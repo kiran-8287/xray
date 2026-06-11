@@ -1,0 +1,1075 @@
+cat > /mnt/user-data/outputs/xray_scanner_taxonomy.txt << 'EOF'
+================================================================================
+X-RAY SCANNER OBJECT TAXONOMY
+Complete Reference for Airport / Metro / Security Checkpoint Scanning
+================================================================================
+
+
+════════════════════════════════════════════════════════════════════════════════
+CATEGORY 1: BAGS
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 1.1 — Trolley / Rolling Bags
+All bag types with wheels and retractable handles, the most common checked luggage type.
+────────────────────────────────────────────────────────────────────────────────
+  1.  2-wheel upright                    [Classic vertical trolley, single axle rear wheels]
+  2.  4-wheel spinner                    [360° rotating wheels, glides in all directions]
+  3.  Cabin carry-on trolley             [56×45×25 cm standard airline cabin size]
+  4.  Medium check-in trolley            [Typically 65–70 cm height, 20–25 kg capacity]
+  5.  Large check-in trolley             [75–80 cm, 28–32 kg capacity]
+  6.  Hardshell ABS trolley              [Rigid polycarbonate or ABS shell]
+  7.  Hardshell polycarbonate trolley    [Lightweight, high-impact resistance]
+  8.  Softshell fabric trolley           [Expandable, external pockets]
+  9.  Hybrid trolley                     [Semi-rigid frame with soft panels]
+  10. Frame trolley                      [Exposed aluminium/steel frame, vintage style]
+  11. Kids' trolley bag                  [Small 16–18 inch, with cartoon prints]
+  12. Pilot / crew trolley               [IATA compliant, 45L, flight crew use]
+  13. Double decker trolley              [Stacked compartments, tall narrow profile]
+  14. Garment trolley bag                [Fold-over design to hang clothes flat]
+  15. Business trolley                   [Integrated laptop compartment, slim profile]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 1.2 — Suitcases
+Non-wheeled or semi-rigid travel cases, carried by handle.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Vintage hard-shell suitcase        [Latched lid, leather straps, retro]
+  2.  Soft-sided suitcase                [Fabric body, zipper closure, external pockets]
+  3.  Hard-sided suitcase                [ABS/polycarbonate, combination lock]
+  4.  Diplomat attaché case              [Flat rectangular hard case, briefcase format]
+  5.  Halliburton aluminum case          [Riveted aluminium shell, foam interior]
+  6.  Trunk-style suitcase               [Box-shaped, dome lid, often vintage]
+  7.  Packing cube set                   [Soft compression cubes inside larger case]
+  8.  Nested suitcase set                [3-piece set that fits inside each other]
+  9.  Hybrid spinner suitcase            [Spinner wheels + rigid shell]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 1.3 — Backpacks
+Worn on the back via shoulder straps; most common bag at metro and train security.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Daypack                            [15–25L, single main compartment]
+  2.  School backpack                    [25–35L, multiple external pockets]
+  3.  Laptop backpack                    [Padded sleeve, 13–17 inch compatibility]
+  4.  Hiking / trekking pack             [40–80L, hip belt, frame support]
+  5.  Travel backpack                    [40–50L, clamshell opening, lockable]
+  6.  Technical climbing pack            [Ice axe loops, helmet holder]
+  7.  Military / tactical backpack       [MOLLE webbing, camo or multicam]
+  8.  Hydration backpack                 [Integrated water bladder, tube port]
+  9.  Rolling backpack                   [Wheeled base + retractable handle]
+  10. Packable ultralight                [Folds into pocket-sized pouch]
+  11. Anti-theft backpack                [Hidden zippers, slash-proof fabric]
+  12. Camera backpack                    [Padded dividers, tripod strap]
+  13. Baby carrier backpack              [Padded seat for infant, large storage]
+  14. Gym / sports backpack              [Ventilated shoe compartment]
+  15. Drawstring bag                     [Cinch top, minimal structure]
+  16. Harness-style vest pack            [Running vest, chest straps]
+  17. Smart backpack                     [USB charging port, GPS tracker]
+  18. Bicycle panniers                   [Side-mounted bags, sometimes worn]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 1.4 — Duffel Bags
+Cylindrical or rectangular soft bags, popular with athletes and travellers.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Standard gym duffel                [40–60L, single strap]
+  2.  Wheeled duffel                     [Telescoping handle + wheels]
+  3.  Military duffel / kit bag          [OD green, drawstring top]
+  4.  Expedition duffel                  [100L+, waterproof, haul handles]
+  5.  Barrel duffel                      [Round cylindrical shape]
+  6.  Weekender duffel                   [30–40L, leather trim]
+  7.  Cricket / sports bag               [Long bat compartment, helmet pod]
+  8.  Hockey bag                         [Stick holder, ventilated panels]
+  9.  Folding travel duffel              [Ultralight, packs flat]
+  10. Medical / first aid duffel         [Red cross marking, padded dividers]
+  11. Waterproof dry bag                 [Roll-top seal, PVC coated]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 1.5 — Handbags & Purses
+Everyday carry bags, typically hand-held or shoulder-hung.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Tote bag                           [Open top, parallel handles]
+  2.  Clutch / evening bag               [No handle, slim envelope shape]
+  3.  Shoulder bag                       [Single strap, medium size]
+  4.  Cross-body bag                     [Long adjustable strap, worn diagonally]
+  5.  Satchel                            [Top handle + long strap, structured]
+  6.  Hobo bag                           [Crescent shape, slouchy leather]
+  7.  Bucket bag                         [Cylindrical with drawstring top]
+  8.  Box bag                            [Rigid geometric shape]
+  9.  Baguette bag                       [Narrow rectangular, crook-of-arm]
+  10. Camera bag (fashion)               [Boxy, structured, front flap]
+  11. Chain bag                          [Metal chain strap, quilted]
+  12. Mini bag                           [Tiny, decorative, barely functional]
+  13. Wristlet                           [Small loop handle around wrist]
+  14. Doctor bag                         [Top-handle, hinged frame opening]
+  15. Belt bag / fanny pack              [Worn around waist or chest]
+  16. Saddle bag                         [D-shaped flap, curved bottom]
+  17. Backpack purse                     [Mini backpack, fashion-oriented]
+  18. Micro bag                          [Credit card size, extremely tiny]
+  19. Jelly bag                          [PVC transparent material]
+  20. Bamboo handle bag                  [Wooden or bamboo top handle]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 1.6 — Laptop & Tech Bags
+Purpose-built carriers for devices and accessories.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Laptop sleeve                      [Slim neoprene/felt slip-in case]
+  2.  Laptop messenger bag               [Single shoulder, flap cover]
+  3.  Laptop briefcase                   [Hard-shell or structured, handle]
+  4.  Tablet bag                         [7–11 inch tablet form factor]
+  5.  Camera bag hard case               [Foam-lined pelican-style]
+  6.  Tech organiser pouch               [Cable/accessories flat organiser]
+  7.  Drone carry bag                    [Foam interior, DJI/Autel fit]
+  8.  DJ equipment bag                   [Mixer + controller format]
+  9.  Production / studio bag            [Audio interface, pads, cables]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 1.7 — Specialty & Work Bags
+Occupation-specific or purpose-built bags that appear in scans.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Toolbox / tool bag                 [Reinforced, heavy tools inside]
+  2.  Medical bag / doctor's bag         [Stethoscope, vials, equipment]
+  3.  Nurse / paramedic bag              [IV kits, defibrillator, meds]
+  4.  Sports equipment bag               [Shin guards, cleats, jerseys]
+  5.  Musical instrument case            [Guitar, violin, flute case]
+  6.  Ammo / range bag                   [Legal firearm transport case]
+  7.  Coin/cash pouch (courier)          [Bank courier sealed bag]
+  8.  Diplomatic pouch                   [Sealed, immunity-protected]
+  9.  Mail sack / postal bag             [Drawstring canvas, postal logos]
+  10. Reusable grocery tote              [Cotton or PP woven, flat bottom]
+  11. Insulated cooler bag               [Foam lining, food delivery]
+  12. Sample bag (sales rep)             [Product demo items]
+  13. Evidence bag                       [Sealed tamper-evident plastic]
+  14. Biohazard bag                      [Orange, universal symbol]
+  15. Parachute bag                      [Parachute harness + canopy folded]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 1.8 — Pouches & Small Bags
+Sub-bag organisers, cases, and small carry items.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Toiletry / wash bag                [Zippered, waterproof lining]
+  2.  Makeup pouch                       [Multiple compartments, brushes]
+  3.  Packing cube                       [Compression zipper, mesh top]
+  4.  Wet bag                            [Waterproof, swim gear]
+  5.  Dry sack                           [Roll-top, kayaking]
+  6.  Pill organiser pouch               [7-day compartments, medication]
+  7.  Cable organiser roll               [Rolled fabric, cable loops]
+  8.  Passport wallet                    [RFID-block, multiple slots]
+  9.  Money belt                         [Flat under-clothing travel wallet]
+  10. Ziplock bag                        [Clear plastic, liquids rule]
+  11. First aid pouch                    [Red cross, plasters, gauze]
+  12. Sunglasses case                    [Hard shell or soft]
+  13. Watch roll / pouch                 [Padded cylinder or flat roll]
+  14. Jewellery pouch                    [Soft velvet or fabric]
+  15. Key organiser                      [Leather fold with key loops]
+
+
+════════════════════════════════════════════════════════════════════════════════
+CATEGORY 2: TRAYS
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 2.1 — Standard Plastic Tray
+Most common tray type at checkpoints.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Standard grey PP tray              [Polypropylene, 600×400mm]
+  2.  Black rubber-lined tray            [Anti-slip lining, item protection]
+  3.  Clear transparent tray             [Used in some European airports]
+  4.  Dual-depth tray                    [Raised insert for shoes]
+  5.  Numbered RFID tray                 [Smart system, Schiphol/Heathrow type]
+  6.  Mini checkpoint tray               [Smaller format for express lanes]
+  7.  Stacked tray unit                  [Dispenser module, auto-feed]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 2.2 — Metal Detection Tray
+Used separately to collect metallic personal items.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Kidney bowl tray                   [Stainless steel, curved, small]
+  2.  Plastic dish tray                  [Oval, for coins/keys/watch]
+  3.  Magnetic separation tray           [Ferrous item collection]
+  4.  Jewellery tray insert              [Velvet-lined insert]
+
+
+════════════════════════════════════════════════════════════════════════════════
+CATEGORY 3: CLOTHING
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 3.1 — Tops
+Upper-body garments.
+────────────────────────────────────────────────────────────────────────────────
+  1.  T-shirt                            [Jersey knit, short sleeves]
+  2.  Polo shirt                         [Collar, button placket]
+  3.  Dress shirt                        [Button-down, collared]
+  4.  Tank top / vest                    [Sleeveless]
+  5.  Hoodie                             [Sweatshirt with hood]
+  6.  Sweater / jumper                   [Knit pullover]
+  7.  Sweatshirt / crewneck              [Fleece or cotton]
+  8.  Blouse                             [Lightweight, women's]
+  9.  Flannel shirt                      [Plaid, brushed cotton]
+  10. Thermal undershirt                 [Base layer, ribbed]
+  11. Turtleneck                         [High neck collar]
+  12. Crop top                           [Short-cut, midriff-exposing]
+  13. Henley                             [Collarless, 3-button placket]
+  14. Compression top                    [Spandex athletic base layer]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 3.2 — Bottoms
+Lower-body garments.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Jeans (denim)                      [5-pocket riveted denim]
+  2.  Chinos / khakis                    [Cotton twill trousers]
+  3.  Trousers / slacks                  [Formal dress pants]
+  4.  Shorts                             [Cargo, board, athletic]
+  5.  Track pants                        [Elastic waist, athletic]
+  6.  Leggings                           [Spandex, full-leg]
+  7.  Joggers                            [Tapered ankle cuff]
+  8.  Skirt                              [A-line, pleated, pencil]
+  9.  Culottes                           [Wide-leg cropped trousers]
+  10. Palazzo pants                      [Wide flowing legs]
+  11. Capri pants                        [Mid-calf length]
+  12. Cargo pants                        [Multiple side pockets]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 3.3 — Outerwear / Coats
+Jackets and heavy outer layers.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Winter coat                        [Insulated, below-knee length]
+  2.  Parka                              [Hooded, fur-trim, extreme cold]
+  3.  Bomber jacket                      [Ribbed cuffs, waistband]
+  4.  Blazer / sport coat                [Structured, single/double breast]
+  5.  Trench coat                        [Double-breasted, belted]
+  6.  Raincoat / windbreaker             [Waterproof shell]
+  7.  Fleece jacket                      [Polyester pile, zip-up]
+  8.  Down jacket / puffer               [Quilted, goose/duck down]
+  9.  Denim jacket                       [Jean jacket]
+  10. Leather jacket                     [Biker or cafe-racer style]
+  11. Suit jacket                        [Formal, matched with trousers]
+  12. Vest / gilet                       [Sleeveless insulation layer]
+  13. Kimono / robe jacket               [Wrap-front, lightweight]
+  14. Hi-vis / reflective vest           [Safety orange/yellow, worker]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 3.4 — Footwear
+Shoes removed at checkpoints (TSA protocol and some international airports).
+────────────────────────────────────────────────────────────────────────────────
+  1.  Sneakers / trainers                [Athletic, foam sole]
+  2.  Dress shoes                        [Oxford, Derby, formal leather]
+  3.  Boots (ankle)                      [Chelsea, chukka, desert boot]
+  4.  Boots (knee-high)                  [Leather or rubber]
+  5.  Sandals / flip flops               [Open-toe, thin strap]
+  6.  High heels                         [Stiletto, block, wedge]
+  7.  Platform shoes                     [Thick sole, can hide items]
+  8.  Work boots                         [Steel toe, thick rubber sole]
+  9.  Cleats / sports boots              [Metal or plastic studs]
+  10. Loafers / moccasins                [Slip-on, flat]
+  11. Ballet flats                       [Thin sole, pointed or round toe]
+  12. Orthopedic shoes                   [Custom insoles, thick build]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 3.5 — Accessories
+Wearables that go in the tray.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Belt                               [Leather or fabric, metal buckle]
+  2.  Metal watch                        [Steel/titanium case + bracelet]
+  3.  Smart watch                        [Electronic screen device]
+  4.  Necklace / chain                   [Metal or beaded]
+  5.  Bracelet / bangle                  [Metal, wood, silicone]
+  6.  Earrings                           [Studs, hoops, drops]
+  7.  Ring                               [Gold, silver, gemstone]
+  8.  Tie clip / cufflinks               [Small metal accessories]
+  9.  Hairpin / bobby pin                [Metal, triggers WTMD]
+  10. Hair clip / scrunchie              [Plastic or fabric]
+  11. Sunglasses                         [Plastic/metal frames]
+  12. Reading glasses                    [Thin metal frames]
+  13. Scarf / shawl                      [Fabric, wool, silk]
+  14. Hat / cap                          [Baseball, fedora, beret]
+  15. Tie / cravat                       [Silk or woven]
+  16. Gloves                             [Leather, wool, latex]
+  17. Head scarf / hijab                 [Fabric wrap]
+  18. Turban                             [Wound cloth head covering]
+  19. Kippah / yarmulke                  [Small round head covering]
+
+
+════════════════════════════════════════════════════════════════════════════════
+CATEGORY 4: ELECTRONICS
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 4.1 — Computing Devices
+Laptops, tablets, and computing hardware.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Laptop (13 inch)                   [Must be removed from bag]
+  2.  Laptop (15–16 inch)                [Standard MacBook/Dell size]
+  3.  Laptop (17 inch)                   [Large gaming or workstation]
+  4.  Tablet (iPad / Android)            [7–13 inch slate]
+  5.  2-in-1 convertible                 [Detachable keyboard + tablet]
+  6.  Chromebook                         [Lightweight, cloud OS]
+  7.  Mini PC                            [NUC-style small form factor]
+  8.  Raspberry Pi                       [Single-board computer]
+  9.  External hard drive                [2.5 inch portable HDD/SSD]
+  10. USB flash drive                    [Small, plugs into port]
+  11. External SSD                       [Slim, cable-connected]
+  12. NVMe enclosure                     [M.2 drive in USB-C case]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 4.2 — Phones & Communication
+Mobile devices and communication gear.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Smartphone                         [iOS / Android]
+  2.  Flip phone                         [Clamshell form factor]
+  3.  Feature phone                      [Basic calls and SMS]
+  4.  Satellite phone                    [Iridium/Thuraya, bulky antenna]
+  5.  Walkie-talkie / radio              [UHF/VHF handheld]
+  6.  Pager                              [Small clip-on receiver]
+  7.  e-Reader                           [Kindle, Kobo]
+  8.  Bluetooth headset                  [Earpiece, over-ear]
+  9.  TWS earbuds case                   [Small pill-shaped charging box]
+  10. Headphones (over-ear)              [Full-size foldable]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 4.3 — Power & Charging
+Batteries and charging devices.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Laptop charger / adapter           [Brick + cable, flagged at some checkpoints]
+  2.  Phone wall charger                 [5W–65W USB adapter]
+  3.  Power bank (small, <100Wh)         [Portable battery, airline allowed]
+  4.  Power bank (large, >100Wh)         [May require declaration]
+  5.  USB-C multi-port hub               [Laptop dock with power pass-through]
+  6.  Wireless charger pad               [Qi standard, flat disc]
+  7.  Solar charger panel                [Foldable, for outdoor use]
+  8.  Car charger adapter                [12V cigarette-socket type]
+  9.  Universal travel adapter           [Multi-plug, voltage converter]
+  10. AA/AAA battery pack                [Alkaline or NiMH, in pouch]
+  11. Lithium battery (loose)            [18650, LiPo cells — flagged]
+  12. Drone battery                      [LiPo high-capacity, flagged]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 4.4 — Heating & Appliances
+Small electrical appliances often flagged at international checkpoints.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Immersion / heating coil           [Coiled resistive element, 200–1000W]
+  2.  Travel kettle                      [Compact collapsible kettle]
+  3.  Hair dryer                         [500–2000W, AC motor visible]
+  4.  Hair straightener / flat iron      [Ceramic plates, heating element]
+  5.  Curling iron / wand                [Cylindrical barrel]
+  6.  Electric shaver                    [Rotary or foil head]
+  7.  Beard trimmer                      [Battery or USB charged]
+  8.  Electric toothbrush                [Oscillating head, battery]
+  9.  Travel iron                        [Steam or dry, compact sole plate]
+  10. Mosquito repellent device          [Electric heating element, mat]
+  11. Milk frother                       [Small wand, AA battery]
+  12. Portable fan                       [USB-powered, folding blades]
+  13. Heating pad                        [Electric, muscle relief]
+  14. Mini projector                     [HDMI + battery, palm-sized]
+  15. Pocket calculator                  [Solar + battery]
+  16. Digital alarm clock                [Battery, travel size]
+  17. GPS tracker / device               [Garmin, handheld]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 4.5 — Cameras & Imaging
+Photography and video equipment.
+────────────────────────────────────────────────────────────────────────────────
+  1.  DSLR camera body                   [Mirrorless or SLR]
+  2.  Mirrorless camera                  [Sony/Fuji/Nikon compact body]
+  3.  Point-and-shoot camera             [Compact digital]
+  4.  Action camera                      [GoPro, DJI Osmo]
+  5.  360-degree camera                  [Dual fisheye lens]
+  6.  Camera lens                        [Cylindrical, glass elements]
+  7.  Telephoto lens                     [Long barrel, large glass]
+  8.  Camera flash / speedlite           [External flash unit]
+  9.  Gimbal stabiliser                  [3-axis motorised arm]
+  10. Tripod / mini-tripod               [Joby/tabletop style]
+  11. Drone body                         [Folding quadrotor]
+  12. Film camera                        [35mm or medium format]
+  13. Polaroid / instant camera          [Film cartridge inside]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 4.6 — Audio & Music
+Music-related electronics.
+────────────────────────────────────────────────────────────────────────────────
+  1.  MP3 player                         [iPod or generic player]
+  2.  Bluetooth speaker                  [Cylindrical or brick shape]
+  3.  Portable DAC/amp                   [Small audio device]
+  4.  Electronic keyboard (small)        [25–37 key mini-keyboard]
+  5.  MIDI controller                    [Pads + knobs, flat]
+  6.  Electric guitar effects pedal      [Metal enclosure, 9V]
+  7.  Digital voice recorder             [Slim handheld]
+  8.  Cassette Walkman                   [Vintage, AA battery]
+  9.  Record player (portable)           [Crosley-style, suitcase form]
+
+
+════════════════════════════════════════════════════════════════════════════════
+CATEGORY 5: FOOD & DRINK
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 5.1 — Snacks & Bars
+Packaged or loose snack items.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Energy / granola bar               [Foil-wrapped, rectangular]
+  2.  Protein bar                        [Dense, chocolate or nut coated]
+  3.  Biscuits / crackers                [Boxed or loose in wrapper]
+  4.  Nuts mix pouch                     [Sealed plastic pouch]
+  5.  Dried fruit pack                   [Mango, raisin, apricot]
+  6.  Jerky / dried meat                 [Protein snack, customs flag]
+  7.  Chips / crisps bag                 [Inflated crisp packet]
+  8.  Chocolate bar                      [Dense, may trigger scanner]
+  9.  Gummy candy bag                    [Sugar-dense, customs flag]
+  10. Trail mix                          [Loose in zip-lock]
+  11. Rice crackers                      [Asian snack, flat round]
+  12. Peanut butter packet               [Single-serve, liquid rule applies >100ml]
+  13. Honey sachet                       [Liquid rule if >100ml]
+  14. Jam / preserve jar                 [Glass jar, dense X-ray signature]
+  15. Cereal box                         [Cardboard, loose grain inside]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 5.2 — Fruits & Vegetables
+Fresh produce, often flagged at customs/international checkpoints.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Banana                             [Curved organic shape, distinctive scan]
+  2.  Apple / pear                       [Dense organic mass]
+  3.  Orange / citrus                    [Spherical, thick rind]
+  4.  Mango                              [Oval, single large seed]
+  5.  Grapes (bunch)                     [Cluster of spheres]
+  6.  Avocado                            [Dense seed, flagged by customs]
+  7.  Pomegranate                        [Spherical, dense seed cluster]
+  8.  Onion / garlic                     [Aromatic, customs flag]
+  9.  Tomato                             [Red dense organic]
+  10. Carrot / root veg                  [Dense cylindrical organic]
+  11. Packed salad bag                   [Sealed plastic, bulky]
+  12. Coconut (whole)                    [Fibrous spherical shell, dense]
+  13. Dried herbs packet                 [Customs sensitive]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 5.3 — Liquids & Beverages
+Subject to 100ml liquid rule at most airports.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Water bottle (plastic)             [PET, 500ml–1.5L]
+  2.  Stainless steel bottle             [Insulated, must be empty]
+  3.  Glass bottle                       [Wine, spirits — checked bag]
+  4.  Juice carton / TetraPak            [Rectangular carton]
+  5.  Coffee tumbler / thermos           [Insulated flask]
+  6.  Energy drink can                   [Aluminium 250–500ml]
+  7.  Soda can                           [330ml standard]
+  8.  Alcohol (mini bottle)              [50ml airline miniature]
+  9.  Wine bottle                        [750ml glass — checked only]
+  10. Spirits flask (hip flask)          [Metal, flat curved]
+  11. Coconut water pack                 [Tetra-pak, sealed]
+  12. Protein shake bottle               [Powder allowed, liquid rules apply]
+  13. Baby formula                       [Exempt from liquid rule]
+  14. Breast milk container              [Exempt, requires declaration]
+  15. Oral medicines (liquid)            [Prescription exemptions apply]
+  16. IV bag / saline                    [Medical exemption, soft pouch]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 5.4 — Prepared & Cooked Food
+Meals being carried through checkpoints.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Tiffin box / lunchbox              [Stacked steel containers]
+  2.  Foil-wrapped food                  [Blocks X-ray, often opened]
+  3.  Sandwich in wrapper                [Organic mass, low-density]
+  4.  Biryani / rice box                 [Dense carb mass]
+  5.  Frozen food pack                   [Customs flag internationally]
+  6.  Canned food                        [Dense cylindrical tin]
+  7.  Pickle jar                         [Glass + liquid, flagged]
+  8.  Cheese block                       [Dense, explosive-similar density]
+  9.  Hard-boiled egg                    [Oval dense organic]
+  10. Frozen meat                        [Dense irregular mass, customs]
+  11. Vacuum-sealed seafood              [Flat dense pack, customs flag]
+  12. Bread loaf                         [Low density, soft structure]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 5.5 — Supplements & Nutrition
+Pills, powders, and health products.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Vitamin tablet bottle              [Plastic pill bottle]
+  2.  Protein powder container           [Cylindrical tub, can trigger explosive trace]
+  3.  Creatine pouch                     [White powder — often swabbed]
+  4.  Pre-workout sachet                 [Coloured powder, sealed]
+  5.  Herbal supplement pack             [Capsules or loose powder]
+  6.  Meal replacement shake             [Powder or premixed]
+
+
+════════════════════════════════════════════════════════════════════════════════
+CATEGORY 6: THREAT / PROHIBITED OBJECTS
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 6.1 — Firearms: Pistols
+Short-barrelled handguns.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Semi-auto pistol (9mm)             [Glock 17, Beretta M9, SIG P320]
+  2.  Semi-auto pistol (.45 ACP)         [1911 pattern, Glock 21]
+  3.  Semi-auto pistol (.40 S&W)         [Glock 22, S&W M&P 40]
+  4.  Compact pistol                     [Glock 26, Sig P365, snub-carry]
+  5.  Sub-compact pistol                 [Ruger LCP, Kel-Tec P3AT]
+  6.  Revolver (.38 Special)             [S&W Model 10, snub-nose 2"]
+  7.  Revolver (.357 Magnum)             [S&W Model 686, Colt Python]
+  8.  Revolver (.44 Magnum)              [S&W Model 629]
+  9.  Revolver (.22 LR)                  [Target / plinking revolver]
+  10. Derringer                          [2-barrel pocket pistol]
+  11. Flare pistol                       [Plastic/metal, wide bore]
+  12. Air pistol                         [CO2 or spring-piston]
+  13. BB pistol                          [Spring or gas, realistic replica]
+  14. Blank-firing pistol                [No projectile, PAK format]
+  15. Pellet pistol                      [PCP or CO2 air pistol]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 6.2 — Firearms: Rifles & Shotguns
+Long-barrelled firearms.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Pump-action shotgun                [Mossberg 500, Remington 870]
+  2.  Semi-auto shotgun                  [Benelli M4, Remington 1100]
+  3.  Break-action shotgun               [Double-barrel, over/under]
+  4.  Bolt-action rifle                  [Hunting or sniper pattern]
+  5.  Semi-auto rifle                    [AR-15, AK-pattern]
+  6.  Lever-action rifle                 [Winchester 1894 style]
+  7.  Bullpup rifle                      [Compact — FAMAS, Tavor, AUG]
+  8.  Submachine gun                     [MP5, UMP-45, compact auto]
+  9.  Machine gun / LMG                  [Belt-fed, large]
+  10. Assault rifle (military)           [M4, AK-47, INSAS]
+  11. Sniper rifle                       [Long barrel, scope, bipod]
+  12. Anti-materiel rifle                [.50 BMG, extremely large]
+  13. Air rifle                          [PCP or spring, long barrel]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 6.3 — Firearms: Parts & Ammunition
+Components that are also prohibited.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Pistol magazine                    [Rectangular metal box]
+  2.  Rifle magazine                     [Curved banana or box mag]
+  3.  Drum magazine                      [Circular high-capacity]
+  4.  Loose cartridges                   [Brass + bullet, any calibre]
+  5.  Shotgun shells                     [Red/green plastic tube]
+  6.  Incendiary ammo (tracer)           [Bright glow in flight, prohibited]
+  7.  Barrel / suppressor                [Cylindrical tube, threaded end]
+  8.  Trigger assembly                   [Internal fire control group]
+  9.  Firearm frame / receiver           [Legal serialised component]
+  10. Bolt carrier group                 [Semi-auto rifle internals]
+  11. Firing pin                         [Small metal rod]
+  12. Holster (shoulder/thigh)           [Nylon or Kydex, rig shape]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 6.4 — Edged Weapons
+Bladed and pointed implements.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Kitchen knife                      [Chef's knife, bread knife]
+  2.  Pocket knife (folding)             [Lockback, slip-joint]
+  3.  Fixed-blade knife                  [Hunting, Bowie style]
+  4.  Tactical knife                     [Serrated, tanto blade]
+  5.  Swiss Army knife                   [Multi-tool with blade]
+  6.  Leatherman / multi-tool            [Pliers + blade, prohibited]
+  7.  Penknife                           [Small folding, office use]
+  8.  Box cutter / utility knife         [Stanley-style, retractable]
+  9.  Scissors (>6cm blade)              [Prohibited in cabin]
+  10. Machete                            [Long heavy chopping blade]
+  11. Sword / sabre                      [Long blade, cultural item]
+  12. Bayonet                            [Military blade, rifle-mount lug]
+  13. Kukri                              [Curved Gurkha blade]
+  14. Karambit                           [Curved claw knife, ring handle]
+  15. Throwing stars / shuriken          [Multi-point, flat]
+  16. Razor blade (loose)                [Single-edge, prohibited]
+  17. Scalpel                            [Medical blade, must declare]
+  18. Letter opener                      [Metal, pointed tip]
+  19. Chisel                             [Woodworking, pointed]
+  20. Awl                                [Pointed leather/wood tool]
+  21. Knitting needles                   [Permitted at some airports, banned at others]
+  22. Crochet hook                       [Metal, hooked point]
+  23. Dart                               [Steel tip, 20–30cm]
+  24. Arrowhead (loose)                  [Broadhead or field point]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 6.5 — Explosive & IED Components
+Items that raise explosive threat indicators.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Hand grenade (live)                [Oval fragmentation body + pin]
+  2.  Hand grenade (inert / replica)     [Training or decorative]
+  3.  Pipe bomb                          [Metal pipe + end caps + fuse]
+  4.  IED (main charge)                  [Improvised explosive device]
+  5.  Detonator                          [Electric or non-electric blasting cap]
+  6.  Detonating cord                    [Primacord / det-cord rope]
+  7.  Blasting cap                       [Small cylindrical initiator]
+  8.  Commercial explosive (stick)       [Dynamite / gelignite stick]
+  9.  C-4 / plastic explosive            [Pliable, clay-like block]
+  10. Semtex                             [Orange/red plastic explosive]
+  11. TATP / HMTD (peroxide)             [White powder/crystal, improvised]
+  12. ANFO                               [Fertiliser-based explosive mix]
+  13. Smoke grenade                      [Coloured smoke canister]
+  14. Flashbang / stun grenade           [Concussion device]
+  15. Signal flare                       [Pyrotechnic, handheld]
+  16. Fireworks (aerial shell)           [Spherical, fused]
+  17. Firecrackers                       [Small paper tubes]
+  18. Black powder (loose)               [Dark granular, prohibited]
+  19. Timer / circuit board IED trigger  [Electronics + wire + power]
+  20. Suicide vest component             [Wired pouches, switch]
+  21. Nail bomb component                [Nails + container + explosive]
+  22. Mortars (military)                 [Cylindrical fin-stabilised]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 6.6 — Chemical & Bio Threats
+Hazardous chemical items detected or suspected.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Tear gas canister                  [CS gas, cylindrical spray]
+  2.  Pepper spray                       [OC aerosol, small canister]
+  3.  Mace spray                         [Chemical irritant spray]
+  4.  Acid bottle                        [Corrosive liquid, unlabelled]
+  5.  Chlorine gas cylinder              [Yellow-green pressurised tank]
+  6.  Nerve agent vial (suspected)       [Sarin, VX precursors]
+  7.  Unknown white powder               [HAZMAT flag, swab test]
+  8.  Unknown liquid (unlabelled)        [Clear/coloured, suspicious]
+  9.  Anthrax simulant / bio agent       [Suspicious powder in envelope]
+  10. Bleach / hydrogen peroxide bottle  [Explosive precursor concern]
+  11. Acetone bottle                     [TATP precursor]
+  12. Nitroglycerin container            [Liquid explosive]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 6.7 — Blunt & Impact Weapons
+Non-bladed weapons that cause blunt trauma.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Baseball bat                       [Wood or aluminium]
+  2.  Cricket bat                        [Willow blade, long handle]
+  3.  Hockey stick                       [Long composite/wood]
+  4.  Golf club                          [Metal or graphite shaft]
+  5.  Collapsible baton / ASP            [Telescoping steel rod]
+  6.  Blackjack / sap                    [Weighted leather pouch]
+  7.  Brass knuckles / knuckle duster    [Metal fist weapon]
+  8.  Nunchaku                           [Two handles + chain]
+  9.  Tonfa / police baton               [Side-handle baton]
+  10. Kubotan                            [Hard keychain rod]
+  11. Hammer                             [Metal head, wooden handle]
+  12. Wrench / spanner                   [Metal tool, impact capable]
+  13. Crowbar / pry bar                  [Metal lever]
+  14. Club / truncheon                   [Solid weighted rod]
+  15. Slingshot                          [Y-frame + elastic, projectile]
+  16. Steel-toe boot (as weapon)         [Worn, dense sole]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 6.8 — Strangulation & Restraint
+Items used for restraint or asphyxiation.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Wire garrote                       [Loop of steel wire]
+  2.  Rope (thin)                        [Paracord, nylon cord]
+  3.  Zip ties (bulk)                    [Plastic restraints, suspicious qty]
+  4.  Handcuffs                          [Metal, double-lock]
+  5.  Duct tape roll                     [Wide adhesive tape]
+  6.  Strangulation cord                 [Thin cord or wire]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 6.9 — Projectile Weapons
+Non-firearm launchers.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Crossbow                           [Stock + prod, uses bolts]
+  2.  Compound bow                       [Pulleys + cables, highly efficient]
+  3.  Recurve bow                        [Curved limbs, traditional]
+  4.  Arrow / bolt                       [Carbon fibre or aluminium]
+  5.  Slingshot / catapult               [Y-frame, ball bearing]
+  6.  Blowgun                            [Tube + darts]
+  7.  Spear / javelin                    [Long shaft + head]
+  8.  Dart gun / tranquilliser gun       [Medical or sporting use]
+  9.  Paintball gun                      [CO2 powered, balls]
+  10. Airsoft gun                        [Realistic replica, 6mm BB]
+  11. BB gun (rifle)                     [Spring or CO2, long barrel]
+  12. Stun gun / TASER                   [Electric shock, prongs]
+  13. Laser pointer (high-power)         [Class 3B/4, eye hazard]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 6.10 — Incendiaries & Flammables
+Fire-starting and flammable items.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Lighter (refillable)               [Butane, allowed 1x in pocket]
+  2.  Lighter (torch / jet)              [High-pressure flame, prohibited]
+  3.  Matches (safety)                   [One box allowed in pocket]
+  4.  Strike-anywhere matches            [Prohibited]
+  5.  Lighter fluid bottle               [Prohibited]
+  6.  Aerosol (flammable)                [Hairspray, deodorant, large can]
+  7.  Propane canister                   [Camping gas, prohibited]
+  8.  Butane canister                    [Camp stove fuel]
+  9.  White phosphorus                   [Military incendiary]
+  10. Thermite mixture                   [Aluminium + iron oxide]
+  11. Molotov components                 [Bottle + rag + flammable liquid]
+  12. Fire starter / fire paste          [Outdoor camping use]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 6.11 — Replica & Toy Weapons
+Non-functional items that trigger alarms.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Toy gun (realistic)                [Plastic, fires caps or foam]
+  2.  Water pistol                       [Soft plastic, bright colour]
+  3.  Replica sword                      [Metal or zinc alloy]
+  4.  Airsoft rifle                      [Realistic AR/AK replica]
+  5.  Cap gun                            [Metal or plastic, small caps]
+  6.  Prop gun (film use)                [Often functional-looking]
+  7.  Souvenir gun                       [Metal replica from gift shop]
+
+
+════════════════════════════════════════════════════════════════════════════════
+CATEGORY 7: TOILETRIES & MEDICAL
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 7.1 — Liquids & Gels (100ml Rule)
+Items subject to 100ml / 3.4oz carry-on restriction.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Toothpaste                         [Gel or paste, tube]
+  2.  Shampoo                            [Bottle, >100ml check]
+  3.  Conditioner                        [Bottle]
+  4.  Body wash / shower gel             [Bottle]
+  5.  Face wash                          [Tube or pump bottle]
+  6.  Moisturiser / lotion               [Jar or pump]
+  7.  Sunscreen                          [Bottle or spray]
+  8.  Perfume / cologne                  [Glass bottle with atomiser]
+  9.  Deodorant (roll-on/gel)            [Liquid rule applies]
+  10. Deodorant (aerosol)                [Flammable aerosol rule]
+  11. Deodorant (solid/crystal)          [No liquid restriction]
+  12. Shaving cream / gel                [Aerosol or tube]
+  13. Hair gel / mousse                  [Tub or pump]
+  14. Hair spray                         [Aerosol]
+  15. Mouthwash                          [Bottle]
+  16. Contact lens solution              [Bottle, exempt if prescribed]
+  17. Eye drops                          [Small bottle]
+  18. Nasal spray                        [Pump bottle]
+  19. Hand sanitiser                     [Gel or liquid]
+  20. Makeup remover                     [Liquid or micellar water]
+  21. Foundation / BB cream              [Pump bottle]
+  22. Nail polish                        [Glass bottle, flammable]
+  23. Nail polish remover                [Acetone, flammable]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 7.2 — Solids & Dry Items
+Non-liquid toiletry items.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Bar soap                           [Solid, no restriction]
+  2.  Solid shampoo bar                  [Compact, no liquid rule]
+  3.  Deodorant stick                    [Solid, no restriction]
+  4.  Lip balm                           [Stick or pot]
+  5.  Lipstick / lip liner               [Solid cosmetic]
+  6.  Mascara                            [Tube + wand, liquid rule]
+  7.  Eyeliner pencil                    [Solid, no restriction]
+  8.  Foundation powder                  [Compact, solid]
+  9.  Blush / bronzer                    [Pressed powder]
+  10. Eye shadow palette                 [Pressed powder]
+  11. Setting powder                     [Loose or pressed]
+  12. Highlighter                        [Pressed or loose]
+  13. Concealer stick                    [Solid]
+  14. Brow pencil                        [Pencil format]
+  15. Razor (disposable)                 [Permitted, no loose blades]
+  16. Safety razor                       [Blade must be removed]
+  17. Tweezers                           [Permitted <6cm]
+  18. Nail file / emery board            [Permitted]
+  19. Nail clippers                      [Permitted in cabin]
+  20. Comb / hairbrush                   [Plastic or metal]
+  21. Dental floss                       [Permitted]
+  22. Cotton swabs (Q-tips)              [Permitted]
+  23. Sanitary pads / tampons            [Permitted]
+  24. Condoms                            [Permitted]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 7.3 — Medical Devices & Aids
+Medical items requiring declaration or exemption.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Insulin pen / syringe              [Must declare, needles allowed]
+  2.  EpiPen (epinephrine)               [Medical exemption]
+  3.  Blood glucose meter                [Electronic medical device]
+  4.  Continuous glucose monitor         [Patch + transmitter]
+  5.  CPAP / BiPAP machine               [Breathing device, cabin allowed]
+  6.  Portable oxygen concentrator       [Medical cert required]
+  7.  Nebuliser                          [Electric, must declare]
+  8.  Hearing aid                        [Behind-ear or in-ear]
+  9.  Cochlear implant processor         [External speech processor]
+  10. Prosthetic limb                    [Private screening available]
+  11. Wheelchair                         [Manual or power]
+  12. Walking cane                       [Metal or composite]
+  13. Crutches                           [Aluminium or wood]
+  14. Knee brace / orthotic              [Metal supports]
+  15. Compression socks                  [Medical grade]
+  16. Colostomy bag                      [Medical, private screening]
+  17. Pacemaker / ICD                    [No X-ray, wand or pat-down]
+  18. Spinal cord stimulator             [Implanted, no scanner]
+  19. Pill box / medication pack         [Prescription required]
+  20. Medical marijuana                  [Country-specific rules]
+  21. First aid kit                      [Scissors, bandages, gauze]
+  22. Thermometer (digital)              [Permitted]
+  23. Thermometer (mercury)              [Prohibited, hazmat]
+  24. Blood pressure monitor             [Electronic cuff device]
+  25. Portable defibrillator (AED)       [Permitted, declare]
+
+
+════════════════════════════════════════════════════════════════════════════════
+CATEGORY 8: STATIONERY & OFFICE
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 8.1 — Writing Instruments
+Pens, pencils, and markers.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Ballpoint pen                      [BIC-style, common]
+  2.  Rollerball pen                     [Gel or liquid ink]
+  3.  Fountain pen                       [Metal nib, ink cartridge]
+  4.  Pencil (wooden)                    [HB, 2B grades]
+  5.  Mechanical pencil                  [0.5 or 0.7mm lead]
+  6.  Marker / Sharpie                   [Felt-tip, permanent]
+  7.  Highlighter                        [Fluorescent ink]
+  8.  Felt-tip pen                       [Thin or thick nib]
+  9.  Whiteboard marker                  [Dry-erase tip]
+  10. Brush pen                          [Calligraphy tip]
+  11. Chalk / chalk marker               [Dusty, art/teaching]
+  12. Correction pen / Tipp-Ex           [White fluid in pen]
+  13. Stylus pen                         [Capacitive or EMR tip]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 8.2 — Notebooks & Paper
+Writing surfaces and bound documents.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Spiral notebook                    [Wire binding, lined pages]
+  2.  Hardcover journal                  [Moleskine-style]
+  3.  Composition book                   [Marbled cover, stitched]
+  4.  Index cards                        [3×5 or 4×6, ruled]
+  5.  Sticky notes / Post-its            [Adhesive paper block]
+  6.  A4 paper ream                      [500 sheet block, heavy]
+  7.  Sketchbook                         [Blank pages, thick paper]
+  8.  Graph paper pad                    [Grid lines]
+  9.  Tracing paper                      [Translucent sheets]
+  10. Calendar / planner                 [Bound, dated]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 8.3 — Office Tools
+Desk accessories found in bags.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Stapler                            [Metal/plastic, staples inside]
+  2.  Staple remover                     [Claw-shaped metal]
+  3.  Staples (box)                      [Metal wire staples]
+  4.  Tape dispenser                     [Heavy plastic, tape roll]
+  5.  Scissors (<6cm blade)              [Permitted, small]
+  6.  Paper clips                        [Metal bent wire]
+  7.  Binder clips                       [Black metal, spring-loaded]
+  8.  Hole punch (single)                [Metal, pointed tube]
+  9.  Ruler (metal)                      [30cm, stainless steel]
+  10. Rubber / eraser                    [Pink or white block]
+  11. Sharpener                          [Plastic, metal blade inside]
+  12. Glue stick                         [UHU-style solid adhesive]
+  13. Liquid glue                        [PVA or super glue, small bottle]
+  14. Super glue                         [Cyanoacrylate, tiny tube]
+  15. Correction fluid                   [Tipp-Ex bottle, brush applicator]
+  16. Compass (drawing)                  [Metal, pointed leg]
+  17. Protractor                         [Semicircular plastic]
+  18. Set square                         [Right-angle plastic]
+  19. Calculator                         [Scientific or basic]
+  20. Stamps (rubber)                    [Rubber block + ink pad]
+  21. Ink pad                            [Stamp ink, flat box]
+  22. File / folder                      [Plastic or cardboard]
+  23. Binder (lever arch)                [Metal lever mechanism]
+  24. USB cable (pack)                   [Multiple cables, tangled]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 8.4 — Art Supplies
+Creative materials in student or artist bags.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Watercolour set                    [Pan palette + brush]
+  2.  Acrylic paint tubes                [Collapsible metal tubes]
+  3.  Oil paint tubes                    [Solvents required, flammable flag]
+  4.  Paintbrushes set                   [Bristle + handle]
+  5.  Palette knife                      [Flexible metal blade]
+  6.  Charcoal sticks                    [Black dusty rods]
+  7.  Pastels (oil/dry)                  [Coloured chalk-like sticks]
+  8.  Coloured pencils set               [Tin or plastic box]
+  9.  Lino-cut tool                      [Sharp V/U gouge]
+  10. Craft knife / X-acto               [Retractable pointed blade — PROHIBITED]
+  11. Cutting mat                        [Self-healing rubber mat]
+  12. Masking tape                       [Cream paper tape roll]
+  13. Washi tape (rolls)                 [Decorative paper tape]
+  14. Stencil set                        [Plastic cut-out templates]
+
+
+════════════════════════════════════════════════════════════════════════════════
+CATEGORY 9: SPORTS & OUTDOORS
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 9.1 — Racquet Sports
+Bats, racquets, and related gear.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Tennis racquet                     [Oval head, grip handle]
+  2.  Badminton racquet                  [Thin frame, shuttlecock]
+  3.  Squash racquet                     [Small head, thick strings]
+  4.  Table tennis bat                   [Rubber face, short handle]
+  5.  Pickleball paddle                  [Solid face, smaller than tennis]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 9.2 — Ball Sports Gear
+Balls and associated equipment.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Football (soccer)                  [Inflated sphere, 410–450g]
+  2.  Basketball                         [Large orange sphere]
+  3.  Rugby ball                         [Oval, dimpled]
+  4.  Cricket ball                       [Hard leather, red/white/pink]
+  5.  Baseball                           [Cork + yarn + leather]
+  6.  Softball                           [Larger baseball]
+  7.  Volleyball                         [Lighter, larger sphere]
+  8.  Tennis balls (tube)                [Pressurised can]
+  9.  Golf balls (pack)                  [Dense dimpled spheres]
+  10. Hockey ball / puck                 [Rubber disc or hard ball]
+  11. Bowling ball                       [Heavy, finger holes]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 9.3 — Outdoor & Camping
+Wilderness and camping gear.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Tent (packed)                      [Poles + fabric, bag]
+  2.  Sleeping bag (rolled)              [Compressed cylinder]
+  3.  Camp stove                         [Butane canister attachment]
+  4.  Fuel canister (butane)             [PROHIBITED, flammable]
+  5.  Headlamp                           [LED + battery, head strap]
+  6.  Compass                            [Magnetic needle, flat case]
+  7.  Trekking poles                     [Aluminium, collapsible — PROHIBITED]
+  8.  Carabiner                          [Metal oval gate — PROHIBITED]
+  9.  Climbing harness                   [Webbing + buckles]
+  10. Rope (climbing)                    [Dynamic or static, coiled]
+  11. Axe / hatchet                      [Wood cutting, PROHIBITED]
+  12. Folding saw                        [Serrated blade, PROHIBITED]
+  13. Bear spray / pepper spray          [PROHIBITED]
+  14. Fishing rod (packed)               [Telescopic, tubes]
+  15. Fishing tackle box                 [Hooks, lures, weights]
+  16. Snorkel + fins                     [Rubber equipment]
+  17. Wetsuit                            [Neoprene suit, folded]
+  18. Life jacket (manual)               [Foam vest, permitted]
+  19. Emergency whistle                  [Plastic or metal, allowed]
+  20. Signal mirror                      [Reflective disc, allowed]
+  21. Paracord roll                      [550 cord, suspicious in bulk]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 9.4 — Fitness & Gym
+Exercise equipment.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Resistance bands                   [Latex loops, allowed]
+  2.  Jump rope                          [Handle + rope]
+  3.  Foam roller                        [Cylindrical foam]
+  4.  Yoga mat (rolled)                  [Cylindrical, cannot scan interior]
+  5.  Kettlebell                         [Heavy, metal handle]
+  6.  Dumbbell (travel)                  [Adjustable compact]
+  7.  Weightlifting belt                 [Wide leather belt]
+  8.  Boxing gloves                      [Padded, laced]
+  9.  Mouth guard                        [Rubber, dental shape]
+  10. Shin guards                        [Plastic + foam, football]
+  11. Helmet (cycling/ski)               [Hard shell, foam lining]
+  12. Knee/elbow pads                    [Plastic cap, foam backing]
+  13. Swim goggles                       [Rubber seal + plastic lens]
+  14. Swim cap                           [Silicone or latex]
+  15. Fins (short)                       [Rubber blade]
+
+
+════════════════════════════════════════════════════════════════════════════════
+CATEGORY 10: MISCELLANEOUS
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 10.1 — Tools & Hardware
+Hand tools and hardware items, mostly prohibited in cabin.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Hammer                             [PROHIBITED in cabin]
+  2.  Screwdriver (>6cm)                 [PROHIBITED]
+  3.  Screwdriver (<6cm, flathead)       [Permitted]
+  4.  Drill bit set                      [Sharp points, PROHIBITED]
+  5.  Power drill                        [Battery or corded, checked bag]
+  6.  Wrench / spanner                   [PROHIBITED]
+  7.  Pliers                             [PROHIBITED]
+  8.  Wire cutters                       [PROHIBITED]
+  9.  Allen key set                      [L-shaped hex keys]
+  10. Tape measure                       [Permitted]
+  11. Utility knife / box cutter         [PROHIBITED]
+  12. Saw (hand)                         [PROHIBITED]
+  13. Soldering iron                     [PROHIBITED, heating element]
+  14. Multimeter                         [Electronic test device]
+  15. Cable ties (roll)                  [Suspicious in bulk]
+  16. Padlock                            [Permitted]
+  17. Cable lock                         [Bicycle or laptop]
+  18. Combination lock                   [Permitted]
+  19. Extension cord                     [Rolled cable]
+  20. Power strip                        [Multiple sockets, scanned]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 10.2 — Documents & Valuables
+Paper and high-value items.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Passport                           [RFID chip, dark cover]
+  2.  National ID card                   [Plastic, chip possible]
+  3.  Boarding pass (paper)              [Barcode strip]
+  4.  Cash (notes)                       [Dense stack, may be counted]
+  5.  Coins                              [Metal, triggers WTMD]
+  6.  Credit / debit card wallet         [RFID blocking cases]
+  7.  Cheque book                        [Paper bound book]
+  8.  Legal document roll                [Cylinder, rolled paper]
+  9.  Book (thick)                       [Dense cellulose, bomb-like density]
+  10. Bible / Quran / religious text     [Thick book]
+  11. Map (folded)                       [Paper, low density]
+  12. Gift-wrapped package               [Must unwrap if flagged]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 10.3 — Children's Items
+Items in bags when travelling with children.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Baby food pouch                    [Soft pack, exempt from liquid rule]
+  2.  Baby bottle                        [Milk or water, exempt]
+  3.  Baby wipes pack                    [Permitted]
+  4.  Nappy / diaper                     [Permitted]
+  5.  Baby monitor                       [Electronic, antenna]
+  6.  Stuffed animal / soft toy          [Dense fill, may need swab]
+  7.  Action figure (metal)              [Metal joints, triggers detector]
+  8.  Toy car (metal)                    [Die-cast, heavy]
+  9.  LEGO pieces (bag)                  [Dense plastic mass]
+  10. Board game box                     [Cardboard + components]
+  11. Fidget toy                         [Spinner or cube, metal]
+  12. Children's scissors                [Blunt tip, permitted]
+  13. Colouring book                     [Thick paper]
+  14. Crayon set                         [Wax sticks]
+  15. Car seat (portable)                [Large plastic + foam]
+
+────────────────────────────────────────────────────────────────────────────────
+SUBCATEGORY 10.4 — Miscellaneous Items
+Other common checkpoint items.
+────────────────────────────────────────────────────────────────────────────────
+  1.  Umbrella                           [Folding or full, metal tips]
+  2.  Walking stick                      [Wooden or metal]
+  3.  Selfie stick                       [Telescopic, metal rod]
+  4.  Tripod                             [3-legged, screw head]
+  5.  Luggage lock                       [TSA-approved combination]
+  6.  Luggage strap                      [Velcro or buckle]
+  7.  Neck pillow                        [U-shaped foam/inflatable]
+  8.  Eye mask                           [Fabric, elastic strap]
+  9.  Ear plugs                          [Foam cylinders]
+  10. Blanket (travel, folded)           [Fabric, compressed]
+  11. Playing cards                      [Box, 52 cards]
+  12. Chess set (folding)                [Magnetic, metal pieces]
+  13. Backgammon set                     [Folding board, dice]
+  14. Musical instrument (small)         [Harmonica, kalimba]
+  15. Prayer beads / rosary              [Beads on string]
+  16. Incense sticks                     [Customs flag in bulk]
+  17. Lighter (1, pocket)                [Permitted, 1 per person]
+  18. Matches (safety, 1 box)            [Permitted]
+  19. Torch / flashlight                 [LED, battery]
+  20. Binoculars                         [Optical device, permitted]
+  21. Telescope / monocular              [Cylindrical, optical]
+  22. Magnifying glass                   [Permitted]
+  23. Globe / souvenir                   [Permitted, may be flagged]
+
+
+================================================================================
+SUMMARY
+================================================================================
+
+  Category 1  — Bags                   8 subcategories    113 objects
+  Category 2  — Trays                  2 subcategories     11 objects
+  Category 3  — Clothing               5 subcategories     81 objects
+  Category 4  — Electronics            6 subcategories     64 objects
+  Category 5  — Food & Drink           5 subcategories     62 objects
+  Category 6  — Threat / Prohibited   11 subcategories    138 objects
+  Category 7  — Toiletries & Medical   3 subcategories     72 objects
+  Category 8  — Stationery & Office    4 subcategories     60 objects
+  Category 9  — Sports & Outdoors      4 subcategories     36 objects
+  Category 10 — Miscellaneous          4 subcategories     60 objects
+  ─────────────────────────────────────────────────────────────────────
+  TOTAL                               52 subcategories   697 objects
+
+================================================================================
+END OF FILE
+================================================================================
+EOF
+echo "Done"

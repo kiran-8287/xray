@@ -1,0 +1,7 @@
+
+<svg viewBox="0 0 230 120" xmlns="http://www.w3.org/2000/svg">
+  <rect x="120" y="22" width="98" height="14" rx="3" fill="rgb(47, 47, 47)" fill-opacity="1" stroke="rgb(47, 47, 47)" stroke-width="1.5" />
+  <rect x="80" y="18" width="136" height="22" rx="4" fill="rgb(47, 47, 47)" fill-opacity="1" stroke="rgb(47, 47, 47)" stroke-width="2" />
+  <path d="M80 38 L185 38 L185 58 L175 58 L175 48 L80 48 Z" fill="rgb(47, 47, 47)" fill-opacity="1" stroke="rgb(47, 47, 47)" stroke-width="1.5" />
+  <path d="M80 38 L90 38 L95 100 L55 104 L48 60 L60 38 Z" fill="rgb(47, 47, 47)" fill-opacity="1" stroke="rgb(47, 47, 47)" stroke-width="1.5" />
+</svg>

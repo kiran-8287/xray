@@ -1,0 +1,26 @@
+{
+  "name": "synthetic-xray-backend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "seed": "node scripts/seed-taxonomy.js",
+    "seed-test-images": "node scripts/generate-test-images.js",
+    "generate-organize-test-images": "node scripts/generate-and-organize-test-images.js",
+    "generate-predefined-stencils": "node scripts/generate-predefined-stencils.js",
+    "organize-images": "node scripts/organize-library-images.js",
+    "seed-full-library": "node scripts/seed-full-library.js",
+    "seed-combined-library": "node scripts/seed-combined-library.js",
+    "rename-images": "node scripts/rename-library-images.js"
+  },
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "cors": "^2.8.6",
+    "express": "^4.22.2",
+    "multer": "^2.1.1",
+    "pg": "^8.13.3",
+    "uuid": "^14.0.0"
+  }
+}

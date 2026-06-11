@@ -1,0 +1,16 @@
+
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="512" height="512" rx="20" ry="20" fill="rgb(211, 211, 211)" />
+  <text x="256" y="200" text-anchor="middle" fill="white" font-size="28" font-family="Arial, sans-serif" font-weight="bold">
+    Deodorant stick
+  </text>
+  <text x="256" y="250" text-anchor="middle" fill="white" font-size="18" font-family="Arial, sans-serif">
+    MISCELLANEOUS
+  </text>
+  <text x="256" y="290" text-anchor="middle" fill="white" font-size="14" font-family="Arial, sans-serif">
+    Solids & Dry Items
+  </text>
+  <text x="256" y="330" text-anchor="middle" fill="white" font-size="12" font-family="Arial, sans-serif">
+    Pixel Value: 54229
+  </text>
+</svg>

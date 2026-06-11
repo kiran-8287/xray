@@ -1,0 +1,7 @@
+
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <path d="M30,90 C25,75 28,25 50,15 C72,25 75,75 70,90 C68,95 60,97 50,97 C40,97 32,95 30,90 Z" fill="rgb(187, 187, 187)" fill-opacity="1" stroke="rgb(187, 187, 187)" stroke-width="2" />
+  <rect x="35" y="55" width="30" height="25" rx="4" fill="rgb(187, 187, 187)" fill-opacity="1" stroke="rgb(187, 187, 187)" stroke-width="1.5" />
+  <path d="M40,25 C30,20 28,40 30,55" fill="none" stroke="rgb(187, 187, 187)" stroke-width="4" stroke-linecap="round" />
+  <path d="M60,25 C70,20 72,40 70,55" fill="none" stroke="rgb(187, 187, 187)" stroke-width="4" stroke-linecap="round" />
+</svg>

@@ -1,0 +1,5 @@
+
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <path d="M20,45 Q20,75 50,78 Q80,75 80,45 L80,40 Q80,35 50,35 Q20,35 20,40 Z" fill="rgb(171, 171, 171)" fill-opacity="1" stroke="rgb(171, 171, 171)" stroke-width="2" />
+  <path d="M30,40 Q30,20 50,15 Q70,20 70,40" fill="none" stroke="rgb(171, 171, 171)" stroke-width="3" stroke-linecap="round" />
+</svg>

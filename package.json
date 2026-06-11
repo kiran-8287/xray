@@ -1,0 +1,17 @@
+{
+  "name": "synthetic-xray-prototype",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Interactive Synthetic X-ray Bag Scan Generation System (UI prototype)",
+  "scripts": {
+    "dev": "npm run dev:backend && npm run dev:frontend",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "build": "npm run build:frontend",
+    "build:frontend": "npm --prefix frontend run build",
+    "start": "npm run start:backend",
+    "start:backend": "npm --prefix backend run start",
+    "lint": "npm --prefix frontend run lint"
+  }
+}
+

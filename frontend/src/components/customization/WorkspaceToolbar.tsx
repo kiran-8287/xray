@@ -1,0 +1,144 @@
+import React from "react";
+import { 
+  Undo2, Redo2, Save, Trash2, RotateCw, Settings, ChevronUp, ChevronDown, 
+  Layers, Layout
+} from "lucide-react";
+
+interface WorkspaceToolbarProps {
+  bagObjectName: string;
+  undoDisabled: boolean;
+  redoDisabled: boolean;
+  selectedObjectId: string | null;
+  showValidRegion: boolean;
+  exportSaving: boolean;
+  handleUndo: () => void;
+  handleRedo: () => void;
+  setShowValidRegion: (val: boolean) => void;
+  handleSendToBack: () => void;
+  handleMoveLayerDown: () => void;
+  handleMoveLayerUp: () => void;
+  handleBringToFront: () => void;
+  handleDeleteSelected: () => void;
+  handleExport: () => void;
+}
+
+export default function WorkspaceToolbar({
+  bagObjectName,
+  undoDisabled,
+  redoDisabled,
+  selectedObjectId,
+  showValidRegion,
+  exportSaving,
+  handleUndo,
+  handleRedo,
+  setShowValidRegion,
+  handleSendToBack,
+  handleMoveLayerDown,
+  handleMoveLayerUp,
+  handleBringToFront,
+  handleDeleteSelected,
+  handleExport,
+}: WorkspaceToolbarProps) {
+  return (
+    <div className="bg-panel border-b border-border px-4 py-2 flex items-center gap-1.5 shadow-card sticky top-14 z-20 h-11 flex-shrink-0 text-sm">
+      {/* Brand Area */}
+      <div className="flex items-center gap-2 mr-3">
+        <Layout size={15} className="text-accent" />
+        <span className="text-sm font-bold text-ink truncate max-w-[120px]">
+          {bagObjectName || "New Workspace"}
+        </span>
+      </div>
+
+      <div className="w-px h-5 bg-border mx-1" />
+
+      {/* Undo/Redo */}
+      <button
+        onClick={handleUndo}
+        disabled={undoDisabled}
+        className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface transition-all disabled:opacity-30 border-none bg-transparent cursor-pointer"
+        title="Undo"
+      >
+        <Undo2 size={16} />
+      </button>
+      <button
+        onClick={handleRedo}
+        disabled={redoDisabled}
+        className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface transition-all disabled:opacity-30 border-none bg-transparent cursor-pointer"
+        title="Redo"
+      >
+        <Redo2 size={16} />
+      </button>
+
+      <div className="w-px h-5 bg-border mx-1" />
+
+      {/* Valid Region Toggle */}
+      <button
+        onClick={() => setShowValidRegion(!showValidRegion)}
+        className={`p-1.5 rounded-lg transition-colors border cursor-pointer ${
+          showValidRegion 
+            ? "bg-accent/10 border-accent/30 text-accent font-semibold" 
+            : "border-transparent text-muted hover:text-ink hover:bg-surface"
+        }`}
+        title={showValidRegion ? "Hide Valid Region" : "Show Valid Region"}
+      >
+        <Layers size={16} />
+      </button>
+
+      {selectedObjectId && (
+        <>
+          <div className="w-px h-5 bg-border mx-1" />
+          {/* Layer actions */}
+          <button
+            onClick={handleSendToBack}
+            className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface cursor-pointer"
+            title="Send to Back"
+          >
+            <ChevronDown size={16} />
+          </button>
+          <button
+            onClick={handleMoveLayerDown}
+            className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface cursor-pointer"
+            title="Move Layer Down"
+          >
+            <Layers size={16} />
+          </button>
+          <button
+            onClick={handleMoveLayerUp}
+            className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface cursor-pointer"
+            title="Move Layer Up"
+          >
+            <Layers size={16} className="rotate-180" />
+          </button>
+          <button
+            onClick={handleBringToFront}
+            className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface cursor-pointer"
+            title="Bring to Front"
+          >
+            <ChevronUp size={16} />
+          </button>
+
+          <div className="w-px h-5 bg-border mx-1" />
+
+          {/* Delete button */}
+          <button
+            onClick={handleDeleteSelected}
+            className="p-1.5 rounded-lg text-muted hover:bg-rose-50 hover:text-rose-600 transition-all cursor-pointer"
+            title="Delete Selected"
+          >
+            <Trash2 size={16} />
+          </button>
+        </>
+      )}
+
+      {/* Export Save Button */}
+      <button
+        onClick={handleExport}
+        disabled={exportSaving}
+        className="ml-auto flex items-center gap-1.5 px-4 py-1.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover transition-all text-xs"
+      >
+        <Save size={14} />
+        {exportSaving ? "Saving..." : "Save Workspace"}
+      </button>
+    </div>
+  );
+}
