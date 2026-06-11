@@ -80,7 +80,7 @@ export default function LibraryPage() {
       if (data.ok) {
         // Merge similar categories into one
         const merged = { ...data.categorized };
-        const mergeIntoMisc = (catName) => {
+        const mergeIntoMisc = (catName: string) => {
           if (merged[catName]) {
             if (!merged.miscellaneous) {
               merged.miscellaneous = {};
