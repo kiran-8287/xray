@@ -182,6 +182,19 @@ export default function LibraryPage() {
     }
   };
 
+  const deleteValidRegion = async () => {
+    if (!editingItem) return;
+    try {
+      await fetch(`http://localhost:8080/api/items/${editingItem.id}/valid-region`, {
+        method: "DELETE",
+      });
+      setEditingItem(null);
+      fetchCategorizedItems();
+    } catch (err) {
+      console.error("Failed to delete valid region:", err);
+    }
+  };
+
   const handleDeleteItem = async (itemId: string) => {
     if (!confirm("Are you sure you want to delete this item?")) return;
     try {
@@ -385,6 +398,7 @@ export default function LibraryPage() {
           initialPoints={editingItem.validRegionData || editingItem.valid_region_points || []}
           onSave={saveValidRegion}
           onCancel={() => setEditingItem(null)}
+          onDelete={deleteValidRegion}
         />
       )}
     </div>

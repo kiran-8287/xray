@@ -20,7 +20,6 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
-  Sparkles,
   Grid,
   Lock,
   Unlock,
@@ -32,7 +31,6 @@ import {
   Clipboard,
   MousePointer,
   AlertTriangle,
-  Crop,
   ArrowUp,
   ArrowDown,
   Download
@@ -67,6 +65,7 @@ interface ValidRegionEditorProps {
   itemId: string;
   onSave: (points: Point[], shapes?: any[]) => void;
   onCancel: () => void;
+  onDelete: () => void;
 }
 
 const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
@@ -74,7 +73,8 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   initialPoints,
   itemId,
   onSave,
-  onCancel
+  onCancel,
+  onDelete
 }) => {
   // -------------------------------
   // State Declarations
@@ -212,43 +212,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
     }
   }, [history, historyIndex]);
 
-  const autoDetectRegion = () => {
-    const img = imgRef.current;
-    if (!img) return;
-    const offscreen = document.createElement('canvas');
-    offscreen.width = img.naturalWidth;
-    offscreen.height = img.naturalHeight;
-    const ctx = offscreen.getContext('2d')!;
-    ctx.drawImage(img, 0, 0);
-    const data = ctx.getImageData(0, 0, offscreen.width, offscreen.height).data;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (let y = 0; y < offscreen.height; y++) {
-      for (let x = 0; x < offscreen.width; x++) {
-        const i = (y * offscreen.width + x) * 4;
-        const luminance = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-        if (luminance <= 235) {
-          minX = Math.min(minX, x); minY = Math.min(minY, y);
-          maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
-        }
-      }
-    }
-    if (minX === Infinity) { showToast('warning', 'Could not auto-detect — draw manually'); return; }
-    const pad = 8;
-    const newRectCount = rectCount + 1;
-    setRectCount(newRectCount);
-    
-    const newShape: Shape = {
-      id: createId(), type: 'rectangle', isPositive: true,
-      points: [], locked: false, visible: true, opacity: 0.35,
-      label: `Auto-Detected ${newRectCount}`,
-      x: Math.max(0, minX - pad), y: Math.max(0, minY - pad),
-      width: Math.min(offscreen.width, maxX + pad) - Math.max(0, minX - pad),
-      height: Math.min(offscreen.height, maxY + pad) - Math.max(0, minY - pad),
-      radius: 0
-    };
-    updateShapesAndHistory([...shapes, newShape]);
-    showToast('success', 'Region auto-detected from image content');
-  };
+
 
   const handleWheel = useCallback((e: WheelEvent) => {
     if (!e.ctrlKey && !e.metaKey) return;
@@ -580,17 +544,59 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
       if (currentTool === 'polygon') {
         const tempShape = shapes.find(s => s.id.startsWith('temp-') && s.type === 'polygon');
         if (tempShape) {
-          setShapes(prev => prev.map(s => {
-            if (s === tempShape) {
-              return { ...s, points: [...s.points, pos] };
-            }
-            return s;
-          }));
+          // Check if clicked near first point (within 20px)
+          const firstPoint = tempShape.points[0];
+          const distance = Math.sqrt(Math.pow(pos.x - firstPoint.x, 2) + Math.pow(pos.y - firstPoint.y, 2));
+          
+          if (distance < 20 && tempShape.points.length >= 3) {
+            // Close the polygon
+            const updatedPolygonCount = polygonCount + 1;
+            setPolygonCount(updatedPolygonCount);
+            
+            setShapes(prev => {
+              const filtered = prev.filter(s => s.id !== tempShape.id);
+              const finalShape = {
+                ...tempShape,
+                id: createId(),
+                label: `Polygon ${updatedPolygonCount}`
+              };
+              // Calculate bounding box
+              let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+              finalShape.points.forEach(p => {
+                minX = Math.min(minX, p.x);
+                minY = Math.min(minY, p.y);
+                maxX = Math.max(maxX, p.x);
+                maxY = Math.max(maxY, p.y);
+              });
+              finalShape.x = minX;
+              finalShape.y = minY;
+              finalShape.width = maxX - minX;
+              finalShape.height = maxY - minY;
+              return [...filtered, finalShape];
+            });
+            
+            setIsDrawing(false);
+            setDrawingStart(null);
+            updateShapesAndHistory([...shapes.filter(s => s.id !== tempShape.id), {
+              ...tempShape,
+              id: createId(),
+              label: `Polygon ${polygonCount + 1}`
+            }]);
+            
+          } else {
+            // Add another point
+            setShapes(prev => prev.map(s => {
+              if (s === tempShape) {
+                return { ...s, points: [...s.points, pos] };
+              }
+              return s;
+            }));
+          }
         } else {
           setShapes(prev => [...prev, {
             id: `temp-${createId()}`,
             type: 'polygon',
-            isPositive: activeMode === 'add',
+            isPositive: true,
             points: [pos],
             x: pos.x,
             y: pos.y,
@@ -742,7 +748,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
           const newShape: Shape = {
             id: `temp-${createId()}`,
             type: 'rectangle',
-            isPositive: activeMode === 'add',
+            isPositive: true,
             points: [],
             x: width > 0 ? drawingStart.x : pos.x,
             y: height > 0 ? drawingStart.y : pos.y,
@@ -760,7 +766,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
           return [...filtered, {
             id: `temp-${createId()}`,
             type: 'circle',
-            isPositive: activeMode === 'add',
+            isPositive: true,
             points: [],
             x: drawingStart.x,
             y: drawingStart.y,
@@ -966,21 +972,48 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
       ctx.restore();
     }
     
-    // Draw all shapes
+    // Create a temporary canvas for shape union
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (tempCtx) {
+      // Draw all shapes onto the temp canvas (union them)
+      shapes.forEach(shape => {
+        if (shape.visible === false) return;
+        
+        tempCtx.save();
+        tempCtx.fillStyle = 'rgba(37, 99, 235, 1)';
+        tempCtx.globalCompositeOperation = 'source-over';
+        tempCtx.beginPath();
+        
+        if (shape.type === 'rectangle') {
+          tempCtx.rect(shape.x, shape.y, shape.width, shape.height);
+        } else if (shape.type === 'circle') {
+          tempCtx.arc(shape.x, shape.y, shape.radius, 0, 2 * Math.PI);
+        } else if (shape.type === 'polygon' && shape.points.length > 0) {
+          tempCtx.moveTo(shape.points[0].x, shape.points[0].y);
+          shape.points.slice(1).forEach(p => tempCtx.lineTo(p.x, p.y));
+          tempCtx.closePath();
+        }
+        
+        tempCtx.fill();
+        tempCtx.restore();
+      });
+      
+      // Draw the union shape with transparency
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.drawImage(tempCanvas, 0, 0);
+      ctx.restore();
+    }
+    
+    // Draw shape outlines and handles
     shapes.forEach(shape => {
       if (shape.visible === false) return;
 
       ctx.save();
-      ctx.globalAlpha = shape.opacity;
-      
-      if (shape.isPositive) {
-        ctx.fillStyle = 'rgba(37, 99, 235, 0.35)';
-        ctx.strokeStyle = 'rgba(37, 99, 235, 0.8)';
-      } else {
-        ctx.fillStyle = 'rgba(220, 38, 38, 0.35)';
-        ctx.strokeStyle = 'rgba(220, 38, 38, 0.8)';
-      }
-      
+      ctx.strokeStyle = 'rgba(37, 99, 235, 0.8)';
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       
@@ -994,49 +1027,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
         ctx.closePath();
       }
       
-      ctx.fill();
       ctx.stroke();
-      
-      // Shape measurements overlay
-      if (shape.width >= 40 && shape.height >= 20) {
-        ctx.save();
-        ctx.globalAlpha = 1;
-        const centerX = shape.x + shape.width / 2;
-        const centerY = shape.y + shape.height / 2;
-        
-        ctx.fillStyle = 'white';
-        ctx.strokeStyle = '#B8C8F0';
-        ctx.lineWidth = 1;
-        
-        let labelText = '';
-        if (shape.type === 'rectangle') {
-          labelText = `${Math.round(shape.width)} × ${Math.round(shape.height)}`;
-        } else if (shape.type === 'circle') {
-          labelText = `r = ${Math.round(shape.radius)}`;
-        } else if (shape.type === 'polygon') {
-          labelText = `${shape.points.length} pts`;
-        }
-        
-        ctx.font = '11px Inter, system-ui, sans-serif';
-        const textMetrics = ctx.measureText(labelText);
-        const paddingX = 8;
-        const paddingY = 4;
-        const rectX = centerX - textMetrics.width / 2 - paddingX;
-        const rectY = centerY - 8 - paddingY;
-        const rectW = textMetrics.width + paddingX * 2;
-        const rectH = 16 + paddingY * 2;
-        
-        ctx.roundRect(rectX, rectY, rectW, rectH, 4);
-        ctx.fill();
-        ctx.stroke();
-        
-        ctx.fillStyle = '#0F172A';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(labelText, centerX, centerY);
-        
-        return ctx.restore();
-      }
       
       if (shape.id === selectedShapeId && !previewMode) {
         ctx.globalAlpha = 1;
@@ -1074,30 +1065,11 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
         }
       }
       
-      // Lock icon overlay
-      if (shape.locked) {
-        ctx.save();
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#64748B';
-        const lockX = shape.x + (shape.type === 'rectangle' ? shape.width : shape.radius) - 16;
-        const lockY = shape.y - 14;
-        
-        ctx.beginPath();
-        ctx.rect(lockX, lockY + 4, 12, 10);
-        ctx.fill();
-        
-        ctx.beginPath();
-        ctx.arc(lockX + 6, lockY + 4, 4, Math.PI, 0);
-        ctx.lineTo(lockX + 10, lockY);
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = '#64748B';
-        ctx.stroke();
-        
-        return ctx.restore();
-      }
-      
-      return ctx.restore();
+      ctx.restore();
     });
+
+
+
     
     // Polygon live preview line
     if (currentTool === 'polygon' && liveMousePos) {
@@ -1253,7 +1225,6 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
         case 'c': return setCurrentTool('circle');
         case 'p': return setCurrentTool('polygon');
         case 'g': return setGridSnap(!gridSnap);
-        case 'a': return autoDetectRegion();
         case 'tab': e.preventDefault(); return setPreviewMode(!previewMode);
         case 'l':
           if (selectedShapeId) {
@@ -1606,17 +1577,6 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
                 <span>Select All</span>
               </div>
               
-              <div 
-                className="flex items-center gap-2.5 px-3 py-2 text-xs text-[#0F172A] hover:bg-[#F5F8FF] cursor-pointer"
-                onClick={() => {
-                  autoDetectRegion();
-                  setContextMenu(null);
-                }}
-              >
-                <Sparkles size={14} />
-                <span>Auto-Detect Region</span>
-              </div>
-              
               <div className="h-px bg-[#DDE4F5] my-1"></div>
               
               <div 
@@ -1738,53 +1698,9 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
             </button>
           </div>
           
-          {/* Mode toggle */}
-          <div className="flex items-center gap-1.5 bg-[#F5F8FF] border border-[#DDE4F5] rounded-xl p-1">
-            <button
-              onClick={() => setActiveMode('add')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border cursor-pointer ${activeMode === 'add' ? 'bg-[#ECFDF5] text-[#059669] border-[#6EE7B7] shadow-sm' : 'bg-transparent border-transparent text-[#64748B] hover:text-[#0F172A] hover:bg-white'}`}
-            >
-              <Plus size={14} className="inline mr-1 stroke-[2.5]" />
-              Add
-            </button>
-            <button
-              onClick={() => setActiveMode('remove')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border cursor-pointer ${activeMode === 'remove' ? 'bg-[#FEF2F2] text-[#DC2626] border-[#FCA5A5] shadow-sm' : 'bg-transparent border-transparent text-[#64748B] hover:text-[#0F172A] hover:bg-white'}`}
-            >
-              <Minus size={14} className="inline mr-1 stroke-[2.5]" />
-              Remove
-            </button>
-          </div>
-          
-          {/* Polygon finish */}
-          {currentTool === 'polygon' && (
-            <button
-              onClick={finishPolygon}
-              className="px-3 py-1.5 bg-[#EFF4FF] text-[#2563EB] rounded-xl text-xs font-semibold border border-[#B8C8F0] hover:bg-[#DBEAFE] cursor-pointer"
-            >
-              Finish Polygon
-            </button>
-          )}
 
-          {/* Auto-detect */}
-          <button
-            onClick={autoDetectRegion}
-            className="px-3 py-1.5 bg-white text-[#64748B] rounded-xl text-xs font-semibold border border-[#DDE4F5] hover:bg-[#F5F8FF] cursor-pointer flex items-center gap-1.5"
-            title="Auto-Detect (A)"
-          >
-            <Sparkles size={14} />
-            Auto-Detect
-          </button>
           
-          {/* Preview */}
-          <button
-            onClick={() => setPreviewMode(!previewMode)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold border cursor-pointer flex items-center gap-1.5 ${previewMode ? 'bg-[#EFF4FF] text-[#2563EB] border-[#B8C8F0]' : 'bg-white text-[#64748B] border-[#DDE4F5] hover:bg-[#F5F8FF]'}`}
-            title="Preview Mode (Tab)"
-          >
-            <Eye size={14} />
-            Preview
-          </button>
+
           
           {/* Internal Undo/Redo */}
           <div className="flex items-center gap-1 bg-[#F5F8FF] border border-[#DDE4F5] rounded-xl p-1">
@@ -1804,30 +1720,6 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
             >
               <Redo2 size={16} />
             </button>
-          </div>
-          
-          {/* Grid snap */}
-          <div className="flex items-center gap-1.5 bg-[#F5F8FF] border border-[#DDE4F5] rounded-xl p-1">
-            <button
-              onClick={() => setGridSnap(!gridSnap)}
-              className={`p-1.5 rounded-lg transition-all border-none cursor-pointer ${gridSnap ? 'bg-[#EFF4FF] text-[#2563EB]' : 'text-[#64748B] hover:text-[#0F172A] hover:bg-white'}`}
-              title="Toggle Grid Snap (G)"
-            >
-              <Grid size={16} />
-            </button>
-            {gridSnap && (
-              <div className="flex items-center gap-1 pl-1 border-l border-[#DDE4F5]">
-                {[10, 20, 50].map(size => (
-                  <button
-                    key={size}
-                    onClick={() => setGridSize(size as 10|20|50)}
-                    className={`px-2 py-0.5 rounded text-[10px] font-medium cursor-pointer ${gridSize === size ? 'bg-[#2563EB] text-white' : 'text-[#64748B] hover:text-[#0F172A]'}`}
-                  >
-                    {size}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
           
           {/* Actions */}
@@ -1905,32 +1797,10 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
                     console.error("Error loading image", e);
                     console.log("Attempted to load:", imageSrc);
                   }}
+                  style={{ display: 'none' }}
                 />
                 
-                {/* Preview mode badge */}
-                {previewMode && (
-                  <div className="absolute top-3 left-3 z-10 bg-[#2563EB] text-white text-[10px] font-semibold px-2.5 py-1 rounded-full tracking-widest uppercase shadow-sm">
-                    Preview Mode
-                  </div>
-                )}
-                
-                {/* Onboarding empty state */}
-                {shapes.length === 0 && imageDimensions.width > 0 && !previewMode && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-                    <div className="bg-white border-2 border-dashed border-[#93C5FD] rounded-2xl px-8 py-6 text-center max-w-xs shadow-sm pointer-events-auto">
-                      <div className="w-10 h-10 bg-[#EFF4FF] rounded-xl flex items-center justify-center mx-auto mb-3">
-                        <Crop size={20} className="text-[#2563EB]" />
-                      </div>
-                      <p className="text-sm font-semibold text-[#0F172A] mb-1">Define Placement Zone</p>
-                      <p className="text-xs text-[#64748B] mb-4">Draw a boundary around the bag interior where objects can be placed</p>
-                      <div className="flex gap-2 justify-center">
-                        <button onClick={() => setCurrentTool('rectangle')} className="px-3 py-1.5 bg-[#EFF4FF] text-[#2563EB] border border-[#B8C8F0] rounded-lg text-xs font-medium hover:bg-[#DBEAFE]">Rectangle</button>
-                        <button onClick={() => setCurrentTool('polygon')} className="px-3 py-1.5 bg-[#EFF4FF] text-[#2563EB] border border-[#B8C8F0] rounded-lg text-xs font-medium hover:bg-[#DBEAFE]">Polygon</button>
-                        <button onClick={autoDetectRegion} className="px-3 py-1.5 bg-[#2563EB] text-white rounded-lg text-xs font-medium hover:bg-[#1D4ED8]">Auto-Detect</button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+
               </div>
             </div>
             
@@ -2181,6 +2051,16 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
           </button>
           
           <div className="flex items-center gap-3">
+            <button 
+              onClick={() => {
+                if (confirm("Are you sure you want to remove the entire valid region?")) {
+                  onDelete();
+                }
+              }} 
+              className="px-4 py-2 border border-[#FCA5A5] text-[#DC2626] hover:bg-[#FEF2F2] rounded-lg text-sm font-semibold transition-all cursor-pointer bg-white"
+            >
+              Remove Valid Region
+            </button>
             <button 
               onClick={onCancel} 
               className="px-4 py-2 border border-[#DDE4F5] text-[#64748B] hover:bg-[#F5F8FF] rounded-lg text-sm font-semibold transition-all cursor-pointer bg-white"

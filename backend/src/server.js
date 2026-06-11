@@ -458,6 +458,22 @@ app.delete("/api/items/:id", async (req, res) => {
     }
   });
 
+  // Delete bag valid region (set to null)
+  app.delete("/api/items/:id/valid-region", async (req, res) => {
+    try {
+      const client = await pool.connect();
+      try {
+        await client.query("UPDATE bags SET valid_region_points = $1 WHERE item_id = $2", [null, req.params.id]);
+        res.json({ ok: true });
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ ok: false, error: String(err) });
+    }
+  });
+
   // Get item details (including valid region for bags)
   app.get("/api/items/:id", async (req, res) => {
     try {
