@@ -1,32 +1,38 @@
 import React from "react";
 import { ChevronRight, Folder, Check, Trash2 } from "lucide-react";
-import type { Item, UploadSession, CategorizedItems, TaxonomyCategory } from "../../types/library";
-import { getCategoryConfig } from "../../config/categories";
+import type { Item, UploadSession, TaxonomyCategory } from "../../types/library";
+import { getCategoryConfig, normalizeCategoryName } from "../../config/categories";
 
 interface LibrarySidebarProps {
   sessions: UploadSession[];
-  categorizedItems: CategorizedItems;
   taxonomy: TaxonomyCategory[];
+  activeSessionId: string | null;
+  setActiveSessionId: (id: string | null) => void;
   activeCategory: string;
   setActiveCategory: (cat: string) => void;
   activeSubcategory: string;
   setActiveSubcategory: (subcat: string) => void;
+  expandedSessions: Set<string>;
+  toggleSessionExpansion: (sessionId: string) => void;
   expandedCategories: Set<string>;
-  toggleCategoryExpansion: (cat: string) => void;
+  toggleCategoryExpansion: (catKey: string) => void;
   selectedItems: Set<string>;
   setSelectedItems: React.Dispatch<React.SetStateAction<Set<string>>>;
   handleDeleteSession: (sessionId: string, sessionName: string, itemCount: number) => void;
-  handleDeleteSubcategory: (categoryKey: string, subKey: string) => void;
+  handleDeleteSubcategory: (sessionId: string, categoryKey: string, subKey: string) => void;
 }
 
 export default function LibrarySidebar({
   sessions,
-  categorizedItems,
   taxonomy,
+  activeSessionId,
+  setActiveSessionId,
   activeCategory,
   setActiveCategory,
   activeSubcategory,
   setActiveSubcategory,
+  expandedSessions,
+  toggleSessionExpansion,
   expandedCategories,
   toggleCategoryExpansion,
   selectedItems,
@@ -34,8 +40,27 @@ export default function LibrarySidebar({
   handleDeleteSession,
   handleDeleteSubcategory,
 }: LibrarySidebarProps) {
+  
+  // Helper to categorize session items in the sidebar
+  function getCategorizedSessionItems(items: Item[]): Record<string, Record<string, Item[]>> {
+    const categorized: any = {};
+    for (const item of items) {
+      const cat = item.category || "misc";
+      const normalized = normalizeCategoryName(cat);
+      if (!categorized[normalized]) {
+        categorized[normalized] = {};
+      }
+      const subcat = item.subcategory || "General";
+      if (!categorized[normalized][subcat]) {
+        categorized[normalized][subcat] = [];
+      }
+      categorized[normalized][subcat].push(item);
+    }
+    return categorized;
+  }
+
   const getCategoryIcon = (category: string) => {
-    return <Folder size={16} />;
+    return <Folder size={14} />;
   };
 
   const getDisplayNames = (categorySlug: string, subcategorySlug: string) => {
@@ -65,235 +90,291 @@ export default function LibrarySidebar({
     return { displayCategory, displaySubcategory };
   };
 
-  const isSubcategorySelected = (categoryKey: string, subKey: string) => {
-    const items = categorizedItems[categoryKey]?.[subKey] || [];
-    return items.length > 0 && items.every(item => selectedItems.has(item.id));
-  };
-
-  const isSubcategoryPartiallySelected = (categoryKey: string, subKey: string) => {
-    const items = categorizedItems[categoryKey]?.[subKey] || [];
-    const someSelected = items.some(item => selectedItems.has(item.id));
-    const allSelected = items.every(item => selectedItems.has(item.id));
-    return someSelected && !allSelected;
-  };
-
-  const selectSubcategory = (categoryKey: string, subKey: string) => {
-    const newSelected = new Set(selectedItems);
-    const items = categorizedItems[categoryKey]?.[subKey] || [];
-    items.forEach(item => newSelected.add(item.id));
-    setSelectedItems(newSelected);
-  };
-
-  const deselectSubcategory = (categoryKey: string, subKey: string) => {
-    const newSelected = new Set(selectedItems);
-    const items = categorizedItems[categoryKey]?.[subKey] || [];
-    items.forEach(item => newSelected.delete(item.id));
-    setSelectedItems(newSelected);
-  };
-
   return (
-    <aside className="w-72 border-r border-border bg-nav flex flex-col overflow-y-auto flex-shrink-0">
-      {/* Upload Sessions Section */}
-      <div className="p-2 border-b border-border">
-        <div className="flex items-center gap-2 px-3 py-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted">
-            Upload Sessions
-          </span>
-          <span className="text-[10px] font-mono text-muted bg-surface px-1.5 py-0.5 rounded-full border border-border">
-            {sessions.length}
-          </span>
-        </div>
-        <div className="space-y-1">
-          {sessions.map((session) => (
-            <div key={session.id} className="flex items-center gap-1">
-              <div className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-surface">
-                <span className="text-xs truncate">{session.folder_name}</span>
-                <span className="text-[10px] font-mono text-muted ml-auto">
-                  {session.item_count}
-                </span>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeleteSession(session.id, session.folder_name, session.item_count);
-                }}
-                className="p-0.5 rounded-full cursor-pointer transition-all border bg-surface border-border text-muted hover:bg-red-50 hover:border-red-200 hover:text-red-600"
-                title={`Delete upload session "${session.folder_name}"`}
-              >
-                <Trash2 size={9} />
-              </button>
-            </div>
-          ))}
-        </div>
+    <aside className="w-72 border-r border-border bg-nav flex flex-col overflow-y-auto flex-shrink-0 select-none">
+      {/* Upload Sessions Title Header */}
+      <div className="p-4 border-b border-border bg-panel flex items-center justify-between flex-shrink-0">
+        <h3 className="font-semibold text-ink text-xs uppercase tracking-wider">
+          Upload Sessions
+        </h3>
+        <span className="text-[10px] font-mono text-muted bg-surface px-2 py-0.5 rounded-full border border-border">
+          {sessions.length}
+        </span>
       </div>
 
-      {/* Categories Section */}
-      <span className="text-xs font-semibold uppercase tracking-wider text-muted px-4 pt-4 pb-2">
-        Categories
-      </span>
-      <div className="p-2 space-y-2">
-        {Object.keys(categorizedItems).map((categoryKey) => {
-          const isActive = activeCategory === categoryKey;
-          const isExpanded = expandedCategories.has(categoryKey);
-          const config = getCategoryConfig(categoryKey);
-          const itemCount = Object.values(categorizedItems[categoryKey]).flat().length;
-          const subcategories = categorizedItems[categoryKey] || {};
-          
-          return (
-            <div key={categoryKey} className="space-y-1">
-              {/* Category Button */}
-              <div className="flex gap-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleCategoryExpansion(categoryKey);
-                  }}
-                  className={`p-1 rounded-lg transition-colors ${isExpanded ? 'text-accent' : 'text-muted hover:text-ink'}`}
-                >
-                  <ChevronRight 
-                    size={16} 
-                    className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`} 
-                  />
-                </button>
-                <button
-                  onClick={() => {
-                    setActiveCategory(categoryKey);
-                    setActiveSubcategory("all");
-                    // Auto-expand when category is activated
-                    if (!expandedCategories.has(categoryKey)) {
-                      toggleCategoryExpansion(categoryKey);
-                    }
-                  }}
-                  className={`flex-1 flex items-center gap-2.5 px-3 py-2.5 rounded-xl border transition-all duration-150 cursor-pointer ${
-                    isActive
-                      ? `bg-panel border-border shadow-card border-l-4 ${config.borderAccent} pl-2 font-semibold`
-                      : 'border-transparent bg-transparent text-ink hover:bg-panel hover:border-border hover:shadow-card'
-                  }`}
-                >
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${config.bg} ${config.text}`}>
-                    {getCategoryIcon(categoryKey)}
-                  </div>
-                  <span className="text-sm font-semibold text-ink flex-1 text-left truncate">
-                    {config.label}
-                  </span>
-                  <span className="text-xs font-mono text-muted bg-surface px-2 py-0.5 rounded-full border border-border">
-                    {itemCount}
-                  </span>
-                </button>
-              </div>
+      {/* Hierarchical tree view */}
+      <div className="p-3 space-y-3 flex-1 overflow-y-auto">
+        {sessions.length === 0 ? (
+          <div className="text-center py-8 text-xs text-muted">
+            No active sessions. Please upload files.
+          </div>
+        ) : (
+          sessions.map((session) => {
+            const isSessionExpanded = expandedSessions.has(session.id);
+            const isSessionActive = activeSessionId === session.id;
+            const sessionCategorized = getCategorizedSessionItems(session.items || []);
+            const firstCat = Object.keys(sessionCategorized)[0] || "bags";
 
-              {/* Subcategories (Expanded) */}
-              {isExpanded && (
-                <div className="ml-8 space-y-1">
-                  {/* "All" Subcategory */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => {
-                        setActiveCategory(categoryKey);
-                        setActiveSubcategory("all");
-                      }}
-                      className={`flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${
-                        isActive && activeSubcategory === "all"
-                          ? `bg-panel border-border shadow-sm ${config.text} font-medium`
-                          : 'border-transparent bg-transparent text-muted hover:bg-surface hover:border-border'
-                      }`}
-                    >
-                      <span className="text-xs truncate">All Items</span>
-                      <span className="text-[10px] font-mono text-muted bg-surface px-1.5 py-0.5 rounded-full border border-border ml-auto">
-                        {itemCount}
-                      </span>
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const allItems = Object.values(subcategories).flat();
-                        const allSelected = allItems.length > 0 && allItems.every(item => selectedItems.has(item.id));
-                        const newSelected = new Set(selectedItems);
-                        if (allSelected) {
-                          allItems.forEach(item => newSelected.delete(item.id));
-                        } else {
-                          allItems.forEach(item => newSelected.add(item.id));
-                        }
-                        setSelectedItems(newSelected);
-                      }}
-                      className={`p-0.5 rounded-full cursor-pointer transition-all border ${
-                        Object.values(subcategories).flat().length > 0 && 
-                        Object.values(subcategories).flat().every(item => selectedItems.has(item.id))
-                          ? 'bg-accent text-white border-accent'
-                          : Object.values(subcategories).flat().some(item => selectedItems.has(item.id))
-                          ? 'bg-accent/30 text-accent border-accent/30'
-                          : 'bg-surface border-border text-muted hover:bg-accent/10 hover:border-accent/40 hover:text-accent'
-                      }`}
-                      title="Select/deselect all items"
-                    >
-                      <Check size={9} />
-                    </button>
-                  </div>
+            return (
+              <div key={session.id} className="space-y-1 bg-panel/30 rounded-xl border border-border/60 p-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                {/* Session Header Folder Row */}
+                <div className="flex items-center gap-1 group">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleSessionExpansion(session.id);
+                    }}
+                    className={`p-1 rounded-lg transition-colors ${isSessionExpanded ? 'text-accent bg-accent/5' : 'text-muted hover:text-ink hover:bg-surface'}`}
+                  >
+                    <ChevronRight 
+                      size={14} 
+                      className={`transition-transform duration-150 ${isSessionExpanded ? 'rotate-90' : ''}`} 
+                    />
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      setActiveSessionId(session.id);
+                      setActiveCategory(firstCat);
+                      setActiveSubcategory("all");
+                      if (!isSessionExpanded) {
+                        toggleSessionExpansion(session.id);
+                      }
+                    }}
+                    className={`flex-1 flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all text-left truncate cursor-pointer ${
+                      isSessionActive
+                        ? 'bg-panel border-border shadow-sm font-semibold text-accent'
+                        : 'border-transparent text-ink hover:bg-panel'
+                    }`}
+                  >
+                    <Folder size={14} className={isSessionActive ? "text-accent" : "text-muted"} />
+                    <span className="text-xs font-semibold truncate flex-1">{session.folder_name}</span>
+                    <span className="text-[10px] font-mono text-muted bg-surface px-1.5 py-0.5 rounded-full border border-border">
+                      {session.item_count}
+                    </span>
+                  </button>
 
-                  {/* Individual Subcategories */}
-                  {Object.keys(subcategories).map((subKey) => {
-                    const itemsList = subcategories[subKey] || [];
-                    const { displaySubcategory } = getDisplayNames(categoryKey, subKey);
-                    const isSubActive = isActive && activeSubcategory === subKey;
-                    const isAllSelected = isSubcategorySelected(categoryKey, subKey);
-                    const isPartiallySelected = isSubcategoryPartiallySelected(categoryKey, subKey);
-
-                    return (
-                      <div key={subKey} className="flex items-center gap-1">
-                        <button
-                          onClick={() => {
-                            setActiveCategory(categoryKey);
-                            setActiveSubcategory(subKey);
-                          }}
-                          className={`flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${
-                            isSubActive
-                              ? `bg-panel border-border shadow-sm ${config.text} font-medium`
-                              : 'border-transparent bg-transparent text-muted hover:bg-surface hover:border-border'
-                          }`}
-                        >
-                          <span className="text-xs truncate">{displaySubcategory}</span>
-                          <span className="text-[10px] font-mono text-muted bg-surface px-1.5 py-0.5 rounded-full border border-border ml-auto">
-                            {itemsList.length}
-                          </span>
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (isAllSelected) {
-                              deselectSubcategory(categoryKey, subKey);
-                            } else {
-                              selectSubcategory(categoryKey, subKey);
-                            }
-                          }}
-                          className={`p-0.5 rounded-full cursor-pointer transition-all border ${
-                            isAllSelected
-                              ? 'bg-accent text-white border-accent'
-                              : isPartiallySelected
-                              ? 'bg-accent/30 text-accent border-accent/30'
-                              : 'bg-surface border-border text-muted hover:bg-accent/10 hover:border-accent/40 hover:text-accent'
-                          }`}
-                          title={`Select/deselect all in ${displaySubcategory}`}
-                        >
-                          <Check size={9} />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteSubcategory(categoryKey, subKey);
-                          }}
-                          className="p-0.5 rounded-full cursor-pointer transition-all border bg-surface border-border text-muted hover:bg-red-50 hover:border-red-200 hover:text-red-600"
-                          title={`Delete all items in ${displaySubcategory}`}
-                        >
-                          <Trash2 size={9} />
-                        </button>
-                      </div>
-                    );
-                  })}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteSession(session.id, session.folder_name, session.item_count);
+                    }}
+                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 cursor-pointer transition-all hover:bg-rose-50 hover:text-rose-600 text-muted"
+                    title={`Delete session "${session.folder_name}"`}
+                  >
+                    <Trash2 size={12} />
+                  </button>
                 </div>
-              )}
-            </div>
-          );
-        })}
+
+                {/* Categories inside this Session */}
+                {isSessionExpanded && (
+                  <div className="pl-3 space-y-1 border-l border-border/80 ml-3.5 mt-1 animate-fade-in">
+                    {Object.keys(sessionCategorized).length === 0 ? (
+                      <div className="text-[11px] text-muted italic pl-4 py-1">
+                        No items in this session
+                      </div>
+                    ) : (
+                      Object.keys(sessionCategorized)
+                        .sort((a, b) => {
+                          const labelA = getCategoryConfig(a).label.toLowerCase();
+                          const labelB = getCategoryConfig(b).label.toLowerCase();
+                          return labelA.localeCompare(labelB);
+                        })
+                        .map((categoryKey) => {
+                          const isCatActive = isSessionActive && activeCategory === categoryKey;
+                          const isCatExpanded = expandedCategories.has(`${session.id}_${categoryKey}`);
+                          const config = getCategoryConfig(categoryKey);
+                          const itemsInCat = Object.values(sessionCategorized[categoryKey]).flat();
+                          const subcategories = sessionCategorized[categoryKey] || {};
+
+                          return (
+                            <div key={categoryKey} className="space-y-1">
+                              {/* Category Folder Row */}
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleCategoryExpansion(`${session.id}_${categoryKey}`);
+                                  }}
+                                  className={`p-0.5 rounded transition-colors ${isCatExpanded ? 'text-accent bg-accent/5' : 'text-muted hover:text-ink hover:bg-surface'}`}
+                                >
+                                  <ChevronRight 
+                                    size={12} 
+                                    className={`transition-transform duration-150 ${isCatExpanded ? 'rotate-90' : ''}`} 
+                                  />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setActiveSessionId(session.id);
+                                    setActiveCategory(categoryKey);
+                                    setActiveSubcategory("all");
+                                    if (!isCatExpanded) {
+                                      toggleCategoryExpansion(`${session.id}_${categoryKey}`);
+                                    }
+                                  }}
+                                  className={`flex-1 flex items-center gap-2 px-2 py-1.5 rounded-md border transition-all text-left truncate cursor-pointer ${
+                                    isCatActive
+                                      ? `bg-panel border-border shadow-sm font-medium ${config.text}`
+                                      : 'border-transparent text-muted hover:bg-panel/50'
+                                  }`}
+                                >
+                                  <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${config.bg} ${config.text}`}>
+                                    {getCategoryIcon(categoryKey)}
+                                  </div>
+                                  <span className="text-xs truncate flex-1">{config.label}</span>
+                                  <span className="text-[10px] font-mono text-muted bg-surface px-1.5 py-0.5 rounded-full border border-border">
+                                    {itemsInCat.length}
+                                  </span>
+                                </button>
+                              </div>
+
+                              {/* Subcategories (If Category Expanded) */}
+                              {isCatExpanded && (
+                                <div className="pl-4 space-y-1 border-l border-border/60 ml-2 mt-1 animate-fade-in">
+                                  {/* "All [Category]" Row */}
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      onClick={() => {
+                                        setActiveSessionId(session.id);
+                                        setActiveCategory(categoryKey);
+                                        setActiveSubcategory("all");
+                                      }}
+                                      className={`flex-1 flex items-center gap-2 px-2 py-1 rounded border transition-all text-left truncate cursor-pointer ${
+                                        isCatActive && activeSubcategory === "all"
+                                          ? `bg-panel border-border shadow-sm font-semibold ${config.text}`
+                                          : 'border-transparent text-muted/80 hover:bg-panel/40'
+                                      }`}
+                                    >
+                                      <span className="text-[11px] truncate flex-1">All {config.label}</span>
+                                      <span className="text-[9px] font-mono text-muted bg-surface px-1.5 py-0.2 rounded-full border border-border">
+                                        {itemsInCat.length}
+                                      </span>
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const allSelected = itemsInCat.length > 0 && itemsInCat.every(item => selectedItems.has(item.id));
+                                        const newSelected = new Set(selectedItems);
+                                        if (allSelected) {
+                                          itemsInCat.forEach(item => newSelected.delete(item.id));
+                                        } else {
+                                          const skippedBags: string[] = [];
+                                          itemsInCat.forEach(item => {
+                                            if (categoryKey === "bags") {
+                                              const hasRegion = item.valid_region_points && (Array.isArray(item.valid_region_points) ? item.valid_region_points.length > 0 : true);
+                                              if (!hasRegion) {
+                                                skippedBags.push(item.name);
+                                                return;
+                                              }
+                                            }
+                                            newSelected.add(item.id);
+                                          });
+                                          if (skippedBags.length > 0) {
+                                            alert(`Some bags were not selected because they do not have a valid region drawn:\n${skippedBags.join(", ")}`);
+                                          }
+                                        }
+                                        setSelectedItems(newSelected);
+                                      }}
+                                      className={`p-1 rounded-full cursor-pointer transition-all border ${
+                                        itemsInCat.length > 0 && itemsInCat.every(item => selectedItems.has(item.id))
+                                          ? 'bg-accent text-white border-accent'
+                                          : itemsInCat.some(item => selectedItems.has(item.id))
+                                          ? 'bg-accent/20 text-accent border-accent/20'
+                                          : 'bg-surface border-border text-muted hover:bg-accent/10 hover:border-accent/40 hover:text-accent'
+                                      }`}
+                                      title="Select/deselect all in category"
+                                    >
+                                      <Check size={8} />
+                                    </button>
+                                  </div>
+
+                                  {/* Subcategory Rows */}
+                                  {Object.keys(subcategories).map((subKey) => {
+                                    const subItems = subcategories[subKey] || [];
+                                    const isSubActive = isCatActive && activeSubcategory === subKey;
+                                    const isSubSelected = subItems.length > 0 && subItems.every(item => selectedItems.has(item.id));
+                                    const isSubPartialSelected = subItems.some(item => selectedItems.has(item.id)) && !isSubSelected;
+                                    const { displaySubcategory } = getDisplayNames(categoryKey, subKey);
+
+                                    return (
+                                      <div key={subKey} className="flex items-center gap-1 group/sub">
+                                        <button
+                                          onClick={() => {
+                                            setActiveSessionId(session.id);
+                                            setActiveCategory(categoryKey);
+                                            setActiveSubcategory(subKey);
+                                          }}
+                                          className={`flex-1 flex items-center gap-2 px-2 py-1 rounded border transition-all text-left truncate cursor-pointer ${
+                                            isSubActive
+                                              ? `bg-panel border-border shadow-sm font-semibold ${config.text}`
+                                              : 'border-transparent text-muted/80 hover:bg-panel/40'
+                                          }`}
+                                        >
+                                          <span className="text-[11px] truncate flex-1">{displaySubcategory}</span>
+                                          <span className="text-[9px] font-mono text-muted bg-surface px-1.5 py-0.2 rounded-full border border-border">
+                                            {subItems.length}
+                                          </span>
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const newSelected = new Set(selectedItems);
+                                            if (isSubSelected) {
+                                              subItems.forEach(item => newSelected.delete(item.id));
+                                            } else {
+                                              const skippedBags: string[] = [];
+                                              subItems.forEach(item => {
+                                                if (categoryKey === "bags") {
+                                                  const hasRegion = item.valid_region_points && (Array.isArray(item.valid_region_points) ? item.valid_region_points.length > 0 : true);
+                                                  if (!hasRegion) {
+                                                    skippedBags.push(item.name);
+                                                    return;
+                                                  }
+                                                }
+                                                newSelected.add(item.id);
+                                              });
+                                              if (skippedBags.length > 0) {
+                                                alert(`Some bags were not selected because they do not have a valid region drawn:\n${skippedBags.join(", ")}`);
+                                              }
+                                            }
+                                            setSelectedItems(newSelected);
+                                          }}
+                                          className={`p-1 rounded-full cursor-pointer transition-all border ${
+                                            isSubSelected
+                                              ? 'bg-accent text-white border-accent'
+                                              : isSubPartialSelected
+                                              ? 'bg-accent/20 text-accent border-accent/20'
+                                              : 'bg-surface border-border text-muted hover:bg-accent/10 hover:border-accent/40 hover:text-accent'
+                                          }`}
+                                          title={`Select all in ${displaySubcategory}`}
+                                        >
+                                          <Check size={8} />
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDeleteSubcategory(session.id, categoryKey, subKey);
+                                          }}
+                                          className="p-1 rounded opacity-0 group-hover/sub:opacity-100 cursor-pointer transition-all hover:bg-rose-50 hover:text-rose-600 text-muted"
+                                          title={`Delete all in ${displaySubcategory}`}
+                                        >
+                                          <Trash2 size={10} />
+                                        </button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </aside>
   );

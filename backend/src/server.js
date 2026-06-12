@@ -8,6 +8,7 @@ import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import pg from "pg";
 import { generateDataset } from "./api/datasetGenerator.js";
+import { isObjectInsideContainer } from "./lib/geometry.js";
 
 const app = express();
 app.use(cors());
@@ -130,10 +131,28 @@ app.post("/api/export", async (req, res) => {
     const outDir = path.join(exportsRoot, exportId);
     await fs.mkdir(outDir, { recursive: true });
 
+    const bagObj = payload.objects?.find(obj => obj.library === "bag");
+    const threatObj = payload.objects?.find(obj => obj.library === "threat");
+
+    let threatStatus = "clean";
+    let placementValidity = "valid";
+
+    if (threatObj) {
+      threatStatus = "threat_present";
+      if (bagObj) {
+        const isInside = isObjectInsideContainer(threatObj, bagObj);
+        placementValidity = isInside ? "valid" : "out_of_bounds";
+      } else {
+        placementValidity = "out_of_bounds";
+      }
+    }
+
     const metadata = {
       exportId,
       createdAt: new Date().toISOString(),
       prototype: payload.prototype ?? "synthetic-xray",
+      threat_status: threatStatus,
+      placement_validity: placementValidity,
       
       annotationSchema: {
         type: payload.annotationSchema ?? "per-object-segmentation",
@@ -141,8 +160,8 @@ app.post("/api/export", async (req, res) => {
         levels: ["bag", "object"]
       },
 
-      bag: payload.objects?.find(obj => obj.library === "bag") ? {
-        object: payload.objects.find(obj => obj.library === "bag"),
+      bag: bagObj ? {
+        object: bagObj,
         validPlacementRegion: payload.validRegionPolygon ?? [],
       } : null,
 
@@ -160,8 +179,6 @@ app.post("/api/export", async (req, res) => {
 
     await fs.writeFile(path.join(outDir, "metadata.json"), JSON.stringify(metadata, null, 2), "utf8");
 
-    const bagObj = metadata.objects.find(obj => obj.library === "bag");
-    const threatObj = metadata.objects.find(obj => obj.library === "threat");
     const nonBagNonThreatCount = metadata.objects.filter(obj => obj.library !== "bag" && obj.library !== "threat").length;
     
     const summaryText = [
@@ -174,6 +191,8 @@ app.post("/api/export", async (req, res) => {
       `  - Threat: ${threatObj ? threatObj.name : 'n/a'}`,
       `  - Other objects: ${nonBagNonThreatCount}`,
       `Valid Region: ${metadata.bag?.validPlacementRegion?.length > 0 ? 'Yes' : 'No'}`,
+      `Threat Status: ${metadata.threat_status}`,
+      `Placement Validity: ${metadata.placement_validity}`,
     ].join("\n");
     await fs.writeFile(path.join(outDir, "summary.txt"), summaryText, "utf8");
 

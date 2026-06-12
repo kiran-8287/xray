@@ -1,6 +1,6 @@
 // backend/src/api/datasetGenerator.js
 import { renderSceneAsync } from "../lib/renderCanvas.js";
-import { getRandomPositionInContainer, getRectCorners, getTransformedPolygon } from "../lib/geometry.js";
+import { getRandomPositionInContainer, getRectCorners, getTransformedPolygon, isObjectInsideContainer } from "../lib/geometry.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -178,6 +178,7 @@ export async function generateDataset(payload, exportId, outDir) {
 
     // Place threat
     const threat = combo.threat;
+    let threatObject = null;
     if (threat) {
       const w = threat.width ? Math.round(threat.width * 0.28) : 90;
       const h = threat.height ? Math.round(threat.height * 0.28) : 45;
@@ -190,7 +191,7 @@ export async function generateDataset(payload, exportId, outDir) {
       }
 
       const pos = getRandomPositionInContainer(w, h, threatOutline, bagObject);
-      sceneObjects.push({
+      threatObject = {
         id: `threat-${threat.id}`,
         name: threat.name,
         library: threat.category,
@@ -207,7 +208,8 @@ export async function generateDataset(payload, exportId, outDir) {
           rotation: pos.rotation ?? Math.random() * 360
         },
         layer: layer++
-      });
+      };
+      sceneObjects.push(threatObject);
     }
 
     // Render this combination
@@ -229,6 +231,8 @@ export async function generateDataset(payload, exportId, outDir) {
       },
       has_threat: !!threat,
       threat_count: threat ? 1 : 0,
+      threat_status: threat ? "threat_present" : "clean",
+      placement_validity: (threat && bagObject && threatObject) ? (isObjectInsideContainer(threatObject, bagObject) ? "valid" : "out_of_bounds") : "valid",
       objects: sceneObjects.map(obj => {
         let polygon = [];
         if (obj.polygonOutline && obj.polygonOutline.length >= 3) {

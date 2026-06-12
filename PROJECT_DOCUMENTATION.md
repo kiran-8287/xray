@@ -1,232 +1,246 @@
+# Synthetic X-Ray Project: Developer & Architecture Guide
 
-# Synthetic X-Ray Project Documentation
----
-
-## 1. PROJECT OVERVIEW
-The **Synthetic X-Ray Project** is a web app for creating realistic X-ray images of bags with threats and other items for training X-ray scanners.
+Welcome to the technical documentation for the **Synthetic X-Ray Project**. This document serves as a comprehensive resource for any developer working on the codebase, explaining the high-level goals, core technical choices, database designs, folder hierarchies, and offering a file-by-file breakdown of both the frontend and backend.
 
 ---
 
-## 2. FULL FILE BREAKDOWN
+## 1. What We Are Doing in the Project
 
-### A. Root Directory (`c:\Users\saikiran\Desktop\xray1`)
-| File/Folder | Purpose |
-|-------------|---------|
-| `README.md` | Project introduction (currently minimal) |
-| `package.json` | Root npm config (scripts for running dev servers) |
-| `plan.txt` / `list.txt` | Internal planning/notes files |
-| `xray_scanner_object_taxonomy.html` | Taxonomy page for X-ray object categorization |
-| `taxonomy.json` | **JSON file defining object categories, subcategories, and items** - used to organize library images |
-| `synthetic_x_ray_workspace.tsx` | Legacy/unused workspace component (contains old prototype) |
-| `roomplanner/` | Unrelated side project (folder we can ignore for our main app) |
-| `frontend/` | The React + TypeScript + Vite user interface |
-| `backend/` | Express.js server with database and file operations |
-| `test_images/` | Large collection of test SVG images for object libraries (organized by category) |
-| `design_document/` | Project planning docs, diagrams, and screenshots |
-| `PROJECT_DOCUMENTATION.md` | This file! Detailed project documentation |
+The core objective of the **Synthetic X-Ray Project** is to generate realistic, simulated X-ray scan images of containers (primarily bags/suitcases) filled with various object categories (clothing, electronics, food, toiletries, etc.), including potentially threat items (firearms, knives, sharp objects). 
+
+These synthetic X-ray scans, accompanied by exact bounding box and pixel-level segmentation coordinate annotations, are used to train machine learning models (such as YOLO or custom segmentation models) for security and baggage scanner screening.
+
+### Key Workflows
+1. **File Uploading (`UploadPage`)**: Users upload custom SVG/PNG images of bags or items. These images are categorized (e.g. as a bag, threat, or accessory) and saved under distinct **Upload Sessions**.
+2. **Library Management (`LibraryPage`)**: Users browse uploaded and seeded items organized hierarchically by upload session and category. Within this library, users can select a bag and draw its **Valid Placement Region** (a polygonal region representing where items can physically be situated inside the bag).
+3. **Collage Creation (`CollagePage`)**: Selected items (bags, threats, accessories) are combined into a collage layout of multiple permutations. The system performs randomized placements ensuring items are located inside the bag's valid region.
+4. **Interactive Customization (`CustomizationPage`)**: Users can click any collage permutation to open it in a canvas workspace. They can drag, rotate, scale, bring items to front, send them to back, delete items, and add new ones manually. Security alerts dynamically warn them if a threat is dragged out-of-bounds.
+5. **Data Export (`backend/api/export`)**: The final layouts are rendered into high-fidelity composite PNGs mimicking material densities (using the Beer-Lambert law of attenuation) and saved along with JSON annotations defining bounding boxes, segmentations, and metadata.
 
 ---
 
-### B. Backend (`c:\Users\saikiran\Desktop\xray1\backend`)
+## 2. Project Structure & Technology Choices
 
-#### Core Backend Files
-1. **`package.json`**
-   - Defines backend dependencies: `express`, `cors`, `pg` (PostgreSQL), `multer`, `uuid`, `canvas`
-   - `dev` script: `node --watch src/server.js` (auto-reload on changes)
-   - `seed` script: (future) seeds library from taxonomy
-   - `organize-images` script: runs image organizer (see below)
+The project is structured as a **monorepo** with a separated frontend and backend. 
 
-2. **`src/server.js`**
-   - **Main Express server entry point**:
-     - Initializes the Express app with CORS and JSON body parser
-     - Sets up paths for data storage (exports, library images, collage images)
-     - Serves static files from `data/` at `/api/static`
-     - **API Routes**:
-       1. `GET /api/health` → Simple health check (returns `{ ok: true }`)
-       2. `POST /api/export` → Saves synthesis session to `data/exports/` and generates X-ray PNG with JSON annotations using `generateDataset`
-       3. `POST /api/dataset/generate` → Batch generates X-ray combinations from CollagePage
-       4. `GET /api/taxonomy` → Returns the full taxonomy from `taxonomy.json`
-       5. `GET /api/items/categorized` → Returns all items from PostgreSQL DB organized by category/subcategory
-       6. `POST /api/upload` → Accepts multiple images, categorizes them, saves to `data/library_images/` and database
-       7. `GET /api/sessions` → Returns all upload sessions
-       8. `DELETE /api/sessions/:id` / `DELETE /api/items/:id` → Deletes sessions or items
-       9. `PUT /api/items/:id/valid-region` → Updates a bag's valid placement region polygon
-       10. `GET /api/items/:id` → Returns details for a single item
-     - Starts server on port 8080
-
-3. **`src/lib/renderCanvas.js`**
-   - **Core X-ray rendering engine using Node Canvas (`canvas` npm package)**:
-     - `renderSceneAsync(objects, width, height)`: Takes a list of scene objects and composes them into a realistic X-ray PNG
-     - Uses Beer-Lambert law for simulating X-ray attenuation
-     - Combines overlapping object densities
-     - **NEW:** Includes `findImageFile` function to recursively search organized library folders
-     - Supports SVG and other image formats
-
-4. **`src/api/datasetGenerator.js`**
-   - Generates PNG dataset + JSON annotations for both single exports and batch collages
-   - Handles random object placement within valid regions
-   - Saves images to `data/collage_images/` or `data/exports/`
-
-5. **`src/taxonomy.js`** (if exists)
-   - Loads and parses `taxonomy.json` for server-side use
-
-#### Backend Scripts (`backend/scripts/`)
-| Script | Purpose |
-|--------|---------|
-| `organize-library-images.js` | **Organizes library images** into `category/subcategory/` folders using: <br>1. Database info first <br>2. `taxonomy.json` + SVG content <br>3. Falls back to `miscellaneous/general` |
-| `cleanup-empty-dirs.js` | Cleans up empty directories after organizing |
-| `generate-test-images.js` | Generates simple placeholder SVGs from `taxonomy.json` |
-| `seed-taxonomy.js` | Seeds the PostgreSQL database from `taxonomy.json` |
-| `parse-taxonomy.js` | Parses `taxonomy.json` into structured format |
-
-#### Backend Data Storage (`backend/data/`)
-| Folder/File | Purpose |
-|-------------|---------|
-| `library_images/` | **Organized library images**! Now in `category/subcategory/` folders (e.g., `bags/backpacks/`, `threats/firearms-pistols/`) |
-| `collage_images/` | Generated X-ray collage PNGs + annotations |
-| `exports/` | Saved single-scene exports (PNG, metadata, annotations, summary) |
-| `customization_exports/` | Empty folder (future use) |
-
----
-
-### C. Frontend (`c:\Users\saikiran\Desktop\xray1\frontend`)
-#### Frontend Config Files
-| File | Purpose |
-|------|---------|
-| `package.json` | Defines frontend dependencies: React, react-router-dom, vite, tailwindcss, lucide-react |
-| `vite.config.ts` | Vite build tool configuration |
-| `tsconfig.json` / `tsconfig.node.json` | TypeScript config |
-| `tailwind.config.js` | Tailwind CSS styling framework config |
-| `postcss.config.js` | PostCSS config for Tailwind |
-| `eslint.config.js` | ESLint linting rules |
-| `index.html` | Entry HTML file (mounts React app) |
-
-#### Frontend Source Code (`frontend/src/`)
-1. **`main.tsx`**
-   - App entry point: Renders the React app into `#root`
-
-2. **`App.tsx`**
-   - Main app component with React Router
-   - **Routes**:
-     - `/` → LibraryPage
-     - `/collage` → CollagePage
-     - `/customize` → CustomizationPage
-     - `/upload` → UploadPage
-   - Top navigation bar with links to Library and Collage
-
-3. **`components/HelpMenu.tsx`**
-   - Help menu with app usage instructions and keyboard shortcuts
-
-4. **`lib/geometry.ts`**
-   - **Core geometric functions**:
-     - `isPointInPolygon`: Uses ray-casting algorithm to determine if a point is inside a polygon
-     - `getRectCorners`: Calculates 4 corners of a rectangle, considering rotation
-     - `getTransformedPolygon`: Transforms a polygon by position, size, rotation
-     - `getRandomPositionInContainer`: Tries 1000 random positions to place an object safely inside a container's valid region
-
-5. **`pages/LibraryPage.tsx`**
-   - Shows all library categories (from hardcoded `STENCILS`)
-   - Lets users select items and click "Generate Combinations" to go to CollagePage
-
-6. **`pages/CollagePage.tsx`**
-   - Generates and previews multiple bag+threat+other item combinations
-   - Uses `getRandomPositionInContainer` to randomly place items safely inside the bag's valid region
-   - Each preview links to CustomizationPage for detailed editing
-
-7. **`pages/CustomizationPage.tsx`**
-   - The main workspace for creating synthetic X-rays!
-   - Features:
-     - Drag and drop objects
-     - Rotate objects
-     - Layer ordering
-     - Valid region visualization
-     - Export functionality (calls `/api/export` on backend)
-
-8. **`pages/UploadPage.tsx`**
-   - Lets users upload multiple images (with category prefixes like `bag_`, `threat_`)
-   - Calls `/api/upload` on backend
-   - Shows upload status
-
-9. **`stencils/registry.tsx`**
-   - **THE HEART OF THE FRONTEND LIBRARY**:
-     - Hardcoded `STENCILS` object with all predefined items (bags, threats, clothes, etc.)
-     - Each stencil includes: `id`, `kind`, `name`, `desc`, `viewBox`, `pixelValue`, `validRegion` (polygon points), `render` (SVG function)
-   - `renderObjectSvg`: Helper to render stencil SVG with pixel-based gray color
-
-10. **`stencils/tokens.ts`**
-    - Color tokens for stencils (currently minimal)
-
-11. **`stencils/types.ts`**
-    - TypeScript type definitions for stencils (StencilId, StencilDescriptor, etc.)
-
-12. **`types/geometry.ts`**
-    - TypeScript type for 2D Point: `{ x: number; y: number }`
-
-13. **`index.css`**
-    - Global Tailwind CSS styles
-
----
-
-## 3. HOW FRONTEND ↔ BACKEND ↔ DATABASE INTERACT
-
-### Currently Active Interactions
-1. **Export Synthesis**:
-   - User clicks "Save" button in CustomizationPage
-   - Frontend sends POST request to `/api/export` with all object states and valid region
-   - Backend:
-     - Creates a new subfolder in `data/exports/` with timestamp
-     - Writes `metadata.json` (detailed export data) and `summary.txt` (human-readable summary)
-     - **Calls `generateDataset`** which renders a PNG X-ray image using `renderSceneAsync`
-     - Also saves JSON annotations with bounding boxes and segmentation polygons
-     - Returns success to frontend
-
-### Future-Ready Interactions (APIs exist but not used yet)
-- `/api/libraries` → Frontend could fetch library categories from database instead of hardcoding
-- `/api/libraries/:name/items` → Fetch items for a specific library from database
-- `/api/upload` → Upload new items to database and file system
-- `/api/collage-combinations` → Fetch pre-generated combinations from database
-- `/api/dataset/generate` → Batch generate many X-ray images at once
-
----
-
-## 4. KEY CONCEPTS RECAP
-
-### Random Object Placement
-1. Get the bag's valid region polygon
-2. Find its bounding box
-3. Try 1000 random positions/rotations
-4. Check each time if all 4 corners are inside valid region
-5. Use first valid position found
-
-### Containment Check
-- Uses ray-casting algorithm (`isPointInPolygon`) to verify every corner of an object is inside the bag's valid region polygon
-
-### X-Ray Pixel Simulation
-- Pixel values (0-65535) represent material density (lower = darker/absorptive, higher = lighter)
-- Uses **Beer-Lambert law** to simulate realistic attenuation
-- Overlapping objects combine their densities logarithmically
-
----
-
-## 5. ORGANIZED LIBRARY IMAGES
-Your library images are now neatly organized in `backend/data/library_images/` using `taxonomy.json` into folders like:
 ```
-library_images/
-├── bags/
-│   ├── backpacks/
-│   ├── suitcases/
-│   ├── duffel-bags/
-│   └── ...
-├── threats/
-│   ├── firearms-pistols/
-│   ├── edged-weapons/
-│   ├── explosive-ied-components/
-│   └── ...
-├── electronics/
-├── food/
-├── stationary/
-└── miscellaneous/
+xray1/
+├── package.json                   # Root package manager configuration
+├── taxonomy.json                  # Master definitions for stencils & category trees
+├── backend/                       # Express server, SQLite/Postgres DB handlers, render script
+│   ├── src/                       # API routes, rendering code, schemas
+│   ├── scripts/                   # Seeding and image organization scripts
+│   └── data/                      # File uploads, exported scans, generated collage datasets
+└── frontend/                      # React SPA built with Vite & Tailwind CSS
+    ├── src/                       # Components, Pages, Utilities, Configs
+    └── index.html                 # DOM entry point
 ```
-- Use `npm run organize-images` in `backend/` to re-organize at any time
-- The render engine automatically finds images no matter which subfolder they're in!
 
+### Why We Chose This Stack
+
+* **React + TypeScript + Vite (Frontend)**:
+  * **React**: Excellent for highly interactive canvas workspaces where single-item states (position, rotation, dimensions, layer index) change continuously during drag-and-drop actions.
+  * **TypeScript**: Enforces strict type safety for coordinates, transformations, and database item schemas, reducing runtime errors.
+  * **Vite**: Offers instantaneous Hot Module Replacement (HMR) and fast build compile times.
+* **Express.js + Node-Canvas (Backend)**:
+  * **Express**: Lightweight and easy to write REST APIs for file uploads, database queries, and exporting assets.
+  * **Node-Canvas (`canvas` npm module)**: Lets the backend run HTML5 Canvas-like graphics operations natively in Node.js, compiling composite X-ray images on the fly.
+* **PostgreSQL Database**:
+  * Persistent storage for file metadata, upload session tracking, category taxonomy, and complex structures like the valid region polygons for suitcase items.
+* **Beer-Lambert Law Attenuation (Rendering Engine)**:
+  * Simulated X-rays combine material colors and alpha values using log-based calculations. Overlapping items become darker rather than simply blending opacity linearly, matching how real X-ray scans behave.
+
+---
+
+## 3. Database Schema
+
+The database resides in a PostgreSQL instance (with default user `postgres` and database `xray_db`), initialized and structured in `backend/src/schema.sql`.
+
+```mermaid
+erDiagram
+    upload_sessions ||--o{ items : "owns"
+    items ||--o| bags : "category specific"
+    items ||--o| threats : "category specific"
+    items ||--o| electronics : "category specific"
+    items ||--o| clothes : "category specific"
+    items ||--o| trays : "category specific"
+
+    upload_sessions {
+        UUID id PK
+        VARCHAR folder_name
+        TIMESTAMP uploaded_at
+        INTEGER item_count
+    }
+
+    items {
+        UUID id PK
+        VARCHAR filename
+        VARCHAR filepath
+        VARCHAR category
+        VARCHAR subcategory
+        VARCHAR name
+        UUID upload_session_id FK
+        TIMESTAMP created_at
+        INTEGER pixel_value
+        INTEGER width
+        INTEGER height
+        JSONB polygon_json
+        VARCHAR mask_path
+    }
+
+    bags {
+        UUID item_id PK, FK
+        JSONB valid_region_points
+    }
+```
+
+---
+
+## 4. File-by-File Breakdown
+
+### Root Directory
+
+* **[package.json](file:///c:/Users/saikiran/Desktop/xray1/package.json)**
+  * Contains scripts to run both the frontend and backend concurrently (`npm run dev:all`), install dependencies in both environments, and initialize packages.
+* **[taxonomy.json](file:///c:/Users/saikiran/Desktop/xray1/taxonomy.json)**
+  * The master list of categories, subcategories, and predefined stencils. Organizes metadata such as default sizes (`width`, `height`), names, paths, and categories. Used by seed scripts to insert core stencils.
+* **[check-taxonomy.js](file:///c:/Users/saikiran/Desktop/xray1/check-taxonomy.js)** / **[reorder-taxonomy.js](file:///c:/Users/saikiran/Desktop/xray1/reorder-taxonomy.js)**
+  * Utility scripts in root to validate taxonomy layout, check key definitions, and format JSON structures cleanly.
+
+---
+
+### Backend Components (`backend/`)
+
+#### Source Code (`backend/src/`)
+
+* **[server.js](file:///c:/Users/saikiran/Desktop/xray1/backend/src/server.js)**
+  * The main entry point. Sets up Express, static routes for serving uploads and exports `/data`, and exposes endpoints:
+    * `/api/upload`: Multi-part upload using `multer` that registers new upload sessions and saves metadata to PostgreSQL.
+    * `/api/items/categorized`: Returns all items structured by normalized category/subcategory.
+    * `/api/sessions`: Exposes upload sessions and their respective item lists.
+    * `/api/export` & `/api/dataset/generate`: Endpoints for single customized saves and batch collage generations.
+    * `/api/items/:id/valid-region`: Updates suitcase regions in the database.
+* **[schema.sql](file:///c:/Users/saikiran/Desktop/xray1/backend/src/schema.sql)**
+  * The DDL statements establishing the database tables, indexing, foreign keys, and default values.
+
+#### Backend Utilities (`backend/src/lib/`)
+
+* **[renderCanvas.js](file:///c:/Users/saikiran/Desktop/xray1/backend/src/lib/renderCanvas.js)**
+  * Backend engine utilizing `canvas` to draw scene objects onto an image. It reads SVGs or images recursively from organized subdirectories, renders them, and uses material grayscale densities (`pixel_value`) to simulate X-ray attenuation.
+* **[geometry.js](file:///c:/Users/saikiran/Desktop/xray1/backend/src/lib/geometry.js)**
+  * Handles backend coordinate geometry. Includes checks like `isObjectInsideContainer` (detects if an item's bounding box fits inside a bag's custom valid region polygon) and random position generation inside suitcases.
+
+#### Backend Business Logic (`backend/src/api/`)
+
+* **[datasetGenerator.js](file:///c:/Users/saikiran/Desktop/xray1/backend/src/api/datasetGenerator.js)**
+  * Orchestrates rendering loops for exports. For collages, it shuffles combination layouts, renders them, and outputs YOLO-compatible JSON annotations containing segmentation arrays and bounding boxes.
+
+#### Seeding & Setup Scripts (`backend/scripts/`)
+
+* **[seed-taxonomy.js](file:///c:/Users/saikiran/Desktop/xray1/backend/scripts/seed-taxonomy.js)**
+  * Parses `taxonomy.json` and inserts the category hierarchy.
+* **[seed-combined-library.js](file:///c:/Users/saikiran/Desktop/xray1/backend/scripts/seed-combined-library.js)**
+  * Integrates the custom SVG stencils (drawn inside JavaScript functions) and seeds the PostgreSQL items table with predefined assets.
+* **[organize-library-images.js](file:///c:/Users/saikiran/Desktop/xray1/backend/scripts/organize-library-images.js)**
+  * Moves SVG files uploaded or seeded into separate organized disk folders under `data/library_images/<category>/<subcategory>/`.
+* **[cleanup-empty-dirs.js](file:///c:/Users/saikiran/Desktop/xray1/backend/scripts/cleanup-empty-dirs.js)**
+  * Housekeeping script to delete nested empty directories in `library_images`.
+
+---
+
+### Frontend Components (`frontend/`)
+
+#### Global Setup & Core Styles (`frontend/src/`)
+
+* **[main.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/main.tsx)**
+  * Frontend entry point. Mounting React's DOM renderer onto the `#root` element.
+* **[App.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/App.tsx)**
+  * Establishes routing and site navigation (`/`, `/library`, `/collage`, `/customize`) inside a navigation wrapper.
+* **[index.css](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/index.css)**
+  * Custom Vanilla CSS utility tokens combined with Tailwind directives. Enforces custom fonts, animations (`animate-fade-in`, `animate-slide-up`), and unified dark-themed panel states.
+
+#### Configuration (`frontend/src/config/`)
+
+* **[categories.ts](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/config/categories.ts)**
+  * Establishes lookups for categories:
+    * `CATEGORY_MAP`: Styling rules (backgrounds, border colors, text weights) for categorizing badges.
+    * `normalizeCategoryName()`: Normalizes DB keys (e.g. `threat-prohibited-objects` becomes `threats`).
+    * `getStencilKind()`: Maps category keywords to basic kinds like `bag`, `threat`, `tray`, or `clothes`.
+
+#### Pages (`frontend/src/pages/`)
+
+* **[UploadPage.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/pages/UploadPage.tsx)**
+  * Interface for dragging and dropping image files, assigning them a session name, managing the queue, and pushing files to the `/api/upload` route.
+* **[LibraryPage.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/pages/LibraryPage.tsx)**
+  * Displays the upload session folders and categories. Keeps track of selection sets globally across session boundaries and persistent selections in `localStorage`.
+* **[CollagePage.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/pages/CollagePage.tsx)**
+  * Synthesizes and previews generated item combinations. It loads cached choices from `localStorage` on page refresh, and sends generation tasks to the backend.
+* **[CustomizationPage.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/pages/CustomizationPage.tsx)**
+  * The full-scale design workspace. Connects user interaction tools: undo/redo, scale adjustments, randomize triggers, dynamic threat-status banners, and localStorage save/restore on refresh.
+
+#### Helper Utilities (`frontend/src/lib/`)
+
+* **[geometry.ts](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/lib/geometry.ts)**
+  * Ray-casting algorithms (`isPointInPolygon`) and mathematical polygon projections used by the interactive canvas to detect mouse selection boundaries.
+* **[customizationHelpers.ts](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/lib/customizationHelpers.ts)**
+  * Coordinates layout calculations:
+    * `isObjectInsideContainer()`: Detects whether all corners of an item fit inside the container's valid region.
+    * `getRandomPositionInContainer()`: Tries up to 1000 times to place objects inside a container's boundaries safely.
+* **[xrayRenderer.ts](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/lib/xrayRenderer.ts)**
+  * Composite preview engine for the Collage list. Loads images, caches them, and draws overlaps using X-ray color blends.
+
+#### React Components (`frontend/src/components/`)
+
+##### General Components
+* **[HelpMenu.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/HelpMenu.tsx)**
+  * Renders interactive tutorials and hotkey summaries.
+* **[ValidRegionEditor.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/ValidRegionEditor.tsx)**
+  * A powerful canvas-based utility for drawing and editing a bag's valid region polygon. Allows adding points, dragging them, and deleting. Pushes updates to the database.
+
+##### Library Component Tree
+* **[LibrarySidebar.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/library/LibrarySidebar.tsx)**
+  * Renders the hierarchical tree structure. Organizes categories and subcategories nested cleanly inside upload session folders. Supports bulk select/deselect and deletes.
+* **[ItemCard.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/library/ItemCard.tsx)** / **[ItemRow.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/library/ItemRow.tsx)**
+  * Presentational rows and grid cards for library assets.
+* **[LibraryToolbar.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/library/LibraryToolbar.tsx)**
+  * Filter controls, searches, and view toggle buttons.
+* **[SelectionTray.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/library/SelectionTray.tsx)**
+  * Bottom floating bar tracking selections, preset choices, and collage navigation triggers.
+
+##### Customization Component Tree
+* **[CanvasArea.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/customization/CanvasArea.tsx)**
+  * The visual canvas workspace where items are rendered as draggable components. Visually draws the container region, guides, and item bounding borders.
+* **[WorkspaceToolbar.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/customization/WorkspaceToolbar.tsx)**
+  * Top workspace toolbar hosting undo, redo, randomize, layers control, and save.
+* **[ScannedBagsSidebar.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/customization/ScannedBagsSidebar.tsx)**
+  * Left dock inside customization page that lets users browse and click additional items to inject into their current workspace.
+
+##### Upload Component Tree
+* **[UploadConfigPanel.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/upload/UploadConfigPanel.tsx)**
+  * Input field for folder/session name.
+* **[UploadDropZone.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/upload/UploadDropZone.tsx)**
+  * Drag-and-drop trigger zone supporting upload queues.
+* **[UploadFileQueue.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/upload/UploadFileQueue.tsx)**
+  * Queue list of staged files before uploading.
+
+##### Collage Component Tree
+* **[SyntheticPreview.tsx](file:///c:/Users/saikiran/Desktop/xray1/frontend/src/components/collage/SyntheticPreview.tsx)**
+  * Preview cards showing the blended composite scans.
+
+---
+
+## 5. Architectural Flow & Key Algorithms
+
+Here is a quick reference for developers on how critical behaviors work inside the codebase.
+
+### Ray-Casting Containment Algorithm
+Both frontend and backend rely on the ray-casting algorithm (`isPointInPolygon`) to calculate containment:
+```
+For each vertex of an object's boundary:
+  Draw a horizontal ray from the vertex to infinity.
+  Count how many sides of the bag's valid region polygon are intersected by this ray.
+  If the intersection count is ODD, the vertex is inside the polygon.
+  If EVEN, it is outside.
+If all vertices of the object are inside, the object is contained.
+```
+This is critical for real-time security scanning banners in the workspace and for dataset exports.

@@ -6,7 +6,8 @@ export function getLoadedImage(filepath: string, onLoad: () => void): HTMLImageE
   const url = `http://localhost:8080/data/library_images/${filepath}`;
   if (imgCache.has(url)) {
     const cached = imgCache.get(url)!;
-    if (cached.complete) return cached;
+    if (cached.complete && cached.naturalWidth > 0) return cached;
+    // Still loading - attach another onLoad if not already queued
     return null;
   }
 
@@ -15,6 +16,10 @@ export function getLoadedImage(filepath: string, onLoad: () => void): HTMLImageE
   img.src = url;
   img.onload = () => {
     onLoad();
+  };
+  img.onerror = () => {
+    // Remove from cache on error so it can be retried
+    imgCache.delete(url);
   };
   imgCache.set(url, img);
   return null;
@@ -42,15 +47,15 @@ export function drawXRayComposite(
   for (const obj of sorted) {
     if (!obj.filepath) continue;
     const img = getLoadedImage(obj.filepath, onImagesLoaded);
-    if (!img) {
-      allLoaded = false;
-    } else {
+    if (img) {
       renderList.push({ obj, img });
+    } else {
+      allLoaded = false;
     }
   }
 
-  // If any images are still loading, wait for the onLoad callback triggers
-  if (!allLoaded) return;
+  // Always render what we have; callback will trigger re-render when more images finish
+  if (renderList.length === 0) return;
 
   // Create an offscreen canvas to render individual layers
   const layerCanvas = document.createElement("canvas");

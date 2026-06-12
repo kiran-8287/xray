@@ -1,7 +1,7 @@
 import React from "react";
 import { 
   Undo2, Redo2, Save, Trash2, RotateCw, Settings, ChevronUp, ChevronDown, 
-  Layers, Layout
+  Layers, Layout, Shuffle
 } from "lucide-react";
 
 interface WorkspaceToolbarProps {
@@ -20,6 +20,7 @@ interface WorkspaceToolbarProps {
   handleBringToFront: () => void;
   handleDeleteSelected: () => void;
   handleExport: () => void;
+  handleRandomize: () => void;
 }
 
 export default function WorkspaceToolbar({
@@ -38,18 +39,10 @@ export default function WorkspaceToolbar({
   handleBringToFront,
   handleDeleteSelected,
   handleExport,
+  handleRandomize,
 }: WorkspaceToolbarProps) {
   return (
-    <div className="bg-panel border-b border-border px-4 py-2 flex items-center gap-1.5 shadow-card sticky top-14 z-20 h-11 flex-shrink-0 text-sm">
-      {/* Brand Area */}
-      <div className="flex items-center gap-2 mr-3">
-        <Layout size={15} className="text-accent" />
-        <span className="text-sm font-bold text-ink truncate max-w-[120px]">
-          {bagObjectName || "New Workspace"}
-        </span>
-      </div>
-
-      <div className="w-px h-5 bg-border mx-1" />
+    <div className="bg-panel border-b border-border px-4 py-2 flex items-center gap-1.5 shadow-card relative z-20 h-11 flex-shrink-0 text-sm">
 
       {/* Undo/Redo */}
       <button
@@ -82,6 +75,15 @@ export default function WorkspaceToolbar({
         title={showValidRegion ? "Hide Valid Region" : "Show Valid Region"}
       >
         <Layers size={16} />
+      </button>
+
+      {/* Randomize Button */}
+      <button
+        onClick={handleRandomize}
+        className="p-1.5 rounded-lg text-muted hover:text-accent hover:bg-accent/10 transition-colors border border-transparent hover:border-accent/30 cursor-pointer"
+        title="Randomize object positions"
+      >
+        <Shuffle size={16} />
       </button>
 
       {selectedObjectId && (

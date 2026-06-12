@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Image } from "lucide-react";
 import type { Item, UploadSession, TaxonomyCategory, CategorizedItems } from "../types/library";
-import { getCategoryConfig } from "../config/categories";
+import { getCategoryConfig, mergeCategorizedItems, normalizeCategoryName } from "../config/categories";
 import ValidRegionEditor from "../components/ValidRegionEditor";
 import LibrarySidebar from "../components/library/LibrarySidebar";
 import LibraryToolbar from "../components/library/LibraryToolbar";
@@ -58,14 +58,30 @@ export default function LibraryPage() {
   const [categorizedItems, setCategorizedItems] = useState<CategorizedItems>({});
   const [taxonomy, setTaxonomy] = useState<TaxonomyCategory[]>([]);
   const [sessions, setSessions] = useState<UploadSession[]>([]);
-  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem("selectedItemIds");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
   const [activeCategory, setActiveCategory] = useState<string>("bags");
   const [activeSubcategory, setActiveSubcategory] = useState<string>("all");
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["bags"]));
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [editingItem, setEditingItem] = useState<Item | null>(null);
-  const [densityPreset, setDensityPreset] = useState<"empty" | "few" | "filled">("filled");
+  const [densityPreset, setDensityPreset] = useState<"empty" | "few" | "filled">((() => {
+    try {
+      const saved = localStorage.getItem("densityPreset");
+      return (saved as any) || "filled";
+    } catch {
+      return "filled";
+    }
+  })());
 
   useEffect(() => {
     fetchCategorizedItems();
@@ -73,33 +89,72 @@ export default function LibraryPage() {
     fetchSessions();
   }, []);
 
+  // Helper to categorize session items in the frontend
+  function getCategorizedSessionItems(items: Item[]): Record<string, Record<string, Item[]>> {
+    const categorized: any = {};
+    for (const item of items) {
+      const cat = item.category || "misc";
+      const normalized = normalizeCategoryName(cat);
+      if (!categorized[normalized]) {
+        categorized[normalized] = {};
+      }
+      const subcat = item.subcategory || "General";
+      if (!categorized[normalized][subcat]) {
+        categorized[normalized][subcat] = [];
+      }
+      categorized[normalized][subcat].push(item);
+    }
+    return categorized;
+  }
+
+  // Set default active session on mount once sessions fetch finishes
+  useEffect(() => {
+    if (sessions.length > 0 && !activeSessionId) {
+      setActiveSessionId(sessions[0].id);
+      setExpandedSessions(new Set([sessions[0].id]));
+    }
+  }, [sessions]);
+
+  // Save selection states to localStorage for persistence across page refreshes
+  useEffect(() => {
+    localStorage.setItem("selectedItemIds", JSON.stringify(Array.from(selectedItems)));
+    
+    const selectedBags: Item[] = [];
+    const selectedThreats: Item[] = [];
+    const selectedOthers: Item[] = [];
+    
+    selectedItems.forEach((itemId) => {
+      let item = null;
+      for (const s of sessions) {
+        const found = (s.items || []).find((i) => i.id === itemId);
+        if (found) {
+          item = found;
+          break;
+        }
+      }
+      if (item) {
+        const normCat = normalizeCategoryName(item.category);
+        if (normCat === "bags") selectedBags.push(item);
+        else if (normCat === "threats") selectedThreats.push(item);
+        else selectedOthers.push(item);
+      }
+    });
+
+    localStorage.setItem("selectedBags", JSON.stringify(selectedBags));
+    localStorage.setItem("selectedThreats", JSON.stringify(selectedThreats));
+    localStorage.setItem("selectedOthers", JSON.stringify(selectedOthers));
+  }, [selectedItems, sessions]);
+
+  useEffect(() => {
+    localStorage.setItem("densityPreset", densityPreset);
+  }, [densityPreset]);
+
   const fetchCategorizedItems = async () => {
     try {
       const res = await fetch("http://localhost:8080/api/items/categorized");
       const data = await res.json();
       if (data.ok) {
-        // Merge similar categories into one
-        const merged = { ...data.categorized };
-        const mergeIntoMisc = (catName: string) => {
-          if (merged[catName]) {
-            if (!merged.miscellaneous) {
-              merged.miscellaneous = {};
-            }
-            for (const subcat of Object.keys(merged[catName])) {
-              if (!merged.miscellaneous[subcat]) {
-                merged.miscellaneous[subcat] = [];
-              }
-              merged.miscellaneous[subcat].push(...merged[catName][subcat]);
-            }
-            delete merged[catName];
-          }
-        };
-
-        mergeIntoMisc("misc");
-        mergeIntoMisc("sports");
-        mergeIntoMisc("stationery");
-        mergeIntoMisc("lag");
-
+        const merged = mergeCategorizedItems(data.categorized);
         setCategorizedItems(merged);
         const firstCategory = Object.keys(merged)[0];
         if (firstCategory) {
@@ -139,10 +194,39 @@ export default function LibraryPage() {
     const newSelected = new Set(selectedItems);
     if (newSelected.has(itemId)) {
       newSelected.delete(itemId);
+      setSelectedItems(newSelected);
     } else {
+      let item = null;
+      for (const s of sessions) {
+        const found = (s.items || []).find((i) => i.id === itemId);
+        if (found) {
+          item = found;
+          break;
+        }
+      }
+      
+      let isBag = false;
+      let hasValidRegion = false;
+      let itemName = "";
+      
+      if (item) {
+        itemName = item.name;
+        if (normalizeCategoryName(item.category) === "bags") {
+          isBag = true;
+          if (item.valid_region_points && (Array.isArray(item.valid_region_points) ? item.valid_region_points.length > 0 : true)) {
+            hasValidRegion = true;
+          }
+        }
+      }
+
+      if (isBag && !hasValidRegion) {
+        alert(`Please draw the valid region for the bag "${itemName}" before selecting it.`);
+        return;
+      }
+
       newSelected.add(itemId);
+      setSelectedItems(newSelected);
     }
-    setSelectedItems(newSelected);
   };
 
   const toggleCategoryExpansion = (categoryKey: string) => {
@@ -211,8 +295,11 @@ export default function LibraryPage() {
     }
   };
 
-  const handleDeleteSubcategory = async (categoryKey: string, subKey: string) => {
-    const items = categorizedItems[categoryKey]?.[subKey] || [];
+  const handleDeleteSubcategory = async (sessionId: string, categoryKey: string, subKey: string) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) return;
+    const sessionCategorized = getCategorizedSessionItems(session.items || []);
+    const items = sessionCategorized[categoryKey]?.[subKey] || [];
     if (items.length === 0) return;
     if (!confirm(`Are you sure you want to delete all ${items.length} items in this subcategory?`)) return;
     try {
@@ -239,6 +326,16 @@ export default function LibraryPage() {
       });
       fetchCategorizedItems();
       fetchSessions();
+      
+      if (activeSessionId === sessionId) {
+        const remaining = sessions.filter(s => s.id !== sessionId);
+        if (remaining.length > 0) {
+          setActiveSessionId(remaining[0].id);
+        } else {
+          setActiveSessionId(null);
+        }
+      }
+
       const session = sessions.find((s) => s.id === sessionId);
       if (session) {
         const newSelected = new Set(selectedItems);
@@ -256,15 +353,19 @@ export default function LibraryPage() {
     const selectedOthers: Item[] = [];
     
     selectedItems.forEach((itemId) => {
-      for (const [cat, subcats] of Object.entries(categorizedItems)) {
-        for (const [, items] of Object.entries(subcats)) {
-          const item = items.find((i) => i.id === itemId);
-          if (item) {
-            if (cat === "bags") selectedBags.push(item);
-            else if (cat === "threats") selectedThreats.push(item);
-            else selectedOthers.push(item);
-          }
+      let item = null;
+      for (const s of sessions) {
+        const found = (s.items || []).find((i) => i.id === itemId);
+        if (found) {
+          item = found;
+          break;
         }
+      }
+      if (item) {
+        const normCat = normalizeCategoryName(item.category);
+        if (normCat === "bags") selectedBags.push(item);
+        else if (normCat === "threats") selectedThreats.push(item);
+        else selectedOthers.push(item);
       }
     });
 
@@ -278,7 +379,9 @@ export default function LibraryPage() {
     });
   };
 
-  const subcategoriesData = categorizedItems[activeCategory] || {};
+  const activeSession = sessions.find(s => s.id === activeSessionId);
+  const sessionCategorized = activeSession ? getCategorizedSessionItems(activeSession.items || []) : {};
+  const subcategoriesData = sessionCategorized[activeCategory] || {};
   let displayedItems: Item[] = [];
 
   if (activeSubcategory === "all") {
@@ -302,12 +405,20 @@ export default function LibraryPage() {
       <div className="flex flex-1 overflow-hidden">
         <LibrarySidebar
           sessions={sessions}
-          categorizedItems={categorizedItems}
           taxonomy={taxonomy}
+          activeSessionId={activeSessionId}
+          setActiveSessionId={setActiveSessionId}
           activeCategory={activeCategory}
           setActiveCategory={setActiveCategory}
           activeSubcategory={activeSubcategory}
           setActiveSubcategory={setActiveSubcategory}
+          expandedSessions={expandedSessions}
+          toggleSessionExpansion={(id) => {
+            const newExp = new Set(expandedSessions);
+            if (newExp.has(id)) newExp.delete(id);
+            else newExp.add(id);
+            setExpandedSessions(newExp);
+          }}
           expandedCategories={expandedCategories}
           toggleCategoryExpansion={toggleCategoryExpansion}
           selectedItems={selectedItems}

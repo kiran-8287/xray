@@ -50,26 +50,8 @@ export default function ScannedBagsSidebar({
     );
   }
 
-  // Merge categories first
-  const mergedList = { ...categorizedList };
-  const mergeIntoMisc = (catName: string) => {
-    if (mergedList[catName]) {
-      if (!mergedList.miscellaneous) {
-        mergedList.miscellaneous = {};
-      }
-      for (const subcat of Object.keys(mergedList[catName])) {
-        if (!mergedList.miscellaneous[subcat]) {
-          mergedList.miscellaneous[subcat] = [];
-        }
-        mergedList.miscellaneous[subcat].push(...mergedList[catName][subcat]);
-      }
-      delete mergedList[catName];
-    }
-  };
-  mergeIntoMisc("misc");
-  mergeIntoMisc("sports");
-  mergeIntoMisc("stationery");
-  mergeIntoMisc("lag");
+  // categorizedList is already merged and normalized by the parent page
+  const mergedList = categorizedList;
 
   // Filter categories to hide bags if a bag is already in the workspace
   const categoryKeys = Object.keys(mergedList).filter(

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import type { Item } from "../../types/library";
 import type { StencilKind } from "../../stencils/types";
 import type { SceneObject } from "../../types/customization";
@@ -19,7 +19,7 @@ export default function SyntheticPreview({
   threat,
   others,
 }: SyntheticPreviewProps) {
-  const [objects] = useState<SceneObject[]>(() => {
+  const objects = useMemo(() => {
     const newObjects: SceneObject[] = [];
     let layer = 0;
     
@@ -129,7 +129,7 @@ export default function SyntheticPreview({
     }
     
     return newObjects;
-  });
+  }, [bag, threat, others]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [, forceUpdate] = useState({});

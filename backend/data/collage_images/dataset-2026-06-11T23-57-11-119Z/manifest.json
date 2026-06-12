@@ -1,0 +1,38 @@
+{
+  "exportId": "dataset-2026-06-11T23-57-11-119Z",
+  "createdAt": "2026-06-11T23:57:12.751Z",
+  "totalScans": 6,
+  "resolution": "800x600",
+  "files": [
+    {
+      "comboId": "cc17ee6c-aab2-4fb7-934b-a5f204a250ca-clean",
+      "image": "images\\cc17ee6c-aab2-4fb7-934b-a5f204a250ca-clean.png",
+      "label": "labels\\cc17ee6c-aab2-4fb7-934b-a5f204a250ca-clean.json"
+    },
+    {
+      "comboId": "cc17ee6c-aab2-4fb7-934b-a5f204a250ca-2873095f-72b6-42c4-98c6-5c7a14c3e1e0",
+      "image": "images\\cc17ee6c-aab2-4fb7-934b-a5f204a250ca-2873095f-72b6-42c4-98c6-5c7a14c3e1e0.png",
+      "label": "labels\\cc17ee6c-aab2-4fb7-934b-a5f204a250ca-2873095f-72b6-42c4-98c6-5c7a14c3e1e0.json"
+    },
+    {
+      "comboId": "cc17ee6c-aab2-4fb7-934b-a5f204a250ca-b77ff72f-3c91-4ada-8f35-a4701ab49b95",
+      "image": "images\\cc17ee6c-aab2-4fb7-934b-a5f204a250ca-b77ff72f-3c91-4ada-8f35-a4701ab49b95.png",
+      "label": "labels\\cc17ee6c-aab2-4fb7-934b-a5f204a250ca-b77ff72f-3c91-4ada-8f35-a4701ab49b95.json"
+    },
+    {
+      "comboId": "7e73f57f-0120-44c7-b1cd-8ac14d4bb052-clean",
+      "image": "images\\7e73f57f-0120-44c7-b1cd-8ac14d4bb052-clean.png",
+      "label": "labels\\7e73f57f-0120-44c7-b1cd-8ac14d4bb052-clean.json"
+    },
+    {
+      "comboId": "7e73f57f-0120-44c7-b1cd-8ac14d4bb052-2873095f-72b6-42c4-98c6-5c7a14c3e1e0",
+      "image": "images\\7e73f57f-0120-44c7-b1cd-8ac14d4bb052-2873095f-72b6-42c4-98c6-5c7a14c3e1e0.png",
+      "label": "labels\\7e73f57f-0120-44c7-b1cd-8ac14d4bb052-2873095f-72b6-42c4-98c6-5c7a14c3e1e0.json"
+    },
+    {
+      "comboId": "7e73f57f-0120-44c7-b1cd-8ac14d4bb052-b77ff72f-3c91-4ada-8f35-a4701ab49b95",
+      "image": "images\\7e73f57f-0120-44c7-b1cd-8ac14d4bb052-b77ff72f-3c91-4ada-8f35-a4701ab49b95.png",
+      "label": "labels\\7e73f57f-0120-44c7-b1cd-8ac14d4bb052-b77ff72f-3c91-4ada-8f35-a4701ab49b95.json"
+    }
+  ]
+}

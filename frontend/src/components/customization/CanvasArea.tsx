@@ -70,14 +70,6 @@ export default function CanvasArea({
           transformOrigin: "center",
         }}
       >
-        {/* Onscreen X-Ray Canvas */}
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_W}
-          height={CANVAS_H}
-          className="absolute top-0 left-0 w-full h-full pointer-events-none"
-        />
-
         {/* Grid Pattern background */}
         <svg className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-40">
           {Array.from({ length: CANVAS_W / 20 + 1 }).map((_, i) => (
@@ -104,6 +96,14 @@ export default function CanvasArea({
           ))}
         </svg>
 
+        {/* Onscreen X-Ray Canvas */}
+        <canvas
+          ref={canvasRef}
+          width={CANVAS_W}
+          height={CANVAS_H}
+          className="absolute top-0 left-0 w-full h-full pointer-events-none"
+        />
+
         {/* Valid region overlay */}
         {showValidRegion && validRegionPolygon.length > 0 && (
           <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-10">
@@ -121,13 +121,18 @@ export default function CanvasArea({
         {sortedObjects.map((obj) => {
           const isSelected = selectedObjectId === obj.id;
           const transform = obj.transform;
+          const isBag = obj.library === "bag";
+          const cursorClass = isBag ? "cursor-default" : "cursor-move";
+          const borderClass = isBag 
+            ? "border border-transparent" 
+            : "border border-dashed border-transparent hover:border-accent/30";
+
+          const zIndexClass = isBag ? "z-10" : (isSelected ? "z-30 border-accent/40" : "z-20");
 
           return (
             <div
               key={obj.id}
-              className={`absolute cursor-move select-none group border border-dashed border-transparent hover:border-accent/30 rounded-lg ${
-                isSelected ? "z-30 border-accent/40" : "z-20"
-              }`}
+              className={`absolute select-none group rounded-lg ${cursorClass} ${borderClass} ${zIndexClass}`}
               style={{
                 left: transform.x - transform.width / 2,
                 top: transform.y - transform.height / 2,

@@ -17,5 +17,7 @@ export type SceneObject = {
     height: number;
     rotation: number;
   };
+  initialWidth?: number;
+  initialHeight?: number;
   layer: number;
 };

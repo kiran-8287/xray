@@ -15,7 +15,7 @@ import { getRectCorners } from "../lib/geometry";
 import ScannedBagsSidebar from "../components/customization/ScannedBagsSidebar";
 import WorkspaceToolbar from "../components/customization/WorkspaceToolbar";
 import CanvasArea from "../components/customization/CanvasArea";
-import { getCategoryConfig } from "../config/categories";
+import { getCategoryConfig, mergeCategorizedItems, getStencilKind, normalizeCategoryName } from "../config/categories";
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
@@ -38,6 +38,7 @@ export default function CustomizationPage() {
   const [zoom, setZoom] = useState(1);
   const [lastSavedTime, setLastSavedTime] = useState<number>(0);
   const [categorizedList, setCategorizedList] = useState<any>(null);
+  const hasInitialized = useRef(false);
 
   // Fetch all scanned bags from DB on mount
   useEffect(() => {
@@ -45,28 +46,80 @@ export default function CustomizationPage() {
       .then((res) => res.json())
       .then((data) => {
         if (data.ok) {
-          setCategorizedList(data.categorized);
+          setCategorizedList(mergeCategorizedItems(data.categorized));
         }
       })
       .catch((err) => console.error("Error loading scanned bags in workspace:", err));
   }, []);
 
-  // Initialize objects from URL query params
+  // Initialize objects from URL query params — runs only ONCE after data loads
   useEffect(() => {
     if (!categorizedList) return;
+    if (hasInitialized.current) return; // Prevent re-randomizing on HMR / state updates
+    hasInitialized.current = true;
 
-    const bagId = searchParams.get("bagId");
-    const threatId = searchParams.get("threatId");
-    const otherIdsStr = searchParams.get("otherIds");
+    const bagId = searchParams.get("bagId") || "";
+    const threatId = searchParams.get("threatId") || "";
+    const otherIds = searchParams.get("otherIds") || "";
+    const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setObjects(parsed);
+          setHistory([parsed]);
+          setHistoryIndex(0);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Error loading saved workspace:", err);
+    }
+
+    buildAndSetObjects(categorizedList, searchParams, setObjects, setHistory, setHistoryIndex);
+  }, [categorizedList]);
+
+  // Save workspace layout to localStorage on changes (so page refresh doesn't lose it)
+  useEffect(() => {
+    if (!hasInitialized.current || objects.length === 0) return;
+    const bagId = searchParams.get("bagId") || "";
+    const threatId = searchParams.get("threatId") || "";
+    const otherIds = searchParams.get("otherIds") || "";
+    const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+    localStorage.setItem(storageKey, JSON.stringify(objects));
+  }, [objects, searchParams]);
+
+  // Shared builder extracted so the Randomize button can call it again
+  function buildAndSetObjects(catList: any, params: URLSearchParams, setObj: typeof setObjects, setHist: typeof setHistory, setHIdx: typeof setHistoryIndex) {
+    const bagId = params.get("bagId");
+    const threatId = params.get("threatId");
+    const otherIdsStr = params.get("otherIds");
     const otherIds = otherIdsStr ? otherIdsStr.split(",").filter(Boolean) : [];
+    const hasQueryParams = params.has("bagId") || params.has("threatId") || params.has("otherIds");
+
+    // Flatten all items across all categories and subcategories
+    const allItems: Item[] = [];
+    Object.values(catList).forEach((subcats: any) => {
+      Object.values(subcats).forEach((items: any) => {
+        if (Array.isArray(items)) {
+          allItems.push(...items);
+        }
+      });
+    });
+
+    const normCat = (c: string) => normalizeCategoryName(c);
+    const isBag = (item: Item) => normCat(item.category) === "bags";
+    const isThreat = (item: Item) => normCat(item.category) === "threats";
+    const isOther = (item: Item) => !isBag(item) && !isThreat(item);
 
     let newObjects: SceneObject[] = [];
     let layer = 0;
     let bagObject: SceneObject | null = null;
 
     // 1. Locate the bag
-    const allBags = Object.values(categorizedList.bags || {}).flat() as Item[];
-    const bagItem = allBags.find((b) => b.id === bagId) || allBags[0];
+    const allBags = allItems.filter(isBag);
+    const bagItem = allBags.find((b) => b.id === bagId) || (hasQueryParams ? null : allBags[0]);
 
     if (bagItem) {
       let bagOutline = null;
@@ -84,7 +137,7 @@ export default function CustomizationPage() {
       bagObject = {
         id: "initial-bag",
         name: bagItem.name,
-        library: bagItem.category as StencilKind,
+        library: getStencilKind(bagItem.category),
         originalPixelValue: bagItem.pixel_value,
         currentPixelValue: bagItem.pixel_value,
         oldPixelValue: null,
@@ -98,25 +151,19 @@ export default function CustomizationPage() {
           height: CANVAS_H * 0.7,
           rotation: 0,
         },
+        initialWidth: CANVAS_W * 0.7,
+        initialHeight: CANVAS_H * 0.7,
         layer: layer++,
       };
       newObjects.push(bagObject);
     }
 
     // 2. Locate other items
-    const allOthers = [
-      ...Object.values(categorizedList.clothes || {}).flat(),
-      ...Object.values(categorizedList.electronics || {}).flat(),
-      ...Object.values(categorizedList.food || {}).flat(),
-      ...Object.values(categorizedList.misc || {}).flat(),
-      ...Object.values(categorizedList.sports || {}).flat(),
-      ...Object.values(categorizedList.stationery || {}).flat(),
-    ] as Item[];
-
+    const allOthers = allItems.filter(isOther);
     const matchedOthers = otherIds
       .map((id) => allOthers.find((item) => item.id === id))
       .filter(Boolean) as Item[];
-    const itemsToPlace = matchedOthers.length > 0 ? matchedOthers : allOthers.slice(0, 2);
+    const itemsToPlace = hasQueryParams ? matchedOthers : (matchedOthers.length > 0 ? matchedOthers : allOthers.slice(0, 2));
 
     itemsToPlace.forEach((item, i) => {
       let itemOutline = null;
@@ -125,45 +172,34 @@ export default function CustomizationPage() {
           ? JSON.parse(item.polygon_json)
           : item.polygon_json;
       }
-
-      const w = item.width ? Math.round(item.width * 0.45) : 80;
-      const h = item.height ? Math.round(item.height * 0.45) : 80;
-
+      const w = item.width ? Math.round(item.width * 0.5) : 80;
+      const h = item.height ? Math.round(item.height * 0.5) : 80;
       let pos;
       if (bagObject) {
         pos = getRandomPositionInContainer(w, h, bagObject, itemOutline);
       } else {
         const padding = 50;
-        pos = {
-          x: padding + Math.random() * (CANVAS_W - 2 * padding),
-          y: padding + Math.random() * (CANVAS_H - 2 * padding),
-          rotation: Math.random() * 360,
-        };
+        pos = { x: padding + Math.random() * (CANVAS_W - 2 * padding), y: padding + Math.random() * (CANVAS_H - 2 * padding), rotation: Math.random() * 360 };
       }
-
       newObjects.push({
         id: `random-object-${i}`,
         name: item.name,
-        library: item.category as StencilKind,
+        library: getStencilKind(item.category),
         originalPixelValue: item.pixel_value,
         currentPixelValue: item.pixel_value,
         oldPixelValue: null,
         stencilId: "tshirt",
         filepath: item.filepath,
         polygonOutline: itemOutline,
-        transform: {
-          x: pos.x,
-          y: pos.y,
-          width: w,
-          height: h,
-          rotation: pos.rotation ?? Math.random() * 360,
-        },
+        transform: { x: pos.x, y: pos.y, width: w, height: h, rotation: pos.rotation ?? Math.random() * 360 },
+        initialWidth: w,
+        initialHeight: h,
         layer: layer++,
       });
     });
 
     // 3. Locate threat
-    const allThreats = Object.values(categorizedList.threats || {}).flat() as Item[];
+    const allThreats = allItems.filter(isThreat);
     const threatItem = allThreats.find((t) => t.id === threatId);
 
     if (threatItem) {
@@ -173,49 +209,54 @@ export default function CustomizationPage() {
           ? JSON.parse(threatItem.polygon_json)
           : threatItem.polygon_json;
       }
-
       const w = threatItem.width ? Math.round(threatItem.width * 0.5) : 120;
       const h = threatItem.height ? Math.round(threatItem.height * 0.5) : 60;
-
       let pos;
       if (bagObject) {
         pos = getRandomPositionInContainer(w, h, bagObject, threatOutline);
       } else {
         const padding = 50;
-        pos = {
-          x: padding + Math.random() * (CANVAS_W - 2 * padding),
-          y: padding + Math.random() * (CANVAS_H - 2 * padding),
-          rotation: Math.random() * 360,
-        };
+        pos = { x: padding + Math.random() * (CANVAS_W - 2 * padding), y: padding + Math.random() * (CANVAS_H - 2 * padding), rotation: Math.random() * 360 };
       }
-
       newObjects.push({
         id: "initial-threat",
         name: threatItem.name,
-        library: threatItem.category as StencilKind,
+        library: getStencilKind(threatItem.category),
         originalPixelValue: threatItem.pixel_value,
         currentPixelValue: threatItem.pixel_value,
         oldPixelValue: null,
         stencilId: "gun",
         filepath: threatItem.filepath,
         polygonOutline: threatOutline,
-        transform: {
-          x: pos.x,
-          y: pos.y,
-          width: w,
-          height: h,
-          rotation: pos.rotation ?? Math.random() * 360,
-        },
+        transform: { x: pos.x, y: pos.y, width: w, height: h, rotation: pos.rotation ?? Math.random() * 360 },
+        initialWidth: w,
+        initialHeight: h,
         layer: layer++,
       });
     }
 
     if (newObjects.length > 0) {
-      setObjects(newObjects);
-      setHistory([newObjects]);
-      setHistoryIndex(0);
+      setObj(newObjects);
+      setHist([newObjects]);
+      setHIdx(0);
     }
-  }, [categorizedList, searchParams]);
+  }
+
+  // Randomize button handler — re-randomizes positions of non-bag items
+  const handleRandomize = () => {
+    if (!categorizedList) return;
+    hasInitialized.current = false;
+    
+    // Clear localStorage for this combination so it doesn't load old positions
+    const bagId = searchParams.get("bagId") || "";
+    const threatId = searchParams.get("threatId") || "";
+    const otherIds = searchParams.get("otherIds") || "";
+    const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+    localStorage.removeItem(storageKey);
+
+    buildAndSetObjects(categorizedList, searchParams, setObjects, setHistory, setHistoryIndex);
+    hasInitialized.current = true;
+  };
 
   useEffect(() => {
     setHasBag(objects.some((obj) => obj.library === "bag"));
@@ -255,7 +296,7 @@ export default function CustomizationPage() {
     const newObject: SceneObject = {
       id: `custom-object-${Date.now()}`,
       name: item.name,
-      library: item.category as StencilKind,
+      library: getStencilKind(item.category),
       originalPixelValue: item.pixel_value,
       currentPixelValue: item.pixel_value,
       oldPixelValue: null,
@@ -269,6 +310,8 @@ export default function CustomizationPage() {
         height,
         rotation: pos.rotation ?? Math.random() * 360,
       },
+      initialWidth: width,
+      initialHeight: height,
       layer: objects.length,
     };
 
@@ -455,8 +498,18 @@ export default function CustomizationPage() {
 
   const bagObject = objects.find(o => o.library === "bag");
   const outOfBoundsObjects = objects.filter(
-    obj => bagObject && obj.library !== "bag" && !isObjectInsideContainer(obj, bagObject)
+    obj => bagObject && obj.library === "threat" && !isObjectInsideContainer(obj, bagObject)
   );
+
+  // Threat validation states
+  const hasThreat = objects.some(o => o.library === "threat");
+  const threatObj = objects.find(o => o.library === "threat");
+  const isThreatInside = bagObject && threatObj ? isObjectInsideContainer(threatObj, bagObject) : false;
+
+  let scanStatus: "clean" | "threat_valid" | "threat_invalid" = "clean";
+  if (hasThreat) {
+    scanStatus = isThreatInside ? "threat_valid" : "threat_invalid";
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-56px)] bg-surface overflow-hidden animate-fade-in text-sm">
@@ -476,10 +529,53 @@ export default function CustomizationPage() {
         handleBringToFront={handleBringToFront}
         handleDeleteSelected={handleDeleteSelected}
         handleExport={handleExport}
+        handleRandomize={handleRandomize}
       />
 
+      {/* Scan Security Status Banner */}
+      <div className={`px-4 py-2 border-b flex items-center justify-between text-xs font-semibold select-none z-10 flex-shrink-0 ${
+        scanStatus === "clean" 
+          ? "bg-emerald-50 border-emerald-100 text-emerald-800 animate-fade-in"
+          : scanStatus === "threat_valid"
+          ? "bg-amber-50 border-amber-100 text-amber-800 animate-fade-in"
+          : "bg-rose-50 border-rose-200 text-rose-800 animate-pulse"
+      }`}>
+        <div className="flex items-center gap-2">
+          {scanStatus === "clean" && (
+            <>
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span>SCAN RESULT: CLEAN (No Threat Objects Detected)</span>
+            </>
+          )}
+          {scanStatus === "threat_valid" && (
+            <>
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
+              <span>SCAN WARNING: THREAT PRESENT & SECURED (Threat is inside valid container region)</span>
+            </>
+          )}
+          {scanStatus === "threat_invalid" && (
+            <>
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+              <span>SECURITY ALERT: THREAT OUT OF BOUNDS (Threat is outside valid container region)</span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase">
+          <span>Status:</span>
+          <span className={`px-2 py-0.5 rounded-full text-white font-bold ${
+            scanStatus === "clean"
+              ? "bg-emerald-600"
+              : scanStatus === "threat_valid"
+              ? "bg-amber-600"
+              : "bg-rose-600"
+          }`}>
+            {scanStatus === "clean" ? "Clean" : scanStatus === "threat_valid" ? "Threat Present (Valid)" : "Threat Out of Bounds (Invalid)"}
+          </span>
+        </div>
+      </div>
+
       {exportState.status !== "idle" && (
-        <div className={`absolute top-16 right-4 z-50 px-4 py-2.5 rounded-xl shadow-panel border flex items-center gap-2 animate-slide-up ${
+        <div className={`absolute top-28 right-4 z-50 px-4 py-2.5 rounded-xl shadow-panel border flex items-center gap-2 animate-slide-up ${
           exportState.status === "success" 
             ? "bg-emerald-50 border-emerald-200 text-emerald-800" 
             : "bg-rose-50 border-rose-200 text-rose-800"
@@ -549,7 +645,9 @@ export default function CustomizationPage() {
             (() => {
               const selectedObj = objects.find((o) => o.id === selectedObjectId);
               if (!selectedObj) return null;
-              const isValid = bagObject && selectedObj.library !== "bag" ? isObjectInsideContainer(selectedObj, bagObject) : true;
+              const isValid = bagObject && selectedObj.library !== "bag" 
+                ? (selectedObj.library === "threat" ? isObjectInsideContainer(selectedObj, bagObject) : true) 
+                : true;
               const config = getCategoryConfig(selectedObj.library);
 
               return (
@@ -593,26 +691,164 @@ export default function CustomizationPage() {
                   <div className="space-y-1.5">
                     <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Transform</span>
                     <div className="space-y-1.5">
+                      {/* Position X */}
                       <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
                         <span className="text-[11px] text-muted uppercase tracking-wider">Position X</span>
-                        <span className="font-mono text-accent text-xs font-semibold">{Math.round(selectedObj.transform.x)} px</span>
+                        {selectedObj.library !== "bag" ? (
+                          <input
+                            type="number"
+                            value={Math.round(selectedObj.transform.x)}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 0;
+                              const newObjects = objects.map((o) =>
+                                o.id === selectedObjectId
+                                  ? { ...o, transform: { ...o.transform, x: val } }
+                                  : o
+                              );
+                              setObjects(newObjects);
+                            }}
+                            onBlur={() => pushHistory(objects)}
+                            className="w-20 bg-surface border border-border rounded px-1.5 py-0.5 text-right font-mono text-xs text-ink focus:outline-none focus:border-accent"
+                          />
+                        ) : (
+                          <span className="font-mono text-muted text-xs">{Math.round(selectedObj.transform.x)} px</span>
+                        )}
                       </div>
+
+                      {/* Position Y */}
                       <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
                         <span className="text-[11px] text-muted uppercase tracking-wider">Position Y</span>
-                        <span className="font-mono text-accent text-xs font-semibold">{Math.round(selectedObj.transform.y)} px</span>
+                        {selectedObj.library !== "bag" ? (
+                          <input
+                            type="number"
+                            value={Math.round(selectedObj.transform.y)}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 0;
+                              const newObjects = objects.map((o) =>
+                                o.id === selectedObjectId
+                                  ? { ...o, transform: { ...o.transform, y: val } }
+                                  : o
+                              );
+                              setObjects(newObjects);
+                            }}
+                            onBlur={() => pushHistory(objects)}
+                            className="w-20 bg-surface border border-border rounded px-1.5 py-0.5 text-right font-mono text-xs text-ink focus:outline-none focus:border-accent"
+                          />
+                        ) : (
+                          <span className="font-mono text-muted text-xs">{Math.round(selectedObj.transform.y)} px</span>
+                        )}
                       </div>
+
+                      {/* Width */}
                       <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
                         <span className="text-[11px] text-muted uppercase tracking-wider">Width</span>
-                        <span className="font-mono text-accent text-xs font-semibold">{Math.round(selectedObj.transform.width)} px</span>
+                        {selectedObj.library !== "bag" ? (
+                          <input
+                            type="number"
+                            value={Math.round(selectedObj.transform.width)}
+                            onChange={(e) => {
+                              const val = Math.max(10, Math.min(800, parseInt(e.target.value) || 10));
+                              const newObjects = objects.map((o) =>
+                                o.id === selectedObjectId
+                                  ? { ...o, transform: { ...o.transform, width: val } }
+                                  : o
+                              );
+                              setObjects(newObjects);
+                            }}
+                            onBlur={() => pushHistory(objects)}
+                            className="w-20 bg-surface border border-border rounded px-1.5 py-0.5 text-right font-mono text-xs text-ink focus:outline-none focus:border-accent"
+                          />
+                        ) : (
+                          <span className="font-mono text-muted text-xs">{Math.round(selectedObj.transform.width)} px</span>
+                        )}
                       </div>
+
+                      {/* Height */}
                       <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
                         <span className="text-[11px] text-muted uppercase tracking-wider">Height</span>
-                        <span className="font-mono text-accent text-xs font-semibold">{Math.round(selectedObj.transform.height)} px</span>
+                        {selectedObj.library !== "bag" ? (
+                          <input
+                            type="number"
+                            value={Math.round(selectedObj.transform.height)}
+                            onChange={(e) => {
+                              const val = Math.max(10, Math.min(800, parseInt(e.target.value) || 10));
+                              const newObjects = objects.map((o) =>
+                                o.id === selectedObjectId
+                                  ? { ...o, transform: { ...o.transform, height: val } }
+                                  : o
+                              );
+                              setObjects(newObjects);
+                            }}
+                            onBlur={() => pushHistory(objects)}
+                            className="w-20 bg-surface border border-border rounded px-1.5 py-0.5 text-right font-mono text-xs text-ink focus:outline-none focus:border-accent"
+                          />
+                        ) : (
+                          <span className="font-mono text-muted text-xs">{Math.round(selectedObj.transform.height)} px</span>
+                        )}
                       </div>
+
+                      {/* Rotation */}
                       <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
                         <span className="text-[11px] text-muted uppercase tracking-wider">Rotation</span>
-                        <span className="font-mono text-accent text-xs font-semibold">{selectedObj.transform.rotation}°</span>
+                        {selectedObj.library !== "bag" ? (
+                          <input
+                            type="number"
+                            value={selectedObj.transform.rotation}
+                            onChange={(e) => {
+                              const val = (parseInt(e.target.value) || 0) % 360;
+                              const newObjects = objects.map((o) =>
+                                o.id === selectedObjectId
+                                  ? { ...o, transform: { ...o.transform, rotation: val } }
+                                  : o
+                              );
+                              setObjects(newObjects);
+                            }}
+                            onBlur={() => pushHistory(objects)}
+                            className="w-20 bg-surface border border-border rounded px-1.5 py-0.5 text-right font-mono text-xs text-ink focus:outline-none focus:border-accent"
+                          />
+                        ) : (
+                          <span className="font-mono text-muted text-xs">{selectedObj.transform.rotation}°</span>
+                        )}
                       </div>
+
+                      {/* Scale Slider */}
+                      {selectedObj.library !== "bag" && (
+                        <div className="bg-panel rounded-xl border border-border px-3 py-2 space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[11px] text-muted uppercase tracking-wider">Proportional Scale</span>
+                            <span className="font-mono text-accent text-xs font-semibold">
+                              {Math.round((selectedObj.transform.width / (selectedObj.initialWidth || 80)) * 100)}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="10"
+                            max="300"
+                            value={Math.round((selectedObj.transform.width / (selectedObj.initialWidth || 80)) * 100)}
+                            onChange={(e) => {
+                              const scalePercent = parseInt(e.target.value) || 100;
+                              const scale = scalePercent / 100;
+                              const initialW = selectedObj.initialWidth || 80;
+                              const initialH = selectedObj.initialHeight || 80;
+                              const newObjects = objects.map((o) =>
+                                o.id === selectedObjectId
+                                  ? {
+                                      ...o,
+                                      transform: {
+                                        ...o.transform,
+                                        width: Math.round(initialW * scale),
+                                        height: Math.round(initialH * scale),
+                                      },
+                                    }
+                                  : o
+                              );
+                              setObjects(newObjects);
+                            }}
+                            onMouseUp={() => pushHistory(objects)}
+                            className="w-full h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent"
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
 

@@ -11,7 +11,7 @@ export const getTransformedValidRegion = (bag: SceneObject): Point[] => {
       { x: bag.transform.x, y: bag.transform.y },
       { width: bag.transform.width, height: bag.transform.height },
       bag.transform.rotation,
-      bag.polygonOutline
+      bag.polygonOutline.map(p => ({ x: p.x - 0.5, y: p.y - 0.5 }))
     );
   }
   // No valid region defined — fall back to bounding box corners
@@ -77,9 +77,15 @@ export const getRandomPositionInContainer = (
     const maxX = containerMaxX - width / 2;
     const minY = containerMinY + height / 2;
     const maxY = containerMaxY - height / 2;
+    
+    const finalMinX = Math.min(minX, maxX);
+    const finalMaxX = Math.max(minX, maxX);
+    const finalMinY = Math.min(minY, maxY);
+    const finalMaxY = Math.max(minY, maxY);
+
     return {
-      x: minX + Math.random() * (maxX - minX),
-      y: minY + Math.random() * (maxY - minY),
+      x: finalMinX + Math.random() * (finalMaxX - finalMinX),
+      y: finalMinY + Math.random() * (finalMaxY - finalMinY),
       rotation: Math.random() * 360
     };
   }
@@ -93,20 +99,54 @@ export const getRandomPositionInContainer = (
   });
   
   for (let i = 0; i < 1000; i++) {
-    const candidateX = minX + width/2 + Math.random() * (maxX - minX - width);
-    const candidateY = minY + height/2 + Math.random() * (maxY - minY - height);
+    let checkW = width;
+    let checkH = height;
+    if (i > 100) {
+      checkW = width * 0.8;
+      checkH = height * 0.8;
+    }
+    if (i > 300) {
+      checkW = width * 0.5;
+      checkH = height * 0.5;
+    }
+    if (i > 600) {
+      checkW = 0;
+      checkH = 0;
+    }
+
+    const rangeX = maxX - minX - checkW;
+    const rangeY = maxY - minY - checkH;
+    
+    let candidateX, candidateY;
+    if (rangeX > 0) {
+      candidateX = minX + checkW / 2 + Math.random() * rangeX;
+    } else {
+      candidateX = minX + (maxX - minX) / 2;
+    }
+    if (rangeY > 0) {
+      candidateY = minY + checkH / 2 + Math.random() * rangeY;
+    } else {
+      candidateY = minY + (maxY - minY) / 2;
+    }
+    
     const randomRotation = Math.random() * 360;
     
     const testObj = {
       polygonOutline,
       transform: {
-        x: candidateX, y: candidateY, width, height, rotation: randomRotation
+        x: candidateX, y: candidateY, width: checkW || 1, height: checkH || 1, rotation: randomRotation
       }
     };
     
     if (isObjectInsideContainer(testObj, container)) {
       return { x: candidateX, y: candidateY, rotation: randomRotation };
     }
+  }
+  
+  if (validRegion.length >= 3) {
+    let sumX = 0, sumY = 0;
+    validRegion.forEach(p => { sumX += p.x; sumY += p.y; });
+    return { x: sumX / validRegion.length, y: sumY / validRegion.length, rotation: 0 };
   }
   
   return { x: container.transform.x, y: container.transform.y, rotation: 0 };

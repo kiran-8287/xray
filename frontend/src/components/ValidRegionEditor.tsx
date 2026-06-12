@@ -983,7 +983,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
         if (shape.visible === false) return;
         
         tempCtx.save();
-        tempCtx.fillStyle = 'rgba(37, 99, 235, 1)';
+        tempCtx.fillStyle = 'rgba(255, 255, 255, 1)';
         tempCtx.globalCompositeOperation = 'source-over';
         tempCtx.beginPath();
         
@@ -1402,7 +1402,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   }, [initialPoints, imageDimensions]);
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-[100] p-4 text-sm select-none" style={{ fontFamily: 'Inter, system-ui, sans-serif', backgroundColor: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(12px)' }}>
+    <div className="fixed inset-0 flex items-center justify-center z-[100] p-4 pt-19 text-sm select-none" style={{ fontFamily: 'Inter, system-ui, sans-serif', backgroundColor: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(12px)' }}>
       <style>{`
         @keyframes slide-down {
           from { opacity:0; transform: translateY(-8px); }
@@ -1597,11 +1597,11 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
       
       {/* Modal Container */}
       <div 
-        className="bg-white rounded-2xl shadow-xl border border-[#DDE4F5] flex flex-col overflow-hidden w-full max-w-[1400px] h-[92vh]"
+        className="bg-white rounded-2xl shadow-xl border border-[#DDE4F5] flex flex-col overflow-hidden w-full max-w-[1100px] h-[85vh]"
         style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-[#DDE4F5] bg-white flex items-center justify-between flex-shrink-0">
+        <div className="px-5 py-3 border-b border-[#DDE4F5] bg-white flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
             <div>
               <h2 className="font-bold text-base text-[#0F172A]">Edit Valid Placement Region</h2>
@@ -1665,7 +1665,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
         )}
         
         {/* Toolbar */}
-        <div className="px-6 py-4 border-b border-[#DDE4F5] bg-white flex flex-wrap gap-4 items-center flex-shrink-0">
+        <div className="px-5 py-3 border-b border-[#DDE4F5] bg-white flex flex-wrap gap-3 items-center flex-shrink-0">
           {/* Tools Grid */}
           <div className="flex items-center gap-1 bg-[#F5F8FF] border border-[#DDE4F5] rounded-xl p-1">
             <button
@@ -1746,8 +1746,8 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
         {/* Main Work Pane Row: Left is Canvas, Right is Layers */}
         <div className="flex flex-1 overflow-hidden">
           {/* Left canvas area */}
-          <div className="flex-1 overflow-hidden bg-[#E8EFFE] relative flex items-center justify-center">
-            <div className="absolute inset-0 flex items-center justify-center p-16 overflow-auto">
+          <div className="flex-[3] overflow-hidden bg-white relative flex items-center justify-center">
+            <div className="absolute inset-0 flex items-center justify-center p-6 overflow-auto">
               <div 
                 className="relative shadow-2xl bg-white border border-[#DDE4F5]"
                 style={{
@@ -1782,8 +1782,8 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
                       canvas.width = img.width;
                       canvas.height = img.height;
                       
-                      const availableWidth = window.innerWidth * 0.65;
-                      const availableHeight = window.innerHeight * 0.65;
+                      const availableWidth = window.innerWidth * 0.55;
+                      const availableHeight = window.innerHeight * 0.55;
                       const scaleX = availableWidth / img.width;
                       const scaleY = availableHeight / img.height;
                       const initialZoom = Math.min(Math.min(scaleX, scaleY), 2.0);
@@ -1833,17 +1833,17 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
                 <ZoomOut size={15} />
               </button>
               <button
-                onClick={() => {
-                  if (imgRef.current) {
-                    const availableWidth = window.innerWidth * 0.65;
-                    const availableHeight = window.innerHeight * 0.65;
-                    const scaleX = availableWidth / imgRef.current.width;
-                    const scaleY = availableHeight / imgRef.current.height;
-                    const initialZoom = Math.min(Math.min(scaleX, scaleY), 2.0);
-                    setZoom(initialZoom);
-                  }
-                  setPanOffset({ x: 0, y: 0 });
-                }}
+                  onClick={() => {
+                    if (imgRef.current) {
+                      const availableWidth = window.innerWidth * 0.55;
+                      const availableHeight = window.innerHeight * 0.55;
+                      const scaleX = availableWidth / imgRef.current.width;
+                      const scaleY = availableHeight / imgRef.current.height;
+                      const initialZoom = Math.min(Math.min(scaleX, scaleY), 2.0);
+                      setZoom(initialZoom);
+                    }
+                    setPanOffset({ x: 0, y: 0 });
+                  }}
                 className="w-7 h-7 bg-transparent border-none rounded-lg flex items-center justify-center text-[#64748B] hover:text-[#0F172A] cursor-pointer hover:bg-[#F5F8FF] transition-colors"
                 title="Reset View"
               >
@@ -1853,7 +1853,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
           </div>
 
           {/* Right Layers List Sidebar */}
-          <aside className="w-72 bg-white border-l border-[#DDE4F5] flex flex-col overflow-hidden flex-shrink-0">
+          <aside className="flex-1 bg-white border-l border-[#DDE4F5] flex flex-col overflow-hidden flex-shrink-0 min-w-[200px] max-w-[280px]">
             <div className="px-4 py-3 border-b border-[#DDE4F5] bg-white flex items-center justify-between">
               <h3 className="font-semibold text-[10px] uppercase tracking-widest text-[#64748B] flex items-center gap-1.5">
                 <Layers size={14} className="text-[#2563EB]" />
@@ -2025,7 +2025,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
         </div>
         
         {/* Status Bar */}
-        <div className="px-6 py-2 border-t border-[#DDE4F5] bg-[#F5F8FF] flex items-center justify-between flex-shrink-0">
+        <div className="px-5 py-2 border-t border-[#DDE4F5] bg-[#F5F8FF] flex items-center justify-between flex-shrink-0">
           <span className="text-xs text-[#64748B] flex items-center gap-1.5">
             <Layers size={14} />
             {shapes.length} Shape{shapes.length !== 1 ? 's' : ''}
@@ -2041,7 +2041,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
         </div>
         
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-[#DDE4F5] bg-white flex justify-between items-center flex-shrink-0">
+        <div className="px-5 py-3 border-t border-[#DDE4F5] bg-white flex justify-between items-center flex-shrink-0">
           <button
             onClick={exportMask}
             className="px-4 py-2 border border-[#DDE4F5] text-[#64748B] hover:bg-[#F5F8FF] rounded-lg text-sm font-semibold transition-all cursor-pointer bg-white flex items-center gap-1.5"

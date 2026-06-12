@@ -31,13 +31,47 @@ export const CATEGORY_MAP: Record<string, CategoryStyle> = {
   lag: { bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200", borderAccent: "border-sky-500", label: "LAG", slug: "lag" },
 };
 
-// Helper to normalize category name
-function normalizeCategoryName(cat: string) {
+export function normalizeCategoryName(cat: string): string {
   const normalized = cat.toLowerCase();
-  if (["misc", "sports", "stationery", "lag"].includes(normalized)) {
+  if (["misc", "sports", "stationery", "lag", "miscellaneous"].includes(normalized)) {
     return "miscellaneous";
   }
+  if (["threat", "threats", "threat-prohibited-objects"].includes(normalized)) {
+    return "threats";
+  }
+  if (["clothing", "clothes"].includes(normalized)) {
+    return "clothes";
+  }
+  if (["food", "food-drink"].includes(normalized)) {
+    return "food";
+  }
+  if (["bag", "bags"].includes(normalized)) {
+    return "bags";
+  }
+  if (["tray", "trays"].includes(normalized)) {
+    return "trays";
+  }
   return normalized;
+}
+
+export function mergeCategorizedItems(categorized: any): any {
+  if (!categorized) return null;
+  const merged: any = {};
+  for (const [catKey, subcats] of Object.entries(categorized)) {
+    const normalized = normalizeCategoryName(catKey);
+    if (!merged[normalized]) {
+      merged[normalized] = {};
+    }
+    for (const [subKey, items] of Object.entries(subcats || {})) {
+      if (!merged[normalized][subKey]) {
+        merged[normalized][subKey] = [];
+      }
+      if (Array.isArray(items)) {
+        merged[normalized][subKey].push(...items);
+      }
+    }
+  }
+  return merged;
 }
 
 export const getCategoryConfig = (category: string): CategoryStyle => {
@@ -103,3 +137,16 @@ export const LIBRARY_NAMES: Record<StencilKind, string> = {
   stationary: "Miscellaneous",
   lag: "Miscellaneous",
 };
+
+export function getStencilKind(category: string): StencilKind {
+  const normalized = category.toLowerCase();
+  if (normalized.includes("bag")) return "bag";
+  if (normalized.includes("tray")) return "tray";
+  if (normalized.includes("threat") || normalized.includes("prohibited")) return "threat";
+  if (normalized.includes("cloth")) return "clothes";
+  if (normalized.includes("electronics")) return "electronics";
+  if (normalized.includes("food") || normalized.includes("drink")) return "food";
+  if (normalized.includes("stationery") || normalized.includes("stationary") || normalized.includes("office")) return "stationary";
+  if (normalized.includes("lag")) return "lag";
+  return "stationary"; // fallback
+}
