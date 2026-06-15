@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, NavLink } from "react-router-dom";
-import { Grid3X3, BookOpen, Upload } from "lucide-react";
+import { Grid3X3, BookOpen, Bookmark, Upload } from "lucide-react";
 import UploadPage from "./pages/UploadPage";
 import CollagePage from "./pages/CollagePage";
 import CustomizationPage from "./pages/CustomizationPage";
@@ -34,7 +34,7 @@ export default function App() {
               Collage
             </NavLink>
             <NavLink to="/saved" className={getNavLinkClass}>
-              <BookOpen size={15} />
+              <Bookmark size={15} />
               Saved
             </NavLink>
           </div>

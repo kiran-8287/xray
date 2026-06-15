@@ -7,6 +7,7 @@ interface ItemRowProps {
   item: Item;
   isSelected: boolean;
   onSelect: () => void;
+  onOpen: () => void;
   onEditRegion: () => void;
   onDelete: () => void;
 }
@@ -15,6 +16,7 @@ export default function ItemRow({
   item,
   isSelected,
   onSelect,
+  onOpen,
   onEditRegion,
   onDelete,
 }: ItemRowProps) {
@@ -22,11 +24,16 @@ export default function ItemRow({
 
   return (
     <tr
-      onClick={onSelect}
+      onClick={onOpen}
       className={`hover:bg-surface/50 cursor-pointer transition-colors ${isSelected ? "bg-accent/4" : ""}`}
     >
       <td className="px-5 py-3">
-        <div
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect();
+          }}
           className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
             isSelected
               ? "bg-accent border-accent text-white"
@@ -34,7 +41,7 @@ export default function ItemRow({
           }`}
         >
           {isSelected && <Check size={13} className="stroke-[3]" />}
-        </div>
+        </button>
       </td>
       <td className="px-5 py-3">
         <div className="w-10 h-10 bg-surface rounded-lg border border-border p-1 flex items-center justify-center overflow-hidden">

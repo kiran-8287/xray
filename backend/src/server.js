@@ -680,6 +680,30 @@ app.delete("/api/sessions/:id", async (req, res) => {
   }
 });
 
+// Update item metadata
+app.put("/api/items/:id", async (req, res) => {
+  try {
+    const { category, subcategory, name } = req.body;
+    if (!category || !subcategory || !name) {
+      return res.status(400).json({ ok: false, error: "Missing required fields" });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query(
+        "UPDATE items SET category = $1, subcategory = $2, name = $3 WHERE id = $4",
+        [category, subcategory, name, req.params.id]
+      );
+      res.json({ ok: true });
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 // Delete an individual item
 app.delete("/api/items/:id", async (req, res) => {
   try {

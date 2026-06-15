@@ -1,12 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React from "react";
 import type { Item } from "../../types/library";
 import type { StencilKind } from "../../stencils/types";
-import type { SceneObject } from "../../types/customization";
-import { getRandomPositionInContainer } from "../../lib/customizationHelpers";
-import { drawXRayComposite } from "../../lib/xrayRenderer";
-
-const PREVIEW_CANVAS_W = 400;
-const PREVIEW_CANVAS_H = 300;
+import { getCategoryConfig } from "../../config/categories";
 
 interface SyntheticPreviewProps {
   bag: Item;
@@ -14,151 +9,46 @@ interface SyntheticPreviewProps {
   others: Item[];
 }
 
-export default function SyntheticPreview({
-  bag,
-  threat,
-  others,
-}: SyntheticPreviewProps) {
-  const objects = useMemo(() => {
-    const newObjects: SceneObject[] = [];
-    let layer = 0;
-    
-    // Create bag
-    const bagWidth = PREVIEW_CANVAS_W * 0.7;
-    const bagHeight = PREVIEW_CANVAS_H * 0.7;
-    
-    let bagOutline = null;
-    if (bag.valid_region_points) {
-      bagOutline = typeof bag.valid_region_points === 'string'
-        ? JSON.parse(bag.valid_region_points)
-        : bag.valid_region_points;
-    }
-    if (!bagOutline && bag.polygon_json) {
-      bagOutline = typeof bag.polygon_json === 'string'
-        ? JSON.parse(bag.polygon_json)
-        : bag.polygon_json;
-    }
-
-    const bagObject: SceneObject = {
-      id: "preview-bag",
-      name: bag.name,
-      library: bag.category as StencilKind,
-      originalPixelValue: bag.pixel_value,
-      currentPixelValue: bag.pixel_value,
-      oldPixelValue: null,
-      stencilId: "suitcase",
-      filepath: bag.filepath,
-      polygonOutline: bagOutline,
-      transform: {
-        x: PREVIEW_CANVAS_W / 2,
-        y: PREVIEW_CANVAS_H / 2,
-        width: bagWidth,
-        height: bagHeight,
-        rotation: 0
-      },
-      layer: layer++
-    };
-    newObjects.push(bagObject);
-    
-    // Add other items
-    others.forEach((item, i) => {
-      const w = item.width ? Math.round(item.width * 0.25) : 50;
-      const h = item.height ? Math.round(item.height * 0.25) : 50;
-      
-      let itemOutline = null;
-      if (item.polygon_json) {
-        itemOutline = typeof item.polygon_json === 'string'
-          ? JSON.parse(item.polygon_json)
-          : item.polygon_json;
-      }
-      
-      const pos = getRandomPositionInContainer(w, h, bagObject, itemOutline);
-      newObjects.push({
-        id: `preview-other-${i}`,
-        name: item.name,
-        library: item.category as StencilKind,
-        originalPixelValue: item.pixel_value,
-        currentPixelValue: item.pixel_value,
-        oldPixelValue: null,
-        stencilId: "tshirt",
-        filepath: item.filepath,
-        polygonOutline: itemOutline,
-        transform: {
-          x: pos.x,
-          y: pos.y,
-          width: w,
-          height: h,
-          rotation: pos.rotation ?? Math.random() * 360
-        },
-        layer: layer++
-      });
-    });
-    
-    // Add threat
-    if (threat) {
-      const w = threat.width ? Math.round(threat.width * 0.25) : 60;
-      const h = threat.height ? Math.round(threat.height * 0.25) : 30;
-      
-      let threatOutline = null;
-      if (threat.polygon_json) {
-        threatOutline = typeof threat.polygon_json === 'string'
-          ? JSON.parse(threat.polygon_json)
-          : threat.polygon_json;
-      }
-      
-      const pos = getRandomPositionInContainer(w, h, bagObject, threatOutline);
-      newObjects.push({
-        id: "preview-threat",
-        name: threat.name,
-        library: threat.category as StencilKind,
-        originalPixelValue: threat.pixel_value,
-        currentPixelValue: threat.pixel_value,
-        oldPixelValue: null,
-        stencilId: "gun",
-        filepath: threat.filepath,
-        polygonOutline: threatOutline,
-        transform: {
-          x: pos.x,
-          y: pos.y,
-          width: w,
-          height: h,
-          rotation: pos.rotation ?? Math.random() * 360
-        },
-        layer: layer++
-      });
-    }
-    
-    return newObjects;
-  }, [bag, threat, others]);
-
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [, forceUpdate] = useState({});
-
-  useEffect(() => {
-    if (canvasRef.current) {
-      drawXRayComposite(canvasRef.current, objects, () => {
-        forceUpdate({});
-      });
-    }
-  }, [objects]);
+export default function SyntheticPreview({ bag, threat, others }: SyntheticPreviewProps) {
+  const bagUrl = `http://localhost:8080/data/library_images/${bag.filepath}`;
+  const threatUrl = threat ? `http://localhost:8080/data/library_images/${threat.filepath}` : null;
+  const otherUrls = others.slice(0, 3).map((item) => ({ id: item.id, url: `http://localhost:8080/data/library_images/${item.filepath}`, name: item.name }));
+  const categoryConfig = getCategoryConfig(bag.category);
 
   return (
-    <div className="aspect-video bg-surface rounded-xl mb-3 relative overflow-hidden border border-border w-full flex items-center justify-center p-3 group-hover:bg-accent/4 transition-colors">
-      <div
-        style={{
-          width: PREVIEW_CANVAS_W,
-          height: PREVIEW_CANVAS_H,
-          transform: "scale(0.65)",
-          transformOrigin: "center",
-          position: "absolute",
-        }}
-      >
-        <canvas
-          ref={canvasRef}
-          width={PREVIEW_CANVAS_W}
-          height={PREVIEW_CANVAS_H}
-          className="w-full h-full pointer-events-none"
+    <div className="bg-panel rounded-2xl border border-border overflow-hidden shadow-card transition-colors duration-200 hover:border-accent/40 hover:bg-accent/5">
+      <div className="bg-surface p-3 flex items-center justify-center h-40 overflow-hidden">
+        <img
+          src={bagUrl}
+          alt={bag.name}
+          className="max-h-full max-w-full object-contain"
         />
+      </div>
+      <div className="px-4 pb-4 pt-2">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <p className="text-sm font-semibold text-ink truncate" title={bag.name}>{bag.name}</p>
+            <p className="text-xs text-muted mt-1">{others.length} other item{others.length !== 1 ? "s" : ""}</p>
+          </div>
+          <span className={`inline-flex px-2 py-1 rounded-full text-[11px] font-semibold ${categoryConfig.bg} ${categoryConfig.text} ${categoryConfig.border}`}>
+            {bag.category}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {threatUrl && (
+            <div className="w-16 h-16 rounded-2xl border border-border overflow-hidden bg-white">
+              <img src={threatUrl} alt={threat?.name} className="w-full h-full object-contain" />
+            </div>
+          )}
+          {otherUrls.map((other) => (
+            <div key={other.id} className="w-16 h-16 rounded-2xl border border-border overflow-hidden bg-white">
+              <img src={other.url} alt={other.name} className="w-full h-full object-contain" />
+            </div>
+          ))}
+          {threatUrl === null && otherUrls.length === 0 && (
+            <div className="text-xs text-muted">No additional items</div>
+          )}
+        </div>
       </div>
     </div>
   );

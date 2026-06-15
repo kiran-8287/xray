@@ -13,7 +13,6 @@ export function getLoadedImage(filepath: string, onLoad: () => void): HTMLImageE
 
   const img = new Image();
   img.crossOrigin = "anonymous";
-  img.src = url;
   img.onload = () => {
     onLoad();
   };
@@ -22,6 +21,11 @@ export function getLoadedImage(filepath: string, onLoad: () => void): HTMLImageE
     imgCache.delete(url);
   };
   imgCache.set(url, img);
+  img.src = url;
+
+  if (img.complete && img.naturalWidth > 0) {
+    return img;
+  }
   return null;
 }
 

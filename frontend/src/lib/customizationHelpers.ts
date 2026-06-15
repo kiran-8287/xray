@@ -4,17 +4,39 @@ import type { SceneObject } from "../types/customization";
 
 const MAX_PIXEL = 65535;
 
+export const normalizePolygonOutline = (outline: any): Point[] | null => {
+  if (!outline) return null;
+  if (Array.isArray(outline)) return outline as Point[];
+  if (typeof outline === "string") {
+    try {
+      const parsed = JSON.parse(outline);
+      if (Array.isArray(parsed)) return parsed as Point[];
+      outline = parsed;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof outline === "object" && outline !== null) {
+    if (Array.isArray(outline.simplifiedPoints)) return outline.simplifiedPoints as Point[];
+    if (Array.isArray(outline.points)) return outline.points as Point[];
+    if (Array.isArray(outline.shapes) && outline.shapes.length > 0) {
+      const firstShape = outline.shapes[0];
+      if (Array.isArray(firstShape.points)) return firstShape.points as Point[];
+    }
+  }
+  return null;
+};
+
 export const getTransformedValidRegion = (bag: SceneObject): Point[] => {
-  // Use the polygon outline stored directly on the object (from DB polygon_json or valid_region)
-  if (bag.polygonOutline && bag.polygonOutline.length >= 3) {
+  const outline = normalizePolygonOutline(bag.polygonOutline);
+  if (outline && outline.length >= 3) {
     return getTransformedPolygon(
       { x: bag.transform.x, y: bag.transform.y },
       { width: bag.transform.width, height: bag.transform.height },
       bag.transform.rotation,
-      bag.polygonOutline.map(p => ({ x: p.x - 0.5, y: p.y - 0.5 }))
+      outline.map((p) => ({ x: p.x - 0.5, y: p.y - 0.5 }))
     );
   }
-  // No valid region defined — fall back to bounding box corners
   return [];
 };
 
@@ -64,7 +86,7 @@ export const getRandomPositionInContainer = (
   width: number,
   height: number,
   container: SceneObject,
-  polygonOutline?: Point[]
+  polygonOutline?: Point[] | any
 ): { x: number; y: number; rotation?: number } => {
   const validRegion = getTransformedValidRegion(container);
   if (validRegion.length < 3) {

@@ -7,6 +7,7 @@ interface ItemCardProps {
   item: Item;
   isSelected: boolean;
   onSelect: () => void;
+  onOpen: () => void;
   onEditRegion: () => void;
   onDelete: () => void;
 }
@@ -15,6 +16,7 @@ export default function ItemCard({
   item,
   isSelected,
   onSelect,
+  onOpen,
   onEditRegion,
   onDelete,
 }: ItemCardProps) {
@@ -22,7 +24,7 @@ export default function ItemCard({
 
   return (
     <div
-      onClick={onSelect}
+      onClick={onOpen}
       className={`relative bg-panel rounded-xl border shadow-card cursor-pointer transition-all duration-150 overflow-hidden group hover:shadow-card-hover hover:border-accent/40 hover:-translate-y-0.5 ${
         isSelected
           ? "border-accent ring-2 ring-accent/20 shadow-btn bg-accent/4"
@@ -31,7 +33,12 @@ export default function ItemCard({
     >
       {/* Checkbox */}
       <div className="absolute top-2.5 left-2.5 z-10">
-        <div
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect();
+          }}
           className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
             isSelected
               ? "bg-accent border-accent text-white scale-105"
@@ -39,7 +46,7 @@ export default function ItemCard({
           }`}
         >
           {isSelected && <Check size={13} className="stroke-[3]" />}
-        </div>
+        </button>
       </div>
 
       {/* Image Area */}

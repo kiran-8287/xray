@@ -2,7 +2,7 @@
 import { useNavigate } from "react-router-dom";
 import { Image, AlertTriangle, CheckCircle2, X, XCircle, Trash2 } from "lucide-react";
 import type { Item, TaxonomyCategory, CategorizedItems } from "../types/library";
-import { getCategoryConfig, mergeCategorizedItems, normalizeCategoryName } from "../config/categories";
+import { LIBRARIES, getCategoryConfig, getLibrarySubcategories, mergeCategorizedItems, normalizeCategoryName } from "../config/categories";
 import SimpleLibrarySidebar from "../components/library/SimpleLibrarySidebar";
 import LibraryToolbar from "../components/library/LibraryToolbar";
 import ItemCard from "../components/library/ItemCard";
@@ -32,6 +32,9 @@ export default function LibraryPage() {
   const [densityPreset, setDensityPreset] = useState<"empty" | "few" | "filled">("filled");
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog>(null);
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [editDraft, setEditDraft] = useState<{ category: string; subcategory: string; name: string } | null>(null);
+  const [isItemSaving, setIsItemSaving] = useState(false);
   const notifCounter = React.useRef(0);
 
   const showNotification = useCallback((type: NotificationType, message: string, duration = 4000) => {
@@ -187,6 +190,70 @@ export default function LibraryPage() {
     }
   };
 
+  const openItemDetail = (item: Item) => {
+    setEditingItem(item);
+    setEditDraft({
+      category: LIBRARIES.some((lib) => lib.slug === item.category) ? item.category : normalizeCategoryName(item.category),
+      subcategory: item.subcategory || "General",
+      name: item.name || item.filename,
+    });
+  };
+
+  const closeItemDetail = () => {
+    setEditingItem(null);
+    setEditDraft(null);
+    setIsItemSaving(false);
+  };
+
+  const selectedItemCategorySlug = editDraft
+    ? LIBRARIES.some((lib) => lib.slug === editDraft.category)
+      ? editDraft.category
+      : normalizeCategoryName(editDraft.category)
+    : editingItem
+    ? LIBRARIES.some((lib) => lib.slug === editingItem.category)
+      ? editingItem.category
+      : normalizeCategoryName(editingItem.category)
+    : activeCategory;
+
+  const selectedCategory = LIBRARIES.find((lib) => lib.slug === selectedItemCategorySlug) || LIBRARIES[0];
+  const subcategoryOptions = getLibrarySubcategories(taxonomy, selectedCategory.slug);
+
+  const handleCategoryChange = (categoryValue: string) => {
+    setEditDraft((prev) => ({
+      ...prev!,
+      category: categoryValue,
+      subcategory: getLibrarySubcategories(taxonomy, categoryValue)[0]?.name || "General",
+    }));
+  };
+
+  const handleSubcategoryChange = (subcategoryValue: string) => {
+    setEditDraft((prev) => ({ ...prev!, subcategory: subcategoryValue }));
+  };
+
+  const handleSaveItemDetails = async () => {
+    if (!editingItem || !editDraft) return;
+    setIsItemSaving(true);
+
+    try {
+      const res = await fetch(`http://localhost:8080/api/items/${editingItem.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editDraft),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to save item details");
+      }
+      await fetchCategorizedItems();
+      showNotification("success", "Item details updated successfully.");
+      closeItemDetail();
+    } catch (err) {
+      console.error("Failed to save item details:", err);
+      showNotification("error", "Failed to save item details. Please try again.");
+      setIsItemSaving(false);
+    }
+  };
+
   const handleGenerateCollage = () => {
     const selectedBags: Item[] = [];
     const selectedThreats: Item[] = [];
@@ -280,6 +347,7 @@ export default function LibraryPage() {
                     item={item}
                     isSelected={selectedItems.has(item.id)}
                     onSelect={() => toggleItemSelection(item.id)}
+                    onOpen={() => openItemDetail(item)}
                     onEditRegion={() => {}}
                     onDelete={() => handleDeleteItem(item.id)}
                   />
@@ -305,6 +373,7 @@ export default function LibraryPage() {
                         item={item}
                         isSelected={selectedItems.has(item.id)}
                         onSelect={() => toggleItemSelection(item.id)}
+                        onOpen={() => openItemDetail(item)}
                         onEditRegion={() => {}}
                         onDelete={() => handleDeleteItem(item.id)}
                       />
@@ -324,6 +393,91 @@ export default function LibraryPage() {
         densityPreset={densityPreset}
         onChangeDensityPreset={setDensityPreset}
       />
+
+      {editingItem && editDraft && (
+        <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4 py-6">
+          <div className="w-full max-w-3xl rounded-3xl bg-panel border border-border shadow-2xl overflow-hidden">
+            <div className="flex flex-col sm:flex-row gap-4 p-5 bg-surface border-b border-border">
+              <div className="w-full sm:w-1/3 rounded-3xl overflow-hidden bg-surface border border-border">
+                <img
+                  src={`http://localhost:8080/data/library_images/${editingItem.filepath}`}
+                  alt={editingItem.filename}
+                  className="w-full h-64 object-contain bg-white"
+                />
+              </div>
+              <div className="flex-1 space-y-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.24em] text-muted mb-1">Selected item</p>
+                  <h2 className="text-xl font-semibold text-ink">{editingItem.filename}</h2>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="space-y-2 text-sm">
+                    <span className="text-muted text-xs">Category</span>
+                    <select
+                      value={selectedCategory.slug}
+                      onChange={(e) => handleCategoryChange(e.target.value)}
+                      className="w-full rounded-2xl border border-border bg-white px-3 py-2 text-sm text-ink"
+                    >
+                      {LIBRARIES.map((lib) => (
+                        <option key={lib.slug} value={lib.slug}>{lib.name}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-2 text-sm">
+                    <span className="text-muted text-xs">Subcategory</span>
+                    <select
+                      value={editDraft.subcategory}
+                      onChange={(e) => handleSubcategoryChange(e.target.value)}
+                      className="w-full rounded-2xl border border-border bg-white px-3 py-2 text-sm text-ink"
+                    >
+                      {subcategoryOptions.length > 0 ? (
+                        subcategoryOptions.map((sub) => (
+                          <option key={sub.slug} value={sub.name}>{sub.name}</option>
+                        ))
+                      ) : (
+                        <option value="General">General</option>
+                      )}
+                    </select>
+                  </label>
+                </div>
+
+                <label className="space-y-2 text-sm">
+                  <span className="text-muted text-xs">Item name / annotation</span>
+                  <textarea
+                    value={editDraft.name}
+                    onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
+                    className="min-h-[120px] w-full rounded-3xl border border-border bg-white p-3 text-sm text-ink resize-none"
+                    placeholder="e.g. Bag containing laptop, phone, knife, and apple"
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between bg-surface border-t border-border">
+              <p className="text-sm text-muted">
+                Category and subcategory selected here will update how this item is grouped in the library.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={closeItemDetail}
+                  className="rounded-2xl border border-border bg-white px-4 py-2 text-sm font-medium text-ink hover:bg-surface"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveItemDetails}
+                  disabled={isItemSaving}
+                  className="rounded-2xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-btn transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isItemSaving ? "Saving..." : "Save details"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] flex flex-col items-center gap-2 pointer-events-none" style={{ maxWidth: 520 }}>
         {notifications.map((n) => (

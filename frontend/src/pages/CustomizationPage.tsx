@@ -90,6 +90,27 @@ export default function CustomizationPage() {
     localStorage.setItem(storageKey, JSON.stringify(objects));
   }, [objects, searchParams]);
 
+  const resolvePolygonOutline = (value: any): any => {
+    if (!value) return null;
+    if (typeof value === "string") {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return null;
+      }
+    }
+    if (Array.isArray(value)) return value;
+    if (typeof value === "object" && value !== null) {
+      if (Array.isArray(value.simplifiedPoints)) return value.simplifiedPoints;
+      if (Array.isArray(value.points)) return value.points;
+      if (Array.isArray(value.shapes) && value.shapes.length > 0) {
+        const firstShape = value.shapes[0];
+        if (Array.isArray(firstShape.points)) return firstShape.points;
+      }
+    }
+    return null;
+  };
+
   // Shared builder extracted so the Randomize button can call it again
   function buildAndSetObjects(catList: any, params: URLSearchParams, setObj: typeof setObjects, setHist: typeof setHistory, setHIdx: typeof setHistoryIndex) {
     const bagId = params.get("bagId");
@@ -122,17 +143,7 @@ export default function CustomizationPage() {
     const bagItem = allBags.find((b) => b.id === bagId) || (hasQueryParams ? null : allBags[0]);
 
     if (bagItem) {
-      let bagOutline = null;
-      if (bagItem.valid_region_points) {
-        bagOutline = typeof bagItem.valid_region_points === "string"
-          ? JSON.parse(bagItem.valid_region_points)
-          : bagItem.valid_region_points;
-      }
-      if (!bagOutline && bagItem.polygon_json) {
-        bagOutline = typeof bagItem.polygon_json === "string"
-          ? JSON.parse(bagItem.polygon_json)
-          : bagItem.polygon_json;
-      }
+      const bagOutline = resolvePolygonOutline(bagItem.valid_region_points) || resolvePolygonOutline(bagItem.polygon_json);
 
       bagObject = {
         id: "initial-bag",
@@ -166,12 +177,7 @@ export default function CustomizationPage() {
     const itemsToPlace = hasQueryParams ? matchedOthers : (matchedOthers.length > 0 ? matchedOthers : allOthers.slice(0, 2));
 
     itemsToPlace.forEach((item, i) => {
-      let itemOutline = null;
-      if (item.polygon_json) {
-        itemOutline = typeof item.polygon_json === "string"
-          ? JSON.parse(item.polygon_json)
-          : item.polygon_json;
-      }
+      const itemOutline = resolvePolygonOutline(item.polygon_json);
       const w = item.width ? Math.round(item.width * 0.5) : 80;
       const h = item.height ? Math.round(item.height * 0.5) : 80;
       let pos;
@@ -203,12 +209,7 @@ export default function CustomizationPage() {
     const threatItem = allThreats.find((t) => t.id === threatId);
 
     if (threatItem) {
-      let threatOutline = null;
-      if (threatItem.polygon_json) {
-        threatOutline = typeof threatItem.polygon_json === "string"
-          ? JSON.parse(threatItem.polygon_json)
-          : threatItem.polygon_json;
-      }
+      const threatOutline = resolvePolygonOutline(threatItem.polygon_json);
       const w = threatItem.width ? Math.round(threatItem.width * 0.5) : 120;
       const h = threatItem.height ? Math.round(threatItem.height * 0.5) : 60;
       let pos;

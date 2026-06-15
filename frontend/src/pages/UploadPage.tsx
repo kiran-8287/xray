@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { TaxonomyCategory } from "../types/library";
-import { CheckCircle2, AlertCircle } from "lucide-react";
-import UploadConfigPanel from "../components/upload/UploadConfigPanel";
+import { CheckCircle2, AlertCircle, Upload as UploadIcon } from "lucide-react";
 import UploadDropZone from "../components/upload/UploadDropZone";
 import UploadFileQueue from "../components/upload/UploadFileQueue";
 import { LIBRARY_PREFIXES } from "../config/categories";
@@ -104,19 +103,40 @@ export default function UploadPage() {
         <h2 className="text-3xl font-bold text-ink tracking-tight">Upload Images</h2>
       </div>
 
-      {/* Two-column layout above the fold */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Config + Dropzone */}
-        <div className="lg:col-span-7 space-y-6">
-          <UploadConfigPanel
-            folderName={folderName}
-            setFolderName={setFolderName}
-          />
-          <UploadDropZone onFilesSelected={handleFilesSelected} />
+      <div className="space-y-6">
+        {/* Dropzone at the top - the file picker */}
+        <UploadDropZone onFilesSelected={handleFilesSelected} />
+
+        {/* Upload Button below dropzone */}
+        <div className="bg-panel rounded-2xl border border-border p-6 shadow-card">
+          <button
+            onClick={handleUpload}
+            disabled={uploading || staged.length === 0}
+            className="w-full flex items-center justify-center gap-3 px-5 py-3.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky transition-all hover:opacity-95 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {uploading ? (
+              "Uploading..."
+            ) : (
+              <>
+                <UploadIcon size={20} />
+                Upload {staged.length > 0 ? `${staged.length} Files` : "Files"}
+              </>
+            )}
+          </button>
+
+          {/* Empty state text when no files are selected */}
+          {staged.length === 0 && (
+            <div className="mt-4 text-center">
+              <p className="text-sm font-medium text-muted">No files selected</p>
+              <p className="text-xs text-muted/70 mt-1">
+                Drag a folder or files into the dropzone to queue them for upload
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* Right Column: File Queue */}
-        <div className="lg:col-span-5 space-y-4">
+        {/* Selected files section - appears below the upload button when files are staged */}
+        {staged.length > 0 && (
           <UploadFileQueue
             files={files}
             staged={staged}
@@ -126,7 +146,7 @@ export default function UploadPage() {
             handleUpload={handleUpload}
             taxonomy={taxonomy}
           />
-        </div>
+        )}
       </div>
 
       {/* Floating Status Toasts */}

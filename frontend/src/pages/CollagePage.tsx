@@ -231,31 +231,6 @@ export default function CollagePage() {
                 className="bg-panel rounded-2xl border border-border p-4 shadow-card hover:shadow-card-hover hover:border-accent/40 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer overflow-hidden group"
               >
                 <SyntheticPreview bag={comb.bag} threat={comb.threat} others={comb.others} />
-
-                <div className="px-1 pb-1 pt-1.5 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-ink leading-tight">
-                      {comb.bag.name}
-                      {comb.threat && ` + ${comb.threat.name}`}
-                    </p>
-                    <p className="text-xs text-muted mt-0.5">
-                      {comb.others.length} other item{comb.others.length !== 1 ? "s" : ""}
-                    </p>
-                  </div>
-
-                  {/* Badges */}
-                  {comb.threat ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-0.5 rounded-full">
-                      <ShieldAlert size={12} />
-                      Threat
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full">
-                      <ShieldCheck size={12} />
-                      Clean
-                    </span>
-                  )}
-                </div>
               </Link>
             );
           })}

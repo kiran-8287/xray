@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import type { TaxonomyCategory } from "../../types/library";
 import ValidRegionEditor from "../ValidRegionEditor";
-import { Trash2, Upload as UploadIcon } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName } from "../../config/categories";
 
 interface UploadFileQueueProps {
@@ -16,15 +16,7 @@ interface UploadFileQueueProps {
 
 export default function UploadFileQueue({ files, staged, setStaged, setFiles, uploading, handleUpload, taxonomy }: UploadFileQueueProps) {
   if (files.length === 0) {
-    return (
-      <div className="bg-panel rounded-2xl border border-border p-12 shadow-card text-center text-muted text-sm flex flex-col items-center justify-center h-[300px]">
-        <UploadIcon className="w-10 h-10 text-muted/30 mb-3" />
-        <p className="font-medium">No files selected</p>
-        <p className="text-xs text-muted/70 mt-1 max-w-[240px] mx-auto">
-          Drag a folder or files into the dropzone to queue them for upload
-        </p>
-      </div>
-    );
+    return null;
   }
 
   // Modal/editing state
@@ -142,18 +134,10 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         })}
       </ul>
 
-      <div className="px-5 py-3.5 bg-nav border-t border-border flex justify-between gap-3 flex-shrink-0">
-        <div>
-          <button onClick={() => { setFiles([]); setStaged([]); }} className="px-4 py-2 rounded-xl border border-border text-sm font-medium text-muted hover:bg-surface"> 
-            <Trash2 size={15} /> Clear All
-          </button>
-        </div>
-        <div>
-          <button onClick={handleUpload} disabled={uploading || staged.length === 0} className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky">
-            {uploading ? "Uploading..." : `Upload ${staged.length} Files`}
-            {!uploading && <UploadIcon size={15} />}
-          </button>
-        </div>
+      <div className="px-5 py-3.5 bg-nav border-t border-border flex-shrink-0">
+        <button onClick={() => { setFiles([]); setStaged([]); }} className="px-4 py-2 rounded-xl border border-border text-sm font-medium text-muted hover:bg-surface flex items-center gap-2">
+          <Trash2 size={15} /> Clear All
+        </button>
       </div>
 
       {/* Edit Modal */}

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import { RotateCw } from "lucide-react";
 import type { SceneObject } from "../../types/customization";
 import { getTransformedValidRegion } from "../../lib/customizationHelpers";
@@ -31,21 +31,22 @@ export default function CanvasArea({
   handleMouseUp,
 }: CanvasAreaProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [, forceUpdate] = useState({});
+  const [loadVersion, setLoadVersion] = useState(0);
   
   const sortedObjects = [...objects].sort((a, b) => a.layer - b.layer);
   const bagObject = objects.find((o) => o.library === "bag");
   const validRegionPolygon = bagObject ? getTransformedValidRegion(bagObject) : [];
 
-  // Redraw canvas whenever objects list changes
+  const handleImageLoaded = useCallback(() => {
+    setLoadVersion((v) => v + 1);
+  }, []);
+
+  // Redraw canvas whenever objects change OR when an image finishes loading
   useEffect(() => {
     if (canvasRef.current) {
-      drawXRayComposite(canvasRef.current, objects, () => {
-        // Rerender when any pending images finish loading
-        forceUpdate({});
-      });
+      drawXRayComposite(canvasRef.current, objects, handleImageLoaded);
     }
-  }, [objects]);
+  }, [objects, loadVersion, handleImageLoaded]);
 
   return (
     <main

@@ -58,12 +58,15 @@ export default function ScannedBagsSidebar({
     (cat) => !(hasBag && (cat === "bags" || cat === "bag"))
   );
 
+  const threatItems = Object.values(mergedList["threats"] || {}).flat() as Item[];
+  const nonThreatItems = Object.values(mergedList["non-threats"] || {}).flat() as Item[];
+
   return (
-    <aside className="w-52 border-r border-border bg-nav flex flex-col overflow-hidden flex-shrink-0 text-sm">
+    <aside className="w-72 border-r border-border bg-nav flex flex-col overflow-hidden flex-shrink-0 text-sm">
       <div className="px-4 py-3 border-b border-border bg-panel flex items-center justify-between">
         <h3 className="font-semibold text-ink flex items-center gap-2 text-xs uppercase tracking-wider">
           <Activity size={14} className="text-accent" />
-          Scanned Bags
+          Library Items
         </h3>
         {activeLibrary && (
           <button
@@ -76,32 +79,80 @@ export default function ScannedBagsSidebar({
         )}
       </div>
       
-      <div className="flex-1 overflow-y-auto p-2">
+      <div className="flex-1 overflow-y-auto p-2 space-y-3">
         {!activeLibrary ? (
-          <div className="space-y-1">
-            {categoryKeys.map((lib) => {
-              const subcategories = mergedList[lib] || {};
-              const count = Object.values(subcategories).flat().length;
-              const config = getCategoryConfig(lib);
-              const displayName = CATEGORY_LABELS[lib] || lib;
-              
-              return (
-                <button
-                  key={lib}
-                  onClick={() => setActiveLibrary(lib)}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-panel text-sm font-medium text-ink cursor-pointer transition-all hover:border-accent/40 hover:bg-accent/4 hover:shadow-card"
-                >
-                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${config.bg} ${config.text}`}>
-                    {displayName.charAt(0)}
-                  </div>
-                  <span className="text-xs font-semibold text-ink flex-1 text-left truncate">
-                    {displayName}
-                  </span>
-                  <span className="text-xs font-mono text-muted">{count}</span>
-                </button>
-              );
-            })}
-          </div>
+          <>
+            {threatItems.length > 0 && (
+              <section className="space-y-2">
+                <div className="flex items-center justify-between px-3">
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Threats</h4>
+                  <span className="text-[11px] text-muted">{threatItems.length}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {threatItems.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => handleAddObject(item)}
+                      className="group h-24 overflow-hidden rounded-2xl border border-border bg-panel p-2 text-left transition hover:border-rose-400 hover:bg-rose-50"
+                    >
+                      <div className="h-12 bg-white rounded-xl overflow-hidden flex items-center justify-center mb-2">
+                        <img src={`http://localhost:8080/data/library_images/${item.filepath}`} alt={item.name} className="max-h-full max-w-full object-contain" />
+                      </div>
+                      <p className="text-[11px] font-semibold text-ink truncate">{item.name}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {nonThreatItems.length > 0 && (
+              <section className="space-y-2">
+                <div className="flex items-center justify-between px-3">
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Non-Threats</h4>
+                  <span className="text-[11px] text-muted">{nonThreatItems.length}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {nonThreatItems.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => handleAddObject(item)}
+                      className="group h-24 overflow-hidden rounded-2xl border border-border bg-panel p-2 text-left transition hover:border-accent/40 hover:bg-accent/4"
+                    >
+                      <div className="h-12 bg-white rounded-xl overflow-hidden flex items-center justify-center mb-2">
+                        <img src={`http://localhost:8080/data/library_images/${item.filepath}`} alt={item.name} className="max-h-full max-w-full object-contain" />
+                      </div>
+                      <p className="text-[11px] font-semibold text-ink truncate">{item.name}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <div className="space-y-1">
+              {categoryKeys.map((lib) => {
+                const subcategories = mergedList[lib] || {};
+                const count = Object.values(subcategories).flat().length;
+                const config = getCategoryConfig(lib);
+                const displayName = CATEGORY_LABELS[lib] || lib;
+                
+                return (
+                  <button
+                    key={lib}
+                    onClick={() => setActiveLibrary(lib)}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-panel text-sm font-medium text-ink cursor-pointer transition-all hover:border-accent/40 hover:bg-accent/4 hover:shadow-card"
+                  >
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${config.bg} ${config.text}`}>
+                      {displayName.charAt(0)}
+                    </div>
+                    <span className="text-xs font-semibold text-ink flex-1 text-left truncate">
+                      {displayName}
+                    </span>
+                    <span className="text-xs font-mono text-muted">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
         ) : (
           <div className="space-y-3 p-1">
             <button
