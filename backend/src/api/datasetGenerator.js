@@ -212,6 +212,28 @@ export async function generateDataset(payload, exportId, outDir) {
       sceneObjects.push(threatObject);
     }
 
+    // Validate that all non-bag objects are inside the bag's valid placement region (if a bag exists)
+    if (bagObject) {
+      let outOfBounds = false;
+      for (const obj of sceneObjects) {
+        if (obj.library === 'bag') continue;
+        try {
+          if (!isObjectInsideContainer(obj, bagObject)) {
+            outOfBounds = true;
+            break;
+          }
+        } catch (err) {
+          // On error, treat as out of bounds to be safe
+          outOfBounds = true;
+          break;
+        }
+      }
+      if (outOfBounds) {
+        // Skip this permutation entirely
+        continue;
+      }
+    }
+
     // Render this combination
     const pngBuffer = await renderSceneAsync(sceneObjects, resolutionW, resolutionH);
     const filename = `${comboId}.png`;

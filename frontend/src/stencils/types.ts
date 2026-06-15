@@ -1,5 +1,11 @@
 import type { Point } from "../types/geometry";
-import type { StencilColors } from "./tokens";
+
+// Stencil color tokens (inlined - tokens.ts removed during cleanup)
+export type StencilColors = {
+  fill?: string;
+  stroke?: string;
+  accent?: string;
+};
 
 export type StencilId =
   | "suitcase"

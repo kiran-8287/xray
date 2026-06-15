@@ -101,6 +101,11 @@ export default function CollagePage() {
 
         // Then, bag + each threat + random others
         threats.forEach((threat) => {
+          // Client-side validation: if threat exists but bag lacks a valid placement region, skip combo
+          const bagHasValidRegion = bag.valid_region_points && (Array.isArray(bag.valid_region_points) ? bag.valid_region_points.length > 0 : true);
+          if (!bagHasValidRegion) {
+            return; // skip this permutation
+          }
           const threatOthers = density === "empty" ? [] : (density === "few" ? others.slice(0, 1) : others);
           combos.push({
             id: `${bag.id}-${threat.id}`,

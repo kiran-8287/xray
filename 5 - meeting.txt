@@ -1,0 +1,42 @@
+The images are in encrypted format. We need to use that dumpread.py to decrypt that. read the .dump.pgm files what they contain fully, then read the dumpread.py file and tell me what it will return.
+
+What they will give u is pixel value btw 0 and 65535. 
+
+there is an easy set of bags with minimum amount of content in them, then medium and heavy with more amounts of content in them respectively. we will use these images now. forget about the designed images we have and all. we will use these data now.
+
+in the upload page:
+1) the user has a drop down where he can select which image is which category. e.g.: the image is a bag, then he should get series of drop downs like Category: Bag, then sub category: trolley bag or backpack something like that. remove the feature to auto categorise them. now we use manual categorisation. 
+2)remove the valid region editor from this library page and move it to upload page while the user selects them(for bags only).
+3) in the selected items tab in the library page, move it down of upload files button, make it horizontally fit.
+4) in that panel of selected items, we need to make some changes. first, list the items like this:
+item name: file name, item size: file size, category: item category , sub category: item sub category, name of item: item name. then edit and delete options.
+5) in this upload page, list the items like in library page, like some collage. in each box there should be an image, then right side of the image these details written vertically.
+6) when the user clicks any box, make a panel option or card make the background other than the card blur. in  the card, there should be an image in the left, then details of that item as we stated before. but here is where the user selects item category, subcategory which should be drop downs. then some text boxes to write item name. this item name describes what type of item it is, like if its a bag: then user can write an annotation which helps him understand what all are there in that bag, like bag with laptop, a phone, a knife, and apple. something like this. this describes the bag or item clearly.
+7)u can use the info we have in the backend folder about categories and subcategories, for drop down.
+8) make three main categories: bags, threats, non-threats. the new thing is simple, just use all non threat object categories under this new category. new change is alo move electronics to threats.
+
+
+in library page:
+1)remove session wise uploads. a common session for all, just append the items as they come under their respective categories, then subcategories(directories).
+2) in search bar user can search for full categories, sub categories too, and select all of them by select all button or few of them manually.
+
+
+valid region editor changes:
+1) lets say when user uploads an image of bag, then he uses drop down options to select it as bag, then backpack or suitcase or something. now, if in database there is already a valid region saved for this subcategory in bags, fetch that valid region and use that here, if there use it and also allow user to edit that valid region too. or else say the user to draw a valid region whenever he choses bag as category in dropdown.
+2)also add an option to the user in the drop down if a category or sub category is not present, he can select new category in the drop down, and add it there, then u need to add this category in database. similarly for sub categories.
+3) database changes are required. like we need to maintain separate tables for categories and sub categories, which save the valid region points for bags. we fetch the valid regions if there is already a valid region or else add it or update it if the user changes or adds it.
+
+
+collage page:
+1)an invalidly placed object should not be a part of collage page, like if random placement leads to out of bounds, that image should not there in the collage page.
+
+
+customization page:
+1)remove resize option completely.
+2)we need to save the orientation and true pixel values of the added items or objects in the bag during customization.
+
+
+
+new saved page:
+1) when user saves all the images generated in the collage page, these should move to saved page.
+2) again he can search these saved in images a search bar and can also readjust them by clicking edit and then we redirect to customization page and when saved in customized page should be saved to saved page also.

@@ -1,4 +1,5 @@
 import { StencilKind } from "../stencils/types";
+import type { TaxonomyCategory, TaxonomySubcategory } from "../types/library";
 
 export interface CategoryStyle {
   bg: string;
@@ -20,6 +21,7 @@ export const CATEGORY_MAP: Record<string, CategoryStyle> = {
   "threat-prohibited-objects": { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threat-prohibited-objects" },
   threats: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threats" },
   threat: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threat" },
+  "non-threats": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", borderAccent: "border-gray-500", label: "Non-Threats", slug: "non-threats" },
   bag: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", borderAccent: "border-blue-500", label: "Bags", slug: "bag" },
   tray: { bg: "bg-slate-50", text: "text-slate-700", border: "border-slate-200", borderAccent: "border-slate-500", label: "Trays", slug: "tray" },
   "toiletries-medical": { bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200", borderAccent: "border-sky-500", label: "Toiletries & Medical", slug: "toiletries-medical" },
@@ -32,26 +34,15 @@ export const CATEGORY_MAP: Record<string, CategoryStyle> = {
 };
 
 export function normalizeCategoryName(cat: string): string {
-  const normalized = cat.toLowerCase();
-  if (["misc", "sports", "stationery", "lag", "miscellaneous"].includes(normalized)) {
-    return "miscellaneous";
+  const normalized = (cat || "").toLowerCase().trim();
+  // Preserve explicit non-threat labels before threat matching
+  if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) {
+    return "non-threats";
   }
-  if (["threat", "threats", "threat-prohibited-objects"].includes(normalized)) {
-    return "threats";
-  }
-  if (["clothing", "clothes"].includes(normalized)) {
-    return "clothes";
-  }
-  if (["food", "food-drink"].includes(normalized)) {
-    return "food";
-  }
-  if (["bag", "bags"].includes(normalized)) {
-    return "bags";
-  }
-  if (["tray", "trays"].includes(normalized)) {
-    return "trays";
-  }
-  return normalized;
+  if (normalized.includes("bag")) return "bags";
+  if (normalized.includes("threat") || normalized.includes("electronic") || normalized === "electronics") return "threats";
+  // Everything else is non-threats (trays, clothes, food, misc, sports, stationery, etc.)
+  return "non-threats";
 }
 
 export function mergeCategorizedItems(categorized: any): any {
@@ -72,6 +63,18 @@ export function mergeCategorizedItems(categorized: any): any {
     }
   }
   return merged;
+}
+
+export function getLibrarySubcategories(taxonomy: TaxonomyCategory[] = [], librarySlug: string): TaxonomySubcategory[] {
+  const seen: Record<string, boolean> = {};
+  return taxonomy
+    .filter((category) => normalizeCategoryName(category.slug || category.name) === librarySlug)
+    .flatMap((category) => category.subcategories || [])
+    .filter((subcategory) => {
+      if (seen[subcategory.slug]) return false;
+      seen[subcategory.slug] = true;
+      return true;
+    });
 }
 
 export const getCategoryConfig = (category: string): CategoryStyle => {
@@ -97,11 +100,7 @@ export const LIBRARY_PREFIXES: Record<string, string> = {
 export const LIBRARIES = [
   { slug: "bags", name: "Bags", colorCls: "bg-blue-50 text-blue-700 border-blue-200" },
   { slug: "threats", name: "Threats", colorCls: "bg-rose-50 text-rose-700 border-rose-200" },
-  { slug: "trays", name: "Trays", colorCls: "bg-slate-50 text-slate-700 border-slate-200" },
-  { slug: "clothes", name: "Clothes", colorCls: "bg-green-50 text-green-700 border-green-200" },
-  { slug: "electronics", name: "Electronics", colorCls: "bg-violet-50 text-violet-700 border-violet-200" },
-  { slug: "food", name: "Food", colorCls: "bg-amber-50 text-amber-700 border-amber-200" },
-  { slug: "miscellaneous", name: "Miscellaneous", colorCls: "bg-gray-50 text-gray-700 border-gray-200" },
+  { slug: "non-threats", name: "Non-Threats", colorCls: "bg-gray-50 text-gray-700 border-gray-200" },
 ];
 
 export const getCategoryColorCls = (slug: string) => {

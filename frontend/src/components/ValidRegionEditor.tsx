@@ -421,24 +421,8 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
       y: p.y / canvas.height
     }));
     
-    try {
-      if (itemId) {
-        await fetch(`http://localhost:8080/api/items/${itemId}/valid-region`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            shapes: normalizedShapes, 
-            validRegionPoints: simplifiedPoints 
-          })
-        });
-      }
-      showToast('success', 'Valid region saved');
-    } catch (e) {
-      console.error('Error saving:', e);
-      showToast('warning', 'Failed to save');
-    }
-    
     onSave(simplifiedPoints, normalizedShapes);
+    showToast('success', 'Valid region saved');
   };
 
   // -------------------------------

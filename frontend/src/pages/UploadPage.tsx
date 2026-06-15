@@ -1,17 +1,37 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import type { TaxonomyCategory } from "../types/library";
 import { CheckCircle2, AlertCircle } from "lucide-react";
 import UploadConfigPanel from "../components/upload/UploadConfigPanel";
 import UploadDropZone from "../components/upload/UploadDropZone";
 import UploadFileQueue from "../components/upload/UploadFileQueue";
+import { LIBRARY_PREFIXES } from "../config/categories";
+
+export interface StagedItem {
+  file: File;
+  category: string;
+  subcategory: string;
+  name: string;
+  valid_region_points?: any | null;
+}
 
 export default function UploadPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "success" | "error">("idle");
   const [folderName, setFolderName] = useState("My Upload");
+  const [staged, setStaged] = useState<StagedItem[]>([]);
+  const [taxonomy, setTaxonomy] = useState<TaxonomyCategory[]>([]);
 
   const handleFilesSelected = (newFiles: File[]) => {
     setFiles((prev) => [...prev, ...newFiles]);
+    const newStaged = newFiles.map((f) => ({
+      file: f,
+      category: "bags",
+      subcategory: "General",
+      name: f.name,
+      valid_region_points: null,
+    } as StagedItem));
+    setStaged((prev) => [...prev, ...newStaged]);
   };
 
   const handleUpload = async () => {
@@ -20,9 +40,19 @@ export default function UploadPage() {
     try {
       const formData = new FormData();
       formData.append("folderName", folderName);
-      files.forEach((file) => {
-        formData.append("images", file);
+      // Append files and metadata
+      staged.forEach((s) => {
+        formData.append("images", s.file);
       });
+      // Build metadata array describing each file
+      const metadata = staged.map((s) => ({
+        originalname: s.file.name,
+        category: s.category,
+        subcategory: s.subcategory,
+        name: s.name,
+        valid_region_points: s.valid_region_points || null,
+      }));
+      formData.append("metadata", JSON.stringify(metadata));
 
       const res = await fetch("http://localhost:8080/api/upload", {
         method: "POST",
@@ -35,6 +65,7 @@ export default function UploadPage() {
         // Clear files on success after small delay
         setTimeout(() => {
           setFiles([]);
+          setStaged([]);
         }, 1000);
       } else {
         setUploadStatus("error");
@@ -46,10 +77,25 @@ export default function UploadPage() {
       setUploading(false);
       // Dismiss toast after 3500ms
       setTimeout(() => {
-        setUploadStatus("idle");
+          setUploadStatus("idle");
       }, 3500);
     }
   };
+
+  useEffect(() => {
+    const fetchTaxonomy = async () => {
+      try {
+        const res = await fetch("http://localhost:8080/api/taxonomy");
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.taxonomy)) {
+          setTaxonomy(data.taxonomy);
+        }
+      } catch (err) {
+        console.error("Failed to fetch taxonomy:", err);
+      }
+    };
+    fetchTaxonomy();
+  }, []);
 
   return (
     <div className="max-w-5xl mx-auto py-10 px-6 animate-fade-in">
@@ -73,9 +119,12 @@ export default function UploadPage() {
         <div className="lg:col-span-5 space-y-4">
           <UploadFileQueue
             files={files}
+            staged={staged}
+            setStaged={setStaged}
             setFiles={setFiles}
             uploading={uploading}
             handleUpload={handleUpload}
+            taxonomy={taxonomy}
           />
         </div>
       </div>

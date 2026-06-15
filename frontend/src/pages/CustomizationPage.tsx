@@ -447,40 +447,53 @@ export default function CustomizationPage() {
   };
 
   const handleExport = async () => {
-    setExportState({ status: "saving", message: "Saving export..." });
+    setExportState({ status: "saving", message: "Saving layout..." });
     try {
       const bagObject = objects.find(o => o.library === "bag");
       const validRegionPolygon = bagObject ? getTransformedValidRegion(bagObject) : [];
-      
-      const objectsWithSegmentation = objects.map(obj => {
+
+      const objectsWithSegmentation = objects.map((obj) => {
         const corners = getRectCorners(
           { x: obj.transform.x, y: obj.transform.y },
           { width: obj.transform.width, height: obj.transform.height },
           obj.transform.rotation
         );
         return {
-          ...obj,
+          id: obj.id,
+          name: obj.name,
+          library: obj.library,
+          filepath: obj.filepath,
+          transform: { ...obj.transform },
+          originalPixelValue: obj.originalPixelValue,
+          currentPixelValue: obj.currentPixelValue,
+          oldPixelValue: obj.oldPixelValue,
+          polygonOutline: obj.polygonOutline,
           segmentation: corners,
         };
       });
 
-      const response = await fetch("http://localhost:8080/api/export", {
+      const layout_json = {
+        objects: objectsWithSegmentation,
+        validRegionPolygon,
+        createdAt: new Date().toISOString(),
+      };
+
+      const response = await fetch("http://localhost:8080/api/saved-layouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prototype: "synthetic-xray-customization",
-          objects: objectsWithSegmentation,
-          validRegionPolygon,
-          annotationSchema: "per-object-segmentation",
+          name: `Workspace ${new Date().toISOString()}`,
+          filepath: null,
+          layout_json,
         }),
       });
 
       if (!response.ok) {
-        throw new Error("Export failed");
+        throw new Error("Save failed");
       }
 
       const data = await response.json();
-      setExportState({ status: "success", message: `Saved successfully: ${data.exportId}` });
+      setExportState({ status: "success", message: `Layout saved: ${data.layout.id}` });
       setLastSavedTime(Date.now());
       
       setTimeout(() => {
@@ -488,7 +501,7 @@ export default function CustomizationPage() {
       }, 3000);
     } catch (error) {
       console.error("Export error:", error);
-      setExportState({ status: "error", message: "Failed to save export. Make sure backend is running." });
+      setExportState({ status: "error", message: "Failed to save layout. Make sure backend is running." });
       
       setTimeout(() => {
         setExportState({ status: "idle", message: "" });
@@ -739,116 +752,7 @@ export default function CustomizationPage() {
                         )}
                       </div>
 
-                      {/* Width */}
-                      <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
-                        <span className="text-[11px] text-muted uppercase tracking-wider">Width</span>
-                        {selectedObj.library !== "bag" ? (
-                          <input
-                            type="number"
-                            value={Math.round(selectedObj.transform.width)}
-                            onChange={(e) => {
-                              const val = Math.max(10, Math.min(800, parseInt(e.target.value) || 10));
-                              const newObjects = objects.map((o) =>
-                                o.id === selectedObjectId
-                                  ? { ...o, transform: { ...o.transform, width: val } }
-                                  : o
-                              );
-                              setObjects(newObjects);
-                            }}
-                            onBlur={() => pushHistory(objects)}
-                            className="w-20 bg-surface border border-border rounded px-1.5 py-0.5 text-right font-mono text-xs text-ink focus:outline-none focus:border-accent"
-                          />
-                        ) : (
-                          <span className="font-mono text-muted text-xs">{Math.round(selectedObj.transform.width)} px</span>
-                        )}
-                      </div>
-
-                      {/* Height */}
-                      <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
-                        <span className="text-[11px] text-muted uppercase tracking-wider">Height</span>
-                        {selectedObj.library !== "bag" ? (
-                          <input
-                            type="number"
-                            value={Math.round(selectedObj.transform.height)}
-                            onChange={(e) => {
-                              const val = Math.max(10, Math.min(800, parseInt(e.target.value) || 10));
-                              const newObjects = objects.map((o) =>
-                                o.id === selectedObjectId
-                                  ? { ...o, transform: { ...o.transform, height: val } }
-                                  : o
-                              );
-                              setObjects(newObjects);
-                            }}
-                            onBlur={() => pushHistory(objects)}
-                            className="w-20 bg-surface border border-border rounded px-1.5 py-0.5 text-right font-mono text-xs text-ink focus:outline-none focus:border-accent"
-                          />
-                        ) : (
-                          <span className="font-mono text-muted text-xs">{Math.round(selectedObj.transform.height)} px</span>
-                        )}
-                      </div>
-
-                      {/* Rotation */}
-                      <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
-                        <span className="text-[11px] text-muted uppercase tracking-wider">Rotation</span>
-                        {selectedObj.library !== "bag" ? (
-                          <input
-                            type="number"
-                            value={selectedObj.transform.rotation}
-                            onChange={(e) => {
-                              const val = (parseInt(e.target.value) || 0) % 360;
-                              const newObjects = objects.map((o) =>
-                                o.id === selectedObjectId
-                                  ? { ...o, transform: { ...o.transform, rotation: val } }
-                                  : o
-                              );
-                              setObjects(newObjects);
-                            }}
-                            onBlur={() => pushHistory(objects)}
-                            className="w-20 bg-surface border border-border rounded px-1.5 py-0.5 text-right font-mono text-xs text-ink focus:outline-none focus:border-accent"
-                          />
-                        ) : (
-                          <span className="font-mono text-muted text-xs">{selectedObj.transform.rotation}°</span>
-                        )}
-                      </div>
-
-                      {/* Scale Slider */}
-                      {selectedObj.library !== "bag" && (
-                        <div className="bg-panel rounded-xl border border-border px-3 py-2 space-y-1.5">
-                          <div className="flex justify-between items-center">
-                            <span className="text-[11px] text-muted uppercase tracking-wider">Proportional Scale</span>
-                            <span className="font-mono text-accent text-xs font-semibold">
-                              {Math.round((selectedObj.transform.width / (selectedObj.initialWidth || 80)) * 100)}%
-                            </span>
-                          </div>
-                          <input
-                            type="range"
-                            min="10"
-                            max="300"
-                            value={Math.round((selectedObj.transform.width / (selectedObj.initialWidth || 80)) * 100)}
-                            onChange={(e) => {
-                              const scalePercent = parseInt(e.target.value) || 100;
-                              const scale = scalePercent / 100;
-                              const initialW = selectedObj.initialWidth || 80;
-                              const initialH = selectedObj.initialHeight || 80;
-                              const newObjects = objects.map((o) =>
-                                o.id === selectedObjectId
-                                  ? {
-                                      ...o,
-                                      transform: {
-                                        ...o.transform,
-                                        width: Math.round(initialW * scale),
-                                        height: Math.round(initialH * scale),
-                                      },
-                                    }
-                                  : o
-                              );
-                              setObjects(newObjects);
-                            }}
-                            onMouseUp={() => pushHistory(objects)}
-                            className="w-full h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent"
-                          />
-                        </div>
-                      )}
+                      {/* Width/Height and proportional scaling removed. Sizes are fixed by asset dimensions. */}
                     </div>
                   </div>
 

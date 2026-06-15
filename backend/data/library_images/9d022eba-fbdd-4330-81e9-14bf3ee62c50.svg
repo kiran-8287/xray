@@ -1,6 +1,0 @@
-
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <rect x="20" y="45" width="65" height="20" rx="4" fill="rgb(171, 171, 171)" fill-opacity="1" stroke="rgb(171, 171, 171)" stroke-width="2" />
-  <path d="M25,45 L40,25 L80,25 L85,45" fill="rgb(171, 171, 171)" fill-opacity="1" stroke="rgb(171, 171, 171)" stroke-width="2" />
-  <rect x="70" y="50" width="10" height="10" rx="2" fill="none" stroke="rgb(171, 171, 171)" stroke-width="1.5" />
-</svg>
