@@ -7,6 +7,8 @@ import { drawXRayComposite } from "../../lib/xrayRenderer";
 const CANVAS_W = 800;
 const CANVAS_H = 600;
 
+const IMAGE_BASE_URL = "http://localhost:8080/data/library_images/";
+
 interface CanvasAreaProps {
   canvasDivRef: React.RefObject<HTMLDivElement>;
   zoom: number;
@@ -32,7 +34,7 @@ export default function CanvasArea({
 }: CanvasAreaProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loadVersion, setLoadVersion] = useState(0);
-  
+
   const sortedObjects = [...objects].sort((a, b) => a.layer - b.layer);
   const bagObject = objects.find((o) => o.library === "bag");
   const validRegionPolygon = bagObject ? getTransformedValidRegion(bagObject) : [];
@@ -118,49 +120,57 @@ export default function CanvasArea({
           </svg>
         )}
 
-        {/* Scene Objects (Interactive layers) */}
+        {/* Scene Objects (Interactive layers + visible image previews) */}
         {sortedObjects.map((obj) => {
           const isSelected = selectedObjectId === obj.id;
           const transform = obj.transform;
           const isBag = obj.library === "bag";
           const cursorClass = isBag ? "cursor-default" : "cursor-move";
-          const borderClass = isBag 
-            ? "border border-transparent" 
-            : "border border-dashed border-transparent hover:border-accent/30";
-
-          const zIndexClass = isBag ? "z-10" : (isSelected ? "z-30 border-accent/40" : "z-20");
+          const zIndexClass = isBag ? "z-10" : (isSelected ? "z-30" : "z-20");
+          const imageUrl = obj.filepath ? `${IMAGE_BASE_URL}${obj.filepath}` : null;
 
           return (
             <div
               key={obj.id}
-              className={`absolute select-none group rounded-lg ${cursorClass} ${borderClass} ${zIndexClass}`}
+              className={`absolute select-none group rounded-lg overflow-hidden ${cursorClass} ${zIndexClass}`}
               style={{
                 left: transform.x - transform.width / 2,
                 top: transform.y - transform.height / 2,
                 width: transform.width,
                 height: transform.height,
                 transform: `rotate(${transform.rotation}deg)`,
-                background: "rgba(0,0,0,0.001)", // Make it clickable
               }}
               onMouseDown={(e) => handleMouseDown(e, obj)}
             >
-              {/* Invisible interactive content */}
-              <div className="w-full h-full relative">
-                {/* Selection border indicator */}
-                {isSelected && (
-                  <div className="absolute inset-0 border-2 border-accent border-dashed pointer-events-none rounded-lg animate-pulse" />
-                )}
+              {/* Visible image preview of the object */}
+              {imageUrl && (
+                <img
+                  src={imageUrl}
+                  alt={obj.name}
+                  className="w-full h-full object-cover pointer-events-none"
+                  draggable={false}
+                  style={{ opacity: 0.4, mixBlendMode: "multiply" }}
+                  onLoad={() => {
+                    // Force re-render of the canvas when an image loads
+                    handleImageLoaded();
+                  }}
+                />
+              )}
 
-                {/* Rotation Handle */}
-                {isSelected && obj.library !== "bag" && (
-                  <div
-                    className="absolute -top-9 left-1/2 -translate-x-1/2 w-7 h-7 bg-panel border border-border shadow-card hover:border-accent hover:text-accent rounded-full flex items-center justify-center cursor-alias z-30 transition-colors"
-                    onMouseDown={(e) => handleRotationMouseDown(e, obj)}
-                  >
-                    <RotateCw size={12} />
-                  </div>
-                )}
-              </div>
+              {/* Selection border indicator */}
+              {isSelected && (
+                <div className="absolute inset-0 border-2 border-accent border-dashed pointer-events-none rounded-lg animate-pulse" />
+              )}
+
+              {/* Rotation Handle */}
+              {isSelected && obj.library !== "bag" && (
+                <div
+                  className="absolute -top-9 left-1/2 -translate-x-1/2 w-7 h-7 bg-panel border border-border shadow-card hover:border-accent hover:text-accent rounded-full flex items-center justify-center cursor-alias z-40 transition-colors"
+                  onMouseDown={(e) => handleRotationMouseDown(e, obj)}
+                >
+                  <RotateCw size={12} />
+                </div>
+              )}
             </div>
           );
         })}
