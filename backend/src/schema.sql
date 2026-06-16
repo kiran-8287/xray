@@ -1,12 +1,5 @@
   CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-  CREATE TABLE IF NOT EXISTS upload_sessions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    folder_name VARCHAR(255) NOT NULL,
-    uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    item_count INTEGER DEFAULT 0
-  );
-
   CREATE TABLE IF NOT EXISTS items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     filename VARCHAR(255) NOT NULL,
@@ -14,7 +7,6 @@
     category VARCHAR(50) NOT NULL,
     subcategory VARCHAR(255),
     name VARCHAR(255) NOT NULL,
-    upload_session_id UUID REFERENCES upload_sessions(id) ON DELETE CASCADE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     pixel_value INTEGER NOT NULL DEFAULT 32767,
     width INTEGER DEFAULT 512,
@@ -34,20 +26,7 @@
     severity VARCHAR(50)
   );
 
-  CREATE TABLE IF NOT EXISTS electronics (
-    item_id UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
-    device_type VARCHAR(100)
-  );
-
-  CREATE TABLE IF NOT EXISTS clothes (
-    item_id UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
-    garment_type VARCHAR(100)
-  );
-
-  CREATE TABLE IF NOT EXISTS trays (
-    item_id UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
-    tray_type VARCHAR(100)
-  );
+  -- legacy tables `electronics`, `clothes`, and `trays` removed in favor of `non_threat_items`
 
   -- New tables for categorized taxonomy and saved layouts
   CREATE TABLE IF NOT EXISTS categories (
@@ -62,6 +41,29 @@
     name VARCHAR(255) NOT NULL,
     valid_region_points JSONB,
     PRIMARY KEY (category_slug, slug)
+  );
+
+  -- Dedicated table for canonical bag-subcategory valid regions (preferred over embedding in subcategories)
+  CREATE TABLE IF NOT EXISTS bag_subcategory_valid_regions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    category_slug VARCHAR(100) NOT NULL REFERENCES categories(slug) ON DELETE CASCADE,
+    subcategory_slug VARCHAR(100) NOT NULL,
+    valid_region_points JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (category_slug, subcategory_slug)
+  );
+
+  -- Generic threat/non-threat mapping tables for clearer classification
+  CREATE TABLE IF NOT EXISTS threat_items (
+    item_id UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    subcategory_slug VARCHAR(100),
+    threat_type VARCHAR(100),
+    severity VARCHAR(50)
+  );
+
+  CREATE TABLE IF NOT EXISTS non_threat_items (
+    item_id UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    subcategory_slug VARCHAR(100)
   );
 
   CREATE TABLE IF NOT EXISTS saved_layouts (

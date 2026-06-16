@@ -90,27 +90,6 @@ export default function CustomizationPage() {
     localStorage.setItem(storageKey, JSON.stringify(objects));
   }, [objects, searchParams]);
 
-  const resolvePolygonOutline = (value: any): any => {
-    if (!value) return null;
-    if (typeof value === "string") {
-      try {
-        return JSON.parse(value);
-      } catch {
-        return null;
-      }
-    }
-    if (Array.isArray(value)) return value;
-    if (typeof value === "object" && value !== null) {
-      if (Array.isArray(value.simplifiedPoints)) return value.simplifiedPoints;
-      if (Array.isArray(value.points)) return value.points;
-      if (Array.isArray(value.shapes) && value.shapes.length > 0) {
-        const firstShape = value.shapes[0];
-        if (Array.isArray(firstShape.points)) return firstShape.points;
-      }
-    }
-    return null;
-  };
-
   // Shared builder extracted so the Randomize button can call it again
   function buildAndSetObjects(catList: any, params: URLSearchParams, setObj: typeof setObjects, setHist: typeof setHistory, setHIdx: typeof setHistoryIndex) {
     const bagId = params.get("bagId");
@@ -143,7 +122,23 @@ export default function CustomizationPage() {
     const bagItem = allBags.find((b) => b.id === bagId) || (hasQueryParams ? null : allBags[0]);
 
     if (bagItem) {
-      const bagOutline = resolvePolygonOutline(bagItem.valid_region_points) || resolvePolygonOutline(bagItem.polygon_json);
+      let bagOutline = null;
+      if (bagItem.valid_region_points) {
+        bagOutline = typeof bagItem.valid_region_points === "string"
+          ? JSON.parse(bagItem.valid_region_points)
+          : bagItem.valid_region_points;
+      }
+      if (!bagOutline && bagItem.polygon_json) {
+        bagOutline = typeof bagItem.polygon_json === "string"
+          ? JSON.parse(bagItem.polygon_json)
+          : bagItem.polygon_json;
+      }
+
+      // Original bag images are square (512x512), so use a square container
+      // to keep valid region mapping correct (same scale for X and Y).
+      // Use a generous size: ~85% of the smallest canvas dimension = 510px
+      // This ensures the valid region polygon maps correctly and the bag is large enough.
+      const bagDisplaySize = Math.min(CANVAS_W, CANVAS_H) * 0.85;
 
       bagObject = {
         id: "initial-bag",
@@ -158,12 +153,12 @@ export default function CustomizationPage() {
         transform: {
           x: CANVAS_W / 2,
           y: CANVAS_H / 2,
-          width: CANVAS_W * 0.7,
-          height: CANVAS_H * 0.7,
+          width: bagDisplaySize,
+          height: bagDisplaySize,
           rotation: 0,
         },
-        initialWidth: CANVAS_W * 0.7,
-        initialHeight: CANVAS_H * 0.7,
+        initialWidth: bagDisplaySize,
+        initialHeight: bagDisplaySize,
         layer: layer++,
       };
       newObjects.push(bagObject);
@@ -177,9 +172,14 @@ export default function CustomizationPage() {
     const itemsToPlace = hasQueryParams ? matchedOthers : (matchedOthers.length > 0 ? matchedOthers : allOthers.slice(0, 2));
 
     itemsToPlace.forEach((item, i) => {
-      const itemOutline = resolvePolygonOutline(item.polygon_json);
-      const w = item.width ? Math.round(item.width * 0.5) : 80;
-      const h = item.height ? Math.round(item.height * 0.5) : 80;
+      let itemOutline = null;
+      if (item.polygon_json) {
+        itemOutline = typeof item.polygon_json === "string"
+          ? JSON.parse(item.polygon_json)
+          : item.polygon_json;
+      }
+      const w = item.width ? Math.round(item.width) : 80;
+      const h = item.height ? Math.round(item.height) : 80;
       let pos;
       if (bagObject) {
         pos = getRandomPositionInContainer(w, h, bagObject, itemOutline);
@@ -209,9 +209,14 @@ export default function CustomizationPage() {
     const threatItem = allThreats.find((t) => t.id === threatId);
 
     if (threatItem) {
-      const threatOutline = resolvePolygonOutline(threatItem.polygon_json);
-      const w = threatItem.width ? Math.round(threatItem.width * 0.5) : 120;
-      const h = threatItem.height ? Math.round(threatItem.height * 0.5) : 60;
+      let threatOutline = null;
+      if (threatItem.polygon_json) {
+        threatOutline = typeof threatItem.polygon_json === "string"
+          ? JSON.parse(threatItem.polygon_json)
+          : threatItem.polygon_json;
+      }
+      const w = threatItem.width ? Math.round(threatItem.width) : 120;
+      const h = threatItem.height ? Math.round(threatItem.height) : 60;
       let pos;
       if (bagObject) {
         pos = getRandomPositionInContainer(w, h, bagObject, threatOutline);
@@ -271,8 +276,8 @@ export default function CustomizationPage() {
   };
 
   const handleAddObject = (item: Item) => {
-    let width = item.width ? Math.round(item.width * 0.5) : 100;
-    let height = item.height ? Math.round(item.height * 0.5) : 100;
+    let width = item.width ? Math.round(item.width) : 100;
+    let height = item.height ? Math.round(item.height) : 100;
 
     let itemOutline = null;
     if (item.polygon_json) {
@@ -515,16 +520,6 @@ export default function CustomizationPage() {
     obj => bagObject && obj.library === "threat" && !isObjectInsideContainer(obj, bagObject)
   );
 
-  // Threat validation states
-  const hasThreat = objects.some(o => o.library === "threat");
-  const threatObj = objects.find(o => o.library === "threat");
-  const isThreatInside = bagObject && threatObj ? isObjectInsideContainer(threatObj, bagObject) : false;
-
-  let scanStatus: "clean" | "threat_valid" | "threat_invalid" = "clean";
-  if (hasThreat) {
-    scanStatus = isThreatInside ? "threat_valid" : "threat_invalid";
-  }
-
   return (
     <div className="flex flex-col h-[calc(100vh-56px)] bg-surface overflow-hidden animate-fade-in text-sm">
       <WorkspaceToolbar
@@ -545,48 +540,6 @@ export default function CustomizationPage() {
         handleExport={handleExport}
         handleRandomize={handleRandomize}
       />
-
-      {/* Scan Security Status Banner */}
-      <div className={`px-4 py-2 border-b flex items-center justify-between text-xs font-semibold select-none z-10 flex-shrink-0 ${
-        scanStatus === "clean" 
-          ? "bg-emerald-50 border-emerald-100 text-emerald-800 animate-fade-in"
-          : scanStatus === "threat_valid"
-          ? "bg-amber-50 border-amber-100 text-amber-800 animate-fade-in"
-          : "bg-rose-50 border-rose-200 text-rose-800 animate-pulse"
-      }`}>
-        <div className="flex items-center gap-2">
-          {scanStatus === "clean" && (
-            <>
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>SCAN RESULT: CLEAN (No Threat Objects Detected)</span>
-            </>
-          )}
-          {scanStatus === "threat_valid" && (
-            <>
-              <span className="w-2 h-2 rounded-full bg-amber-500" />
-              <span>SCAN WARNING: THREAT PRESENT & SECURED (Threat is inside valid container region)</span>
-            </>
-          )}
-          {scanStatus === "threat_invalid" && (
-            <>
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-              <span>SECURITY ALERT: THREAT OUT OF BOUNDS (Threat is outside valid container region)</span>
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase">
-          <span>Status:</span>
-          <span className={`px-2 py-0.5 rounded-full text-white font-bold ${
-            scanStatus === "clean"
-              ? "bg-emerald-600"
-              : scanStatus === "threat_valid"
-              ? "bg-amber-600"
-              : "bg-rose-600"
-          }`}>
-            {scanStatus === "clean" ? "Clean" : scanStatus === "threat_valid" ? "Threat Present (Valid)" : "Threat Out of Bounds (Invalid)"}
-          </span>
-        </div>
-      </div>
 
       {exportState.status !== "idle" && (
         <div className={`absolute top-28 right-4 z-50 px-4 py-2.5 rounded-xl shadow-panel border flex items-center gap-2 animate-slide-up ${

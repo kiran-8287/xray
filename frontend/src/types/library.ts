@@ -7,7 +7,6 @@ export interface Item {
   category: string;
   subcategory: string;
   name: string;
-  upload_session_id?: string;
   valid_region_points?: Point[] | string;
   validRegionData?: any;
   /** 16-bit attenuation pixel value (0 = fully absorbing / black, 65535 = transparent / white) */

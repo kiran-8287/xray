@@ -78,20 +78,10 @@ async function main() {
 
     // Clear existing items
     console.log('🧹 Clearing existing items...');
-    await client.query('DELETE FROM electronics');
-    await client.query('DELETE FROM clothes');
-    await client.query('DELETE FROM trays');
+    await client.query('DELETE FROM non_threat_items');
     await client.query('DELETE FROM bags');
     await client.query('DELETE FROM threats');
     await client.query('DELETE FROM items');
-    await client.query('DELETE FROM upload_sessions');
-
-    // Create an upload session
-    const sessionRes = await client.query(
-      `INSERT INTO upload_sessions (folder_name, item_count) VALUES ($1, $2) RETURNING id`,
-      ['Full Library Seed (Unique)', taxonomyMap.size]
-    );
-    const sessionId = sessionRes.rows[0].id;
 
     // 4. Match SVGs to taxonomy items and insert ONE PER TAXONOMY ITEM
     const seededTaxonomyKeys = new Set();
@@ -157,8 +147,8 @@ async function main() {
         // Insert into items table
         const result = await client.query(
           `INSERT INTO items (
-            filename, filepath, category, subcategory, name, upload_session_id, pixel_value, width, height
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 512, 512)
+            filename, filepath, category, subcategory, name, pixel_value, width, height
+          ) VALUES ($1, $2, $3, $4, $5, $6, 512, 512)
           RETURNING id`,
           [
             svg.name,
@@ -166,7 +156,6 @@ async function main() {
             taxonomyItem.category,
             taxonomyItem.subcategory,
             taxonomyItem.name,
-            sessionId,
             pixelValue
           ]
         );
@@ -192,23 +181,13 @@ async function main() {
             [itemId, taxonomyItem.subcategory]
           );
         }
-        if (taxonomyItem.category === 'electronics') {
+        if (taxonomyItem.category === 'electronics' || taxonomyItem.category === 'clothes' || taxonomyItem.category === 'trays' || taxonomyItem.category === 'misc' || taxonomyItem.category === 'food') {
+          const subSlug = taxonomyItem.subcategory ? taxonomyItem.subcategory : null;
           await client.query(
-            `INSERT INTO electronics (item_id, device_type) VALUES ($1, $2)`,
-            [itemId, taxonomyItem.subcategory]
+            `INSERT INTO non_threat_items (item_id, subcategory_slug) VALUES ($1, $2)`,
+            [itemId, subSlug]
           );
         }
-        if (taxonomyItem.category === 'clothes') {
-          await client.query(
-            `INSERT INTO clothes (item_id, garment_type) VALUES ($1, $2)`,
-            [itemId, taxonomyItem.subcategory]
-          );
-        }
-        if (taxonomyItem.category === 'trays') {
-          await client.query(
-            `INSERT INTO trays (item_id, tray_type) VALUES ($1, $2)`,
-            [itemId, taxonomyItem.subcategory]
-          );
         }
       }
     }

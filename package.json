@@ -12,6 +12,8 @@
     "start": "npm run start:backend",
     "start:backend": "npm --prefix backend run start",
     "lint": "npm --prefix frontend run lint"
+  },
+  "dependencies": {
+    "canvas": "^3.2.3"
   }
 }
-

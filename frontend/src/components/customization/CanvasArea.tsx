@@ -1,8 +1,7 @@
-import React, { useRef, useEffect, useState, useCallback } from "react";
-import { RotateCw } from "lucide-react";
+import React from "react";
+import { RotateCw, GripVertical } from "lucide-react";
 import type { SceneObject } from "../../types/customization";
 import { getTransformedValidRegion } from "../../lib/customizationHelpers";
-import { drawXRayComposite } from "../../lib/xrayRenderer";
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
@@ -32,23 +31,21 @@ export default function CanvasArea({
   handleMouseMove,
   handleMouseUp,
 }: CanvasAreaProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [loadVersion, setLoadVersion] = useState(0);
-
+  const [bagImageDimensions, setBagImageDimensions] = React.useState<{ width: number; height: number } | null>(null);
+  
   const sortedObjects = [...objects].sort((a, b) => a.layer - b.layer);
   const bagObject = objects.find((o) => o.library === "bag");
-  const validRegionPolygon = bagObject ? getTransformedValidRegion(bagObject) : [];
+  const validRegionPolygon = bagObject ? getTransformedValidRegion(bagObject, bagImageDimensions) : [];
 
-  const handleImageLoaded = useCallback(() => {
-    setLoadVersion((v) => v + 1);
-  }, []);
+  // Get display dimensions that fit the bag image within the canvas
+  const bagImageUrl = bagObject?.filepath ? `${IMAGE_BASE_URL}${bagObject.filepath}` : null;
+  const bagTransform = bagObject?.transform;
 
-  // Redraw canvas whenever objects change OR when an image finishes loading
-  useEffect(() => {
-    if (canvasRef.current) {
-      drawXRayComposite(canvasRef.current, objects, handleImageLoaded);
-    }
-  }, [objects, loadVersion, handleImageLoaded]);
+  // Handler to capture actual image dimensions for correct valid region scaling
+  const handleBagImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = event.currentTarget;
+    setBagImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+  };
 
   return (
     <main
@@ -74,45 +71,44 @@ export default function CanvasArea({
         }}
       >
         {/* Grid Pattern background */}
-        <svg className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-40">
+        <svg className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-30">
           {Array.from({ length: CANVAS_W / 20 + 1 }).map((_, i) => (
-            <line
-              key={`v-${i}`}
-              x1={i * 20}
-              y1={0}
-              x2={i * 20}
-              y2={CANVAS_H}
-              stroke="#F0F3F8"
-              strokeWidth={1}
-            />
+            <line key={`v-${i}`} x1={i * 20} y1={0} x2={i * 20} y2={CANVAS_H} stroke="#E5E7EB" strokeWidth={1} />
           ))}
           {Array.from({ length: CANVAS_H / 20 + 1 }).map((_, i) => (
-            <line
-              key={`h-${i}`}
-              x1={0}
-              y1={i * 20}
-              x2={CANVAS_W}
-              y2={i * 20}
-              stroke="#F0F3F8"
-              strokeWidth={1}
-            />
+            <line key={`h-${i}`} x1={0} y1={i * 20} x2={CANVAS_W} y2={i * 20} stroke="#E5E7EB" strokeWidth={1} />
           ))}
         </svg>
 
-        {/* Onscreen X-Ray Canvas */}
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_W}
-          height={CANVAS_H}
-          className="absolute top-0 left-0 w-full h-full pointer-events-none"
-        />
+        {/* Base Bag Image - shown directly centered on the canvas */}
+        {bagImageUrl && bagTransform && (
+          <div
+            className="absolute pointer-events-none"
+            style={{
+              left: bagTransform.x - bagTransform.width / 2,
+              top: bagTransform.y - bagTransform.height / 2,
+              width: bagTransform.width,
+              height: bagTransform.height,
+              transform: `rotate(${bagTransform.rotation}deg)`,
+              zIndex: 1,
+            }}
+          >
+            <img
+              src={bagImageUrl}
+              alt={bagObject?.name || "Bag"}
+              className="w-full h-full object-contain pointer-events-none"
+              draggable={false}
+              onLoad={handleBagImageLoad}
+            />
+          </div>
+        )}
 
-        {/* Valid region overlay */}
+        {/* Valid region overlay (from database) */}
         {showValidRegion && validRegionPolygon.length > 0 && (
           <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-10">
             <polygon
               points={validRegionPolygon.map((p) => `${p.x},${p.y}`).join(" ")}
-              fill="rgba(5,150,105,0.02)"
+              fill="rgba(5,150,105,0.04)"
               stroke="#059669"
               strokeWidth={1.5}
               strokeDasharray="4 3"
@@ -120,60 +116,78 @@ export default function CanvasArea({
           </svg>
         )}
 
-        {/* Scene Objects (Interactive layers + visible image previews) */}
-        {sortedObjects.map((obj) => {
-          const isSelected = selectedObjectId === obj.id;
-          const transform = obj.transform;
-          const isBag = obj.library === "bag";
-          const cursorClass = isBag ? "cursor-default" : "cursor-move";
-          const zIndexClass = isBag ? "z-10" : (isSelected ? "z-30" : "z-20");
-          const imageUrl = obj.filepath ? `${IMAGE_BASE_URL}${obj.filepath}` : null;
+        {/* Interactive Objects (threats, others placed on top of bag) */}
+        {sortedObjects
+          .filter((obj) => obj.library !== "bag")
+          .map((obj) => {
+            const isSelected = selectedObjectId === obj.id;
+            const transform = obj.transform;
+            const imageUrl = obj.filepath ? `${IMAGE_BASE_URL}${obj.filepath}` : null;
 
-          return (
-            <div
-              key={obj.id}
-              className={`absolute select-none group rounded-lg overflow-hidden ${cursorClass} ${zIndexClass}`}
-              style={{
-                left: transform.x - transform.width / 2,
-                top: transform.y - transform.height / 2,
-                width: transform.width,
-                height: transform.height,
-                transform: `rotate(${transform.rotation}deg)`,
-              }}
-              onMouseDown={(e) => handleMouseDown(e, obj)}
-            >
-              {/* Visible image preview of the object */}
-              {imageUrl && (
-                <img
-                  src={imageUrl}
-                  alt={obj.name}
-                  className="w-full h-full object-cover pointer-events-none"
-                  draggable={false}
-                  style={{ opacity: 0.4, mixBlendMode: "multiply" }}
-                  onLoad={() => {
-                    // Force re-render of the canvas when an image loads
-                    handleImageLoaded();
-                  }}
-                />
-              )}
+            return (
+              <div
+                key={obj.id}
+                className={`absolute select-none group rounded-lg overflow-hidden ${
+                  isSelected ? "z-30" : "z-20"
+                }`}
+                style={{
+                  left: transform.x - transform.width / 2,
+                  top: transform.y - transform.height / 2,
+                  width: transform.width,
+                  height: transform.height,
+                  transform: `rotate(${transform.rotation}deg)`,
+                  cursor: "move",
+                }}
+                onMouseDown={(e) => handleMouseDown(e, obj)}
+              >
+                {/* Object image */}
+                {imageUrl && (
+                  <img
+                    src={imageUrl}
+                    alt={obj.name}
+                    className="w-full h-full object-contain pointer-events-none"
+                    draggable={false}
+                    style={{ opacity: 0.7, mixBlendMode: "multiply" }}
+                  />
+                )}
 
-              {/* Selection border indicator */}
-              {isSelected && (
-                <div className="absolute inset-0 border-2 border-accent border-dashed pointer-events-none rounded-lg animate-pulse" />
-              )}
+                {/* Selection border */}
+                {isSelected && (
+                  <div className="absolute inset-0 border-2 border-accent border-dashed pointer-events-none rounded-lg animate-pulse" />
+                )}
 
-              {/* Rotation Handle */}
-              {isSelected && obj.library !== "bag" && (
-                <div
-                  className="absolute -top-9 left-1/2 -translate-x-1/2 w-7 h-7 bg-panel border border-border shadow-card hover:border-accent hover:text-accent rounded-full flex items-center justify-center cursor-alias z-40 transition-colors"
-                  onMouseDown={(e) => handleRotationMouseDown(e, obj)}
-                >
-                  <RotateCw size={12} />
-                </div>
-              )}
+                {/* Rotation handle */}
+                {isSelected && (
+                  <div
+                    className="absolute -top-9 left-1/2 -translate-x-1/2 w-7 h-7 bg-panel border border-border shadow-card hover:border-accent hover:text-accent rounded-full flex items-center justify-center cursor-alias z-40 transition-colors"
+                    onMouseDown={(e) => handleRotationMouseDown(e, obj)}
+                  >
+                    <RotateCw size={12} />
+                  </div>
+                )}
+
+                {/* Object name label */}
+                {isSelected && (
+                  <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-panel/90 border border-border rounded-md px-2 py-0.5 text-[10px] font-semibold text-ink whitespace-nowrap pointer-events-none shadow-card">
+                    {obj.name}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+        {/* Empty canvas state */}
+        {!bagObject && (
+          <div className="absolute inset-0 flex items-center justify-center z-10">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-surface rounded-full flex items-center justify-center mx-auto mb-3 border border-border">
+                <GripVertical size={24} className="text-muted/40" />
+              </div>
+              <p className="text-sm font-semibold text-ink mb-1">No bag selected</p>
+              <p className="text-xs text-muted">Go to collage page to select a bag</p>
             </div>
-          );
-        })}
+          </div>
+        )}
       </div>
     </main>
   );

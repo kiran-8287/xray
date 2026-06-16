@@ -1,7 +1,8 @@
-import React from "react";
-import { Activity, ArrowLeft } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Activity, ArrowLeft, BookOpen } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import type { Item } from "../../types/library";
-import { getCategoryConfig } from "../../config/categories";
+import { getCategoryConfig, normalizeCategoryName } from "../../config/categories";
 
 interface ScannedBagsSidebarProps {
   activeLibrary: string | null;
@@ -11,23 +12,18 @@ interface ScannedBagsSidebarProps {
   categorizedList: any;
 }
 
-// Helper to normalize category name
-function normalizeCategoryName(cat: string) {
-  const normalized = cat.toLowerCase();
-  if (["misc", "sports", "stationery", "lag"].includes(normalized)) {
-    return "miscellaneous";
-  }
-  return normalized;
-}
-
 const CATEGORY_LABELS: Record<string, string> = {
   bags: "Bags",
+  bag: "Bags",
   trays: "Trays",
+  tray: "Trays",
   clothes: "Clothes",
   clothing: "Clothing",
   electronics: "Electronics",
   food: "Food",
   threats: "Threats",
+  threat: "Threats",
+  "non-threats": "Non-Threats",
   misc: "Miscellaneous",
   miscellaneous: "Miscellaneous",
   sports: "Miscellaneous",
@@ -42,10 +38,12 @@ export default function ScannedBagsSidebar({
   handleAddObject,
   categorizedList,
 }: ScannedBagsSidebarProps) {
+  const navigate = useNavigate();
+
   if (!categorizedList) {
     return (
-      <aside className="w-52 border-r border-border bg-nav flex flex-col items-center justify-center text-muted p-4">
-        <span className="text-xs font-semibold">Loading scanned bags...</span>
+      <aside className="w-72 border-r border-border bg-nav flex flex-col items-center justify-center text-muted p-4">
+        <span className="text-xs font-semibold">Loading library items...</span>
       </aside>
     );
   }
@@ -53,13 +51,40 @@ export default function ScannedBagsSidebar({
   // categorizedList is already merged and normalized by the parent page
   const mergedList = categorizedList;
 
-  // Filter categories to hide bags if a bag is already in the workspace
-  const categoryKeys = Object.keys(mergedList).filter(
-    (cat) => !(hasBag && (cat === "bags" || cat === "bag"))
-  );
+  // Collect items from ALL categories (bags, threats, non-threats, etc.)
+  // and group them properly
+  const allThreatItems: Item[] = [];
+  const allNonThreatItems: Item[] = [];
+  const categoryButtons: { key: string; label: string; count: number; config: any }[] = [];
 
-  const threatItems = Object.values(mergedList["threats"] || {}).flat() as Item[];
-  const nonThreatItems = Object.values(mergedList["non-threats"] || {}).flat() as Item[];
+  for (const [catKey, subcats] of Object.entries(mergedList)) {
+    const flattenedItems = Object.values(subcats || {}).flat() as Item[];
+    const count = flattenedItems.length;
+    if (count === 0) continue;
+
+    const normalized = normalizeCategoryName(catKey);
+    const displayName = CATEGORY_LABELS[catKey] || catKey;
+    const config = getCategoryConfig(catKey);
+
+    // Skip bags category entirely if there's already a bag on the canvas
+    if (hasBag && (normalized === "bags" || catKey === "bag")) continue;
+
+    // Categorize items for the main view
+    if (normalized === "threats") {
+      allThreatItems.push(...flattenedItems);
+    } else if (normalized === "bags") {
+      // Bags are shown as a category button only if no bag on canvas
+      categoryButtons.push({ key: catKey, label: displayName, count, config });
+    } else {
+      // Everything else is a non-threat
+      allNonThreatItems.push(...flattenedItems);
+    }
+
+    // Add as category button (for drill-down)
+    if (normalized !== "threats" && normalized !== "bags") {
+      categoryButtons.push({ key: catKey, label: displayName, count, config });
+    }
+  }
 
   return (
     <aside className="w-72 border-r border-border bg-nav flex flex-col overflow-hidden flex-shrink-0 text-sm">
@@ -82,14 +107,15 @@ export default function ScannedBagsSidebar({
       <div className="flex-1 overflow-y-auto p-2 space-y-3">
         {!activeLibrary ? (
           <>
-            {threatItems.length > 0 && (
+            {/* Threats Section */}
+            {allThreatItems.length > 0 && (
               <section className="space-y-2">
                 <div className="flex items-center justify-between px-3">
                   <h4 className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Threats</h4>
-                  <span className="text-[11px] text-muted">{threatItems.length}</span>
+                  <span className="text-[11px] text-muted">{allThreatItems.length}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  {threatItems.map((item) => (
+                  {allThreatItems.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => handleAddObject(item)}
@@ -105,14 +131,15 @@ export default function ScannedBagsSidebar({
               </section>
             )}
 
-            {nonThreatItems.length > 0 && (
+            {/* Non-Threats Section */}
+            {allNonThreatItems.length > 0 && (
               <section className="space-y-2">
                 <div className="flex items-center justify-between px-3">
                   <h4 className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Non-Threats</h4>
-                  <span className="text-[11px] text-muted">{nonThreatItems.length}</span>
+                  <span className="text-[11px] text-muted">{allNonThreatItems.length}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  {nonThreatItems.map((item) => (
+                  {allNonThreatItems.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => handleAddObject(item)}
@@ -128,32 +155,44 @@ export default function ScannedBagsSidebar({
               </section>
             )}
 
-            <div className="space-y-1">
-              {categoryKeys.map((lib) => {
-                const subcategories = mergedList[lib] || {};
-                const count = Object.values(subcategories).flat().length;
-                const config = getCategoryConfig(lib);
-                const displayName = CATEGORY_LABELS[lib] || lib;
-                
-                return (
+            {/* Category buttons for drill-down */}
+            {categoryButtons.length > 0 && (
+              <div className="space-y-1">
+                {categoryButtons.map(({ key, label, count, config }) => (
                   <button
-                    key={lib}
-                    onClick={() => setActiveLibrary(lib)}
+                    key={key}
+                    onClick={() => setActiveLibrary(key)}
                     className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-panel text-sm font-medium text-ink cursor-pointer transition-all hover:border-accent/40 hover:bg-accent/4 hover:shadow-card"
                   >
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${config.bg} ${config.text}`}>
-                      {displayName.charAt(0)}
+                      {label.charAt(0)}
                     </div>
-                    <span className="text-xs font-semibold text-ink flex-1 text-left truncate">
-                      {displayName}
-                    </span>
+                    <span className="text-xs font-semibold text-ink flex-1 text-left truncate">{label}</span>
                     <span className="text-xs font-mono text-muted">{count}</span>
                   </button>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            )}
+
+            {/* No items available state */}
+            {allThreatItems.length === 0 && allNonThreatItems.length === 0 && categoryButtons.length === 0 && (
+              <div className="text-center py-12 px-4">
+                <div className="w-12 h-12 bg-surface rounded-full flex items-center justify-center mx-auto mb-3 border border-border">
+                  <BookOpen size={20} className="text-muted/40" />
+                </div>
+                <p className="text-xs text-muted mb-4">No additional items available in the library.</p>
+                <button
+                  onClick={() => navigate("/library")}
+                  className="px-4 py-2 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover transition-all text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <BookOpen size={12} />
+                  Go to Library
+                </button>
+              </div>
+            )}
           </>
         ) : (
+          /* Drill-down view for a specific category */
           <div className="space-y-3 p-1">
             <button
               onClick={() => setActiveLibrary(null)}

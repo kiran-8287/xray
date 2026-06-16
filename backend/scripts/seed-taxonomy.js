@@ -895,16 +895,6 @@ async function main() {
     await client.query("ALTER TABLE items ADD COLUMN IF NOT EXISTS mask_path VARCHAR(255)");
     
     // Clear out previous system stencils to prevent duplicates
-    await client.query("DELETE FROM upload_sessions WHERE folder_name = 'Default System Stencils'");
-    
-    // Create a new clean upload session for default stencils
-    const sessionRes = await client.query(
-      `INSERT INTO upload_sessions (folder_name, uploaded_at, item_count) 
-       VALUES ('Default System Stencils', NOW(), $1) 
-       RETURNING id`,
-      [OBJECTS.length]
-    );
-    const sessionId = sessionRes.rows[0].id;
     
     for (const obj of OBJECTS) {
       // 1. Write the SVG file
@@ -915,18 +905,17 @@ async function main() {
       const itemRes = await client.query(
         `INSERT INTO items (
           filename, filepath, category, subcategory, name, 
-          upload_session_id, created_at, pixel_value, width, height, polygon_json
-         ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9, $10) RETURNING id`,
+          created_at, pixel_value, width, height, polygon_json
+         ) VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9) RETURNING id`,
         [
-          obj.filename, 
-          obj.filename, 
-          obj.category, 
-          obj.subcategory, 
-          obj.name, 
-          sessionId, 
-          obj.pixel_value, 
-          obj.width, 
-          obj.height, 
+          obj.filename,
+          obj.filename,
+          obj.category,
+          obj.subcategory,
+          obj.name,
+          obj.pixel_value,
+          obj.width,
+          obj.height,
           JSON.stringify(obj.polygon_json)
         ]
       );
@@ -949,21 +938,14 @@ async function main() {
           `INSERT INTO threats (item_id, threat_type, severity) VALUES ($1, $2, 'high')`,
           [itemId, obj.subcategory]
         );
-      } else if (obj.category === 'electronics') {
+      } else {
+        // All non-bag, non-threat items are stored in non_threat_items
+        const subSlug = obj.subcategory ? obj.subcategory : null;
         await client.query(
-          `INSERT INTO electronics (item_id, device_type) VALUES ($1, $2)`,
-          [itemId, obj.subcategory]
+          `INSERT INTO non_threat_items (item_id, subcategory_slug) VALUES ($1, $2)`,
+          [itemId, subSlug]
         );
-      } else if (obj.category === 'clothes') {
-        await client.query(
-          `INSERT INTO clothes (item_id, garment_type) VALUES ($1, $2)`,
-          [itemId, obj.subcategory]
-        );
-      } else if (obj.category === 'trays') {
-        await client.query(
-          `INSERT INTO trays (item_id, tray_type) VALUES ($1, $2)`,
-          [itemId, obj.subcategory]
-        );
+      }
       }
       
       console.log(`  Added item: ${obj.name} (${obj.category} -> ${obj.subcategory})`);

@@ -29,7 +29,6 @@ export default function LibraryPage() {
   const [activeSubcategory, setActiveSubcategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [densityPreset, setDensityPreset] = useState<"empty" | "few" | "filled">("filled");
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog>(null);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
@@ -390,8 +389,6 @@ export default function LibraryPage() {
         selectedCount={selectedItems.size}
         onClearSelection={() => setSelectedItems(new Set())}
         onGenerateCollage={handleGenerateCollage}
-        densityPreset={densityPreset}
-        onChangeDensityPreset={setDensityPreset}
       />
 
       {editingItem && editDraft && (

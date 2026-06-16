@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from "uuid";
 import pg from "pg";
 import { generateDataset } from "./api/datasetGenerator.js";
 import { isObjectInsideContainer } from "./lib/geometry.js";
+import { loadImage } from "canvas";
 
 const app = express();
 app.use(cors());
@@ -489,41 +490,7 @@ app.delete('/api/saved-layouts/:id', async (req, res) => {
   }
 });
 
-// Get all upload sessions with their items
-app.get("/api/sessions", async (_req, res) => {
-  try {
-    const client = await pool.connect();
-    try {
-      const sessionsResult = await client.query("SELECT * FROM upload_sessions ORDER BY uploaded_at DESC");
-      const sessions = sessionsResult.rows;
-      
-      for (const session of sessions) {
-        const itemsResult = await client.query("SELECT * FROM items WHERE upload_session_id = $1", [session.id]);
-        session.items = itemsResult.rows;
-        
-        // Enrich bag items with valid_region_points from bags table
-        for (const item of session.items) {
-          if (item.category === "bags") {
-            const bagResult = await client.query("SELECT valid_region_points FROM bags WHERE item_id = $1", [item.id]);
-            const data = bagResult.rows[0]?.valid_region_points;
-            if (data && typeof data === 'object' && 'simplifiedPoints' in data) {
-              item.valid_region_points = data.simplifiedPoints;
-            } else {
-              item.valid_region_points = data;
-            }
-          }
-        }
-      }
-      
-      res.json({ ok: true, sessions });
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
-});
+// Sessions are removed: items are fetched directly from `items` and related tables
 
 // Upload endpoint
 app.post("/api/upload", upload.array("images"), async (req, res) => {
@@ -551,11 +518,7 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
       }
     }
 
-    const sessionResult = await client.query(
-      "INSERT INTO upload_sessions (folder_name, uploaded_at, item_count) VALUES ($1, NOW(), $2) RETURNING *",
-      [folderName, files.length]
-    );
-    const uploadSession = sessionResult.rows[0];
+    // No upload sessions: insert items directly into `items` table
 
     for (const file of files) {
       // First try to find item in taxonomy by filename
@@ -610,9 +573,21 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
         // use the final category after metadata overrides
       }
 
+      // Detect actual image dimensions from the saved file
+      let imgWidth = 512;
+      let imgHeight = 512;
+      try {
+        const savedFilePath = path.join(libraryImagesRoot, file.filename);
+        const loadedImg = await loadImage(savedFilePath);
+        imgWidth = loadedImg.width;
+        imgHeight = loadedImg.height;
+      } catch (dimErr) {
+        console.warn("Warning: could not detect image dimensions for", file.filename, dimErr);
+      }
+
       const itemResult = await client.query(
-        "INSERT INTO items (filename, filepath, category, subcategory, name, upload_session_id, pixel_value) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
-        [file.originalname, file.filename, category, subcategory, name, uploadSession.id, pixelValue]
+        "INSERT INTO items (filename, filepath, category, subcategory, name, pixel_value, width, height) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
+        [file.originalname, file.filename, category, subcategory, name, pixelValue, imgWidth, imgHeight]
       );
       const item = itemResult.rows[0];
 
@@ -631,22 +606,15 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
         }
       } else if (category === "threats") {
         await client.query("INSERT INTO threats (item_id, threat_type, severity) VALUES ($1, NULL, NULL)", [item.id]);
-      } else if (category === "electronics") {
-        await client.query("INSERT INTO electronics (item_id, device_type) VALUES ($1, NULL)", [item.id]);
-      } else if (category === "clothes") {
-        await client.query("INSERT INTO clothes (item_id, garment_type) VALUES ($1, NULL)", [item.id]);
-      } else if (category === "trays") {
-        await client.query("INSERT INTO trays (item_id, tray_type) VALUES ($1, NULL)", [item.id]);
+      } else {
+        // All other categories are treated as non-threats
+        const subSlug = subcategory ? String(subcategory).toLowerCase().replace(/\s+/g, "-") : null;
+        await client.query("INSERT INTO non_threat_items (item_id, subcategory_slug) VALUES ($1, $2)", [item.id, subSlug]);
       }
     }
 
     await client.query("COMMIT");
-    res.json({
-      ok: true,
-      message: "Files uploaded successfully!",
-      uploadSessionId: uploadSession.id,
-      itemsProcessed: files.length,
-    });
+    res.json({ ok: true, message: "Files uploaded successfully!", itemsProcessed: files.length });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error(err);
@@ -656,29 +624,7 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
   }
 });
 
-// Delete a session
-app.delete("/api/sessions/:id", async (req, res) => {
-  try {
-    const client = await pool.connect();
-    try {
-      const itemsResult = await client.query("SELECT filepath FROM items WHERE upload_session_id = $1", [req.params.id]);
-      for (const item of itemsResult.rows) {
-        try {
-          await fs.unlink(path.join(libraryImagesRoot, item.filepath));
-        } catch (err) {
-          console.error("Error deleting file:", err);
-        }
-      }
-      await client.query("DELETE FROM upload_sessions WHERE id = $1", [req.params.id]);
-      res.json({ ok: true });
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
-});
+// Session deletion removed; files should be managed individually if needed
 
 // Update item metadata
 app.put("/api/items/:id", async (req, res) => {

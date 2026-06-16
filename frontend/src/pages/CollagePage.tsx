@@ -14,10 +14,23 @@ type Combination = {
 export default function CollagePage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const state = location.state as
+  const locationState = location.state as
     | { selectedBags?: Item[]; selectedThreats?: Item[]; selectedOthers?: Item[]; densityPreset?: "empty" | "few" | "filled" }
     | undefined;
-  const [combinations, setCombinations] = useState<Combination[]>([]);
+
+  // Try to restore combinations from sessionStorage first (survives page navigations)
+  const [combinations, setCombinations] = useState<Combination[]>(() => {
+    try {
+      const cached = sessionStorage.getItem("collageCombinations");
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
   const [exportState, setExportState] = useState<{
     status: "idle" | "generating" | "success" | "error";
     message: string;
@@ -63,64 +76,70 @@ export default function CollagePage() {
     }
   };
 
+  // Whenever new data arrives via location state, persist it and regenerate combinations
   useEffect(() => {
-    let bags = state?.selectedBags;
-    let threats = state?.selectedThreats || [];
-    let others = state?.selectedOthers || [];
-    let density = state?.densityPreset || "filled";
-
-    if (!bags || bags.length === 0) {
-      try {
-        const savedBags = localStorage.getItem("selectedBags");
-        const savedThreats = localStorage.getItem("selectedThreats");
-        const savedOthers = localStorage.getItem("selectedOthers");
-        const savedDensity = localStorage.getItem("densityPreset");
-        
-        if (savedBags) {
-          bags = JSON.parse(savedBags);
-          if (savedThreats) threats = JSON.parse(savedThreats);
-          if (savedOthers) others = JSON.parse(savedOthers);
-          if (savedDensity) density = savedDensity as any;
-        }
-      } catch (err) {
-        console.error("Error reading saved collage state:", err);
-      }
+    // Only process if we have fresh data from Library via location state
+    if (!locationState || !locationState.selectedBags || locationState.selectedBags.length === 0) {
+      return;
     }
 
-    if (bags && bags.length > 0) {
-      const combos: Combination[] = [];
+    const { selectedBags, selectedThreats, selectedOthers, densityPreset } = locationState;
+    const bags = selectedBags;
+    const threats = selectedThreats || [];
+    const others = selectedOthers || [];
+    const density = densityPreset || "filled";
 
-      bags.forEach((bag) => {
-        // First, combo with just bag and random others
-        const cleanOthers = density === "empty" ? [] : (density === "few" ? others.slice(0, 2) : others);
-        combos.push({
-          id: `${bag.id}-clean`,
-          bag,
-          others: cleanOthers,
-        });
+    // Persist to localStorage so it survives even sessionStorage clearing
+    try {
+      localStorage.setItem("selectedBags", JSON.stringify(bags));
+      localStorage.setItem("selectedThreats", JSON.stringify(threats));
+      localStorage.setItem("selectedOthers", JSON.stringify(others));
+      localStorage.setItem("densityPreset", density);
+    } catch (err) {
+      console.error("Error saving collage state to localStorage:", err);
+    }
 
-        // Then, bag + each threat + random others
-        threats.forEach((threat) => {
-          // Client-side validation: if threat exists but bag lacks a valid placement region, skip combo
-          const bagHasValidRegion = bag.valid_region_points && (Array.isArray(bag.valid_region_points) ? bag.valid_region_points.length > 0 : true);
-          if (!bagHasValidRegion) {
-            return; // skip this permutation
-          }
-          const threatOthers = density === "empty" ? [] : (density === "few" ? others.slice(0, 1) : others);
-          combos.push({
-            id: `${bag.id}-${threat.id}`,
-            bag,
-            threat,
-            others: threatOthers,
-          });
-        });
+    const combos: Combination[] = [];
+
+    bags.forEach((bag) => {
+      // First, combo with just bag and random others
+      const cleanOthers = density === "empty" ? [] : (density === "few" ? others.slice(0, 2) : others);
+      combos.push({
+        id: `${bag.id}-clean`,
+        bag,
+        others: cleanOthers,
       });
 
-      setCombinations(combos);
-    } else {
-      setCombinations([]);
+      // Then, bag + each threat + random others
+      threats.forEach((threat) => {
+        // Client-side validation: if threat exists but bag lacks a valid placement region, skip combo
+        const bagHasValidRegion = bag.valid_region_points && (Array.isArray(bag.valid_region_points) ? bag.valid_region_points.length > 0 : true);
+        if (!bagHasValidRegion) {
+          return; // skip this permutation
+        }
+        const threatOthers = density === "empty" ? [] : (density === "few" ? others.slice(0, 1) : others);
+        combos.push({
+          id: `${bag.id}-${threat.id}`,
+          bag,
+          threat,
+          others: threatOthers,
+        });
+      });
+    });
+
+    setCombinations(combos);
+  }, [locationState]);
+
+  // Persist combinations to sessionStorage whenever they change (survives page navigations)
+  useEffect(() => {
+    try {
+      if (combinations.length > 0) {
+        sessionStorage.setItem("collageCombinations", JSON.stringify(combinations));
+      }
+    } catch (err) {
+      console.error("Error saving combinations to sessionStorage:", err);
     }
-  }, [state]);
+  }, [combinations]);
 
   return (
     <div className="max-w-6xl mx-auto py-8 px-6 animate-fade-in text-sm">

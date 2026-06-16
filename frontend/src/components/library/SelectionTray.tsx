@@ -5,16 +5,12 @@ interface SelectionTrayProps {
   selectedCount: number;
   onClearSelection: () => void;
   onGenerateCollage: () => void;
-  densityPreset: "empty" | "few" | "filled";
-  onChangeDensityPreset: (preset: "empty" | "few" | "filled") => void;
 }
 
 export default function SelectionTray({
   selectedCount,
   onClearSelection,
   onGenerateCollage,
-  densityPreset,
-  onChangeDensityPreset,
 }: SelectionTrayProps) {
   if (selectedCount === 0) return null;
 
@@ -26,24 +22,6 @@ export default function SelectionTray({
       <span className="text-sm font-semibold text-ink ml-2">
         item{selectedCount !== 1 ? "s" : ""} selected
       </span>
-      
-      {/* Density preset selector */}
-      <div className="flex items-center gap-2 border-l border-border pl-4">
-        <span className="text-xs font-semibold text-muted">Density:</span>
-        {(["empty", "few", "filled"] as const).map((preset) => (
-          <button
-            key={preset}
-            onClick={() => onChangeDensityPreset(preset)}
-            className={`px-3 py-1 text-xs font-semibold rounded-lg border transition-all ${
-              densityPreset === preset
-                ? "bg-accent border-accent text-white shadow-btn"
-                : "bg-surface border-border text-ink hover:border-accent/40"
-            }`}
-          >
-            {preset.charAt(0).toUpperCase() + preset.slice(1)}
-          </button>
-        ))}
-      </div>
 
       <button
         onClick={onClearSelection}

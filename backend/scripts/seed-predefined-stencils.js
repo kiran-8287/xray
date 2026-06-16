@@ -472,12 +472,7 @@ async function seedPredefinedStencils() {
     console.log('🗂️  Clearing existing library items...');
     await client.query('DELETE FROM items');
 
-    // First create an upload session
-    const sessionResult = await client.query(
-      'INSERT INTO upload_sessions (folder_name) VALUES ($1) RETURNING id',
-      ['predefined-stencils']
-    );
-    const sessionId = sessionResult.rows[0].id;
+    // Seeding predefined stencils without upload sessions
 
     console.log('📦 Seeding predefined stencils...');
     for (const stencil of PREDEFINED_STENCILS) {
@@ -487,8 +482,8 @@ async function seedPredefinedStencils() {
       const result = await client.query(
         `INSERT INTO items (
            filename, filepath, category, subcategory, name,
-           upload_session_id, pixel_value, width, height
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           pixel_value, width, height
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id`,
         [
           filename,
@@ -496,7 +491,6 @@ async function seedPredefinedStencils() {
           stencil.category,
           stencil.subcategory,
           stencil.name,
-          sessionId,
           stencil.pixel_value,
           stencil.width,
           stencil.height
@@ -519,21 +513,13 @@ async function seedPredefinedStencils() {
           'INSERT INTO threats (item_id, threat_type, severity) VALUES ($1, $2, $3)',
           [itemId, stencil.subcategory, 'high']
         );
-      } else if (stencil.category === 'electronics') {
+      } else {
+        const subSlug = stencil.subcategory ? stencil.subcategory : null;
         await client.query(
-          'INSERT INTO electronics (item_id, device_type) VALUES ($1, $2)',
-          [itemId, stencil.subcategory]
+          'INSERT INTO non_threat_items (item_id, subcategory_slug) VALUES ($1, $2)',
+          [itemId, subSlug]
         );
-      } else if (stencil.category === 'clothes') {
-        await client.query(
-          'INSERT INTO clothes (item_id, garment_type) VALUES ($1, $2)',
-          [itemId, stencil.subcategory]
-        );
-      } else if (stencil.category === 'trays') {
-        await client.query(
-          'INSERT INTO trays (item_id, tray_type) VALUES ($1, $2)',
-          [itemId, stencil.subcategory]
-        );
+      }
       }
 
       console.log(`✅ Inserted: ${stencil.name}`);

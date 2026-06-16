@@ -1,55 +1,27 @@
 import type { SceneObject } from "../types/customization";
 
 const imgCache = new Map<string, HTMLImageElement>();
-const pendingCallbacks = new Map<string, Set<() => void>>();
 
 export function getLoadedImage(filepath: string, onLoad: () => void): HTMLImageElement | null {
   const url = `http://localhost:8080/data/library_images/${filepath}`;
-  
-  // Check if the image is already in cache and fully loaded
   if (imgCache.has(url)) {
     const cached = imgCache.get(url)!;
     if (cached.complete && cached.naturalWidth > 0) return cached;
-    
-    // Image is in cache but still loading — register onLoad to be called when it finishes
-    const existing = pendingCallbacks.get(url) || new Set();
-    existing.add(onLoad);
-    pendingCallbacks.set(url, existing);
+    // Still loading - attach another onLoad if not already queued
     return null;
   }
 
-  // Create a new image and start loading
   const img = new Image();
   img.crossOrigin = "anonymous";
-  imgCache.set(url, img);
-
-  const callbacks = pendingCallbacks.get(url) || new Set();
-  callbacks.add(onLoad);
-  pendingCallbacks.set(url, callbacks);
-
+  img.src = url;
   img.onload = () => {
-    const cbs = pendingCallbacks.get(url);
-    if (cbs) {
-      cbs.forEach((cb) => cb());
-      pendingCallbacks.delete(url);
-    }
+    onLoad();
   };
   img.onerror = () => {
     // Remove from cache on error so it can be retried
     imgCache.delete(url);
-    pendingCallbacks.delete(url);
   };
-  img.src = url;
-
-  if (img.complete && img.naturalWidth > 0) {
-    // Image loaded synchronously (from browser cache)
-    const cbs = pendingCallbacks.get(url);
-    if (cbs) {
-      cbs.forEach((cb) => cb());
-      pendingCallbacks.delete(url);
-    }
-    return img;
-  }
+  imgCache.set(url, img);
   return null;
 }
 
@@ -112,7 +84,7 @@ export function drawXRayComposite(
     );
     layerCtx.restore();
 
-    // Get layer RGBA data — we'll use both the grayscale intensity and alpha
+    // Get layer alpha channel to extract thickness map
     const imgData = layerCtx.getImageData(0, 0, width, height);
     const pixels = imgData.data;
 
@@ -120,21 +92,27 @@ export function drawXRayComposite(
     const pixelVal = obj.originalPixelValue;
     const mu = -Math.log(Math.max(1, pixelVal) / 65535);
 
+    // Treat near-white pixels in the source image as transparent/background so
+    // they don't contribute density. This avoids the rendered composite having
+    // a grey background when source images include light backgrounds.
     for (let i = 0; i < pixels.length; i += 4) {
       const r = pixels[i];
       const g = pixels[i + 1];
       const b = pixels[i + 2];
       const alpha = pixels[i + 3];
 
-      if (alpha > 0) {
-        const idx = i / 4;
-        // Use the image's actual grayscale intensity (normalized 0-1)
-        // This preserves the internal detail/features of the xray image
-        const grayIntensity = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
-        const normalizedThickness = alpha / 255;
-        // Scale the absorption by both the thickness (alpha) and the image's actual density
-        densityBuffer[idx] += mu * normalizedThickness * (1 - grayIntensity * 0.7 + 0.3);
-      }
+      // If fully transparent, skip
+      if (alpha === 0) continue;
+
+      // If pixel is very close to white, treat as transparent.
+      // Threshold chosen to ignore faint near-white backgrounds while keeping
+      // legitimate light objects. Adjust if needed.
+      const whiteThreshold = 245;
+      if (r >= whiteThreshold && g >= whiteThreshold && b >= whiteThreshold) continue;
+
+      const idx = i / 4;
+      const normalizedThickness = alpha / 255;
+      densityBuffer[idx] += mu * normalizedThickness;
     }
   }
 

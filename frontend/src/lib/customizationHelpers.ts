@@ -4,39 +4,40 @@ import type { SceneObject } from "../types/customization";
 
 const MAX_PIXEL = 65535;
 
-export const normalizePolygonOutline = (outline: any): Point[] | null => {
-  if (!outline) return null;
-  if (Array.isArray(outline)) return outline as Point[];
-  if (typeof outline === "string") {
-    try {
-      const parsed = JSON.parse(outline);
-      if (Array.isArray(parsed)) return parsed as Point[];
-      outline = parsed;
-    } catch {
-      return null;
-    }
-  }
-  if (typeof outline === "object" && outline !== null) {
-    if (Array.isArray(outline.simplifiedPoints)) return outline.simplifiedPoints as Point[];
-    if (Array.isArray(outline.points)) return outline.points as Point[];
-    if (Array.isArray(outline.shapes) && outline.shapes.length > 0) {
-      const firstShape = outline.shapes[0];
-      if (Array.isArray(firstShape.points)) return firstShape.points as Point[];
-    }
-  }
-  return null;
-};
+export const getTransformedValidRegion = (
+  bag: SceneObject,
+  actualImageDimensions?: { width: number; height: number } | null
+): Point[] => {
+  // Use the polygon outline stored directly on the object (from DB polygon_json or valid_region)
+  if (bag.polygonOutline && bag.polygonOutline.length >= 3) {
+    // Calculate the actual displayed size accounting for object-contain
+    let displayWidth = bag.transform.width;
+    let displayHeight = bag.transform.height;
 
-export const getTransformedValidRegion = (bag: SceneObject): Point[] => {
-  const outline = normalizePolygonOutline(bag.polygonOutline);
-  if (outline && outline.length >= 3) {
+    if (actualImageDimensions && actualImageDimensions.width > 0 && actualImageDimensions.height > 0) {
+      const imageAspectRatio = actualImageDimensions.width / actualImageDimensions.height;
+      const containerAspectRatio = bag.transform.width / bag.transform.height;
+
+      // With object-contain, the image scales to fit within the container while maintaining aspect ratio
+      if (imageAspectRatio > containerAspectRatio) {
+        // Image is wider: constrained by width
+        displayWidth = bag.transform.width;
+        displayHeight = bag.transform.width / imageAspectRatio;
+      } else {
+        // Image is taller or square: constrained by height
+        displayHeight = bag.transform.height;
+        displayWidth = bag.transform.height * imageAspectRatio;
+      }
+    }
+
     return getTransformedPolygon(
       { x: bag.transform.x, y: bag.transform.y },
-      { width: bag.transform.width, height: bag.transform.height },
+      { width: displayWidth, height: displayHeight },
       bag.transform.rotation,
-      outline.map((p) => ({ x: p.x - 0.5, y: p.y - 0.5 }))
+      bag.polygonOutline.map(p => ({ x: p.x - 0.5, y: p.y - 0.5 }))
     );
   }
+  // No valid region defined — fall back to bounding box corners
   return [];
 };
 
@@ -86,7 +87,7 @@ export const getRandomPositionInContainer = (
   width: number,
   height: number,
   container: SceneObject,
-  polygonOutline?: Point[] | any
+  polygonOutline?: Point[]
 ): { x: number; y: number; rotation?: number } => {
   const validRegion = getTransformedValidRegion(container);
   if (validRegion.length < 3) {
