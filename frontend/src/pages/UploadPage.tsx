@@ -1,24 +1,16 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import type { TaxonomyCategory } from "../types/library";
-import { CheckCircle2, AlertCircle, Upload as UploadIcon } from "lucide-react";
+import { CheckCircle2, AlertCircle, Upload as UploadIcon, AlertTriangle } from "lucide-react";
 import UploadDropZone from "../components/upload/UploadDropZone";
 import UploadFileQueue from "../components/upload/UploadFileQueue";
 import { LIBRARY_PREFIXES } from "../config/categories";
-
-export interface StagedItem {
-  file: File;
-  category: string;
-  subcategory: string;
-  name: string;
-  valid_region_points?: any | null;
-}
+import { useUploadContext } from "../context/UploadContext";
 
 export default function UploadPage() {
-  const [files, setFiles] = useState<File[]>([]);
+  const { files, setFiles, staged, setStaged, clearAll } = useUploadContext();
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "success" | "error">("idle");
-  const [folderName, setFolderName] = useState("My Upload");
-  const [staged, setStaged] = useState<StagedItem[]>([]);
+  const [validation
   const [taxonomy, setTaxonomy] = useState<TaxonomyCategory[]>([]);
 
   const handleFilesSelected = (newFiles: File[]) => {
@@ -29,7 +21,7 @@ export default function UploadPage() {
       subcategory: "",
       name: f.name,
       valid_region_points: null,
-    } as StagedItem));
+    }));
     setStaged((prev) => [...prev, ...newStaged]);
   };
 
@@ -63,8 +55,7 @@ export default function UploadPage() {
         setUploadStatus("success");
         // Clear files on success after small delay
         setTimeout(() => {
-          setFiles([]);
-          setStaged([]);
+          clearAll();
         }, 1000);
       } else {
         setUploadStatus("error");

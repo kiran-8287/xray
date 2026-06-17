@@ -6,6 +6,7 @@ import CustomizationPage from "./pages/CustomizationPage";
 import LibraryPage from "./pages/LibraryPage";
 import SavedPage from "./pages/SavedPage";
 import HelpMenu from "./components/HelpMenu";
+import { UploadProvider } from "./context/UploadContext";
 
 export default function App() {
   const getNavLinkClass = ({ isActive }: { isActive: boolean }) => {
@@ -16,6 +17,7 @@ export default function App() {
   };
 
   return (
+    <UploadProvider>
     <Router>
       <div className="min-h-screen bg-surface flex flex-col">
         {/* Top Navigation */}
@@ -53,5 +55,6 @@ export default function App() {
         </main>
       </div>
     </Router>
+    </UploadProvider>
   );
 }

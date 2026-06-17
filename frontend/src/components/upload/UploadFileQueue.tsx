@@ -14,6 +14,66 @@ interface UploadFileQueueProps {
   taxonomy: TaxonomyCategory[];
 }
 
+// Simple canvas component that draws the image + valid region overlay
+function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; validRegionPoints: any; alt: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const img = new Image();
+    img.onload = () => {
+      // Set canvas to 96x96 (match the w-24 h-24 class)
+      canvas.width = 96;
+      canvas.height = 96;
+      ctx.clearRect(0, 0, 96, 96);
+      ctx.drawImage(img, 0, 0, 96, 96);
+
+      // Draw valid region overlay if points exist
+      if (validRegionPoints) {
+        let points: { x: number; y: number }[] = [];
+        // Support both direct points array and { simplifiedPoints, shapes } format
+        const raw = Array.isArray(validRegionPoints)
+          ? validRegionPoints
+          : validRegionPoints.simplifiedPoints || validRegionPoints.shapes?.[0]?.points || [];
+        points = raw.map((p: any) => ({
+          x: typeof p.x === "number" && p.x <= 1 ? p.x * 96 : p.x,
+          y: typeof p.y === "number" && p.y <= 1 ? p.y * 96 : p.y,
+        }));
+
+        if (points.length >= 2) {
+          ctx.save();
+          ctx.strokeStyle = "rgba(37, 99, 235, 0.9)";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([3, 2]);
+          ctx.fillStyle = "rgba(37, 99, 235, 0.25)";
+          ctx.beginPath();
+          ctx.moveTo(points[0].x, points[0].y);
+          for (let i = 1; i < points.length; i++) {
+            ctx.lineTo(points[i].x, points[i].y);
+          }
+          if (points.length > 2) ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    };
+    img.src = src;
+  }, [src, validRegionPoints]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="w-24 h-24 object-contain bg-white border border-border rounded-lg"
+      title={alt}
+    />
+  );
+}
+
 export default function UploadFileQueue({ files, staged, setStaged, setFiles, uploading, handleUpload, taxonomy }: UploadFileQueueProps) {
   if (files.length === 0) {
     return null;
@@ -103,67 +163,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     setIsValidRegionEditorOpen(false);
   };
 
-  // Simple canvas component that draws the image + valid region overlay
-function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; validRegionPoints: any; alt: string }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const img = new Image();
-    img.onload = () => {
-      // Set canvas to 64x64 (match the w-16 h-16 class)
-      canvas.width = 64;
-      canvas.height = 64;
-      ctx.clearRect(0, 0, 64, 64);
-      ctx.drawImage(img, 0, 0, 64, 64);
-
-      // Draw valid region overlay if points exist
-      if (validRegionPoints) {
-        let points: { x: number; y: number }[] = [];
-        // Support both direct points array and { simplifiedPoints, shapes } format
-        const raw = Array.isArray(validRegionPoints)
-          ? validRegionPoints
-          : validRegionPoints.simplifiedPoints || validRegionPoints.shapes?.[0]?.points || [];
-        points = raw.map((p: any) => ({
-          x: typeof p.x === "number" && p.x <= 1 ? p.x * 64 : p.x,
-          y: typeof p.y === "number" && p.y <= 1 ? p.y * 64 : p.y,
-        }));
-
-        if (points.length >= 2) {
-          ctx.save();
-          ctx.strokeStyle = "rgba(37, 99, 235, 0.9)";
-          ctx.lineWidth = 2;
-          ctx.setLineDash([3, 2]);
-          ctx.fillStyle = "rgba(37, 99, 235, 0.25)";
-          ctx.beginPath();
-          ctx.moveTo(points[0].x, points[0].y);
-          for (let i = 1; i < points.length; i++) {
-            ctx.lineTo(points[i].x, points[i].y);
-          }
-          if (points.length > 2) ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-          ctx.restore();
-        }
-      }
-    };
-    img.src = src;
-  }, [src, validRegionPoints]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className="w-16 h-16 object-contain bg-white border border-border rounded-lg"
-      title={alt}
-    />
-  );
-}
-
-function removeIndex(idx: number) {
+  function removeIndex(idx: number) {
     const copy = [...staged];
     copy.splice(idx, 1);
     setStaged(copy);
@@ -217,12 +217,12 @@ function removeIndex(idx: number) {
         <table className="w-full min-w-max divide-y divide-border">
           <thead className="bg-surface/50">
             <tr className="text-xs font-semibold text-muted uppercase tracking-wider">
-              <th className="text-left py-2.5 px-3 w-24">Image</th>
-              <th className="text-left py-2.5 px-3">Category</th>
-              <th className="text-left py-2.5 px-3">Subcategory</th>
-              <th className="text-left py-2.5 px-3">Name</th>
-              <th className="text-left py-2.5 px-3">Valid Region</th>
-              <th className="text-right py-2.5 px-3">Actions</th>
+              <th className="text-left py-3 px-4 w-28">Image</th>
+              <th className="text-left py-3 px-4">Category</th>
+              <th className="text-left py-3 px-4">Subcategory</th>
+              <th className="text-left py-3 px-4">Name</th>
+              <th className="text-left py-3 px-4">Valid Region</th>
+              <th className="text-right py-3 px-4">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -234,29 +234,29 @@ function removeIndex(idx: number) {
 
               return (
                 <tr key={idx} className="hover:bg-surface/50 transition-colors even:bg-surface/20">
-                  <td className="py-2 px-3">
+                  <td className="py-3 px-4 align-top">
                     <ThumbnailWithRegion
                       src={preview}
                       validRegionPoints={s.valid_region_points}
                       alt={file.name}
                     />
                   </td>
-                  <td className="py-2 px-3">
+                  <td className="py-3 px-4 align-top">
                     <select
-                      className="w-32 p-1.5 border border-border rounded-lg text-xs bg-white"
+                      className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
                       value={s.category || ""}
                       onChange={(e) => handleInlineCategoryChange(idx, e.target.value)}
                       disabled={uploading}
                     >
                       <option value="">NONE</option>
-                      {categoryOptions.map((category) => (
-                        <option key={category.slug} value={category.slug}>{category.name}</option>
+                      {categoryOptions.map((cat) => (
+                        <option key={cat.slug} value={cat.slug}>{cat.name}</option>
                       ))}
                     </select>
                   </td>
-                  <td className="py-2 px-3">
+                  <td className="py-3 px-4 align-top">
                     <select
-                      className="w-32 p-1.5 border border-border rounded-lg text-xs bg-white"
+                      className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
                       value={s.subcategory || ""}
                       onChange={(e) => handleInlineSubcategoryChange(idx, e.target.value)}
                       disabled={uploading || !s.category}
@@ -271,13 +271,13 @@ function removeIndex(idx: number) {
                       )}
                     </select>
                   </td>
-                  <td className="py-2 px-3">
+                  <td className="py-3 px-4 align-top">
                     <span className="text-sm text-ink truncate block max-w-[200px]" title={file.name}>
                       {s.name || file.name}
                     </span>
                     <span className="text-xs text-muted">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
                   </td>
-                  <td className="py-2 px-3">
+                  <td className="py-3 px-4 align-top">
                     {isBags ? (
                       <button
                         type="button"
@@ -291,7 +291,7 @@ function removeIndex(idx: number) {
                       <span className="text-xs text-muted/50">—</span>
                     )}
                   </td>
-                  <td className="py-2 px-3 text-right">
+                  <td className="py-3 px-4 text-right align-top">
                     <button
                       onClick={() => removeIndex(idx)}
                       className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 transition-colors"
@@ -335,8 +335,8 @@ function removeIndex(idx: number) {
                   onChange={(e) => handleCategoryChange(e.target.value)}
                 >
                   <option value="">NONE</option>
-                  {categoryOptions.map((category) => (
-                    <option key={category.slug} value={category.slug}>{category.name}</option>
+                  {categoryOptions.map((cat) => (
+                    <option key={cat.slug} value={cat.slug}>{cat.name}</option>
                   ))}
                 </select>
                 <label className="text-xs text-muted mt-2 block">Subcategory</label>

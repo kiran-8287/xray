@@ -55,87 +55,72 @@ This system solves the problem by **synthesizing** realistic X-ray composites fr
 
 ## 3. Project Structure & Architecture
 
-```
+```text
 xray1/                              # Root project directory
-├── package.json                    # Root monorepo package (orchestrates frontend + backend)
-├── README.md                       # Project readme
-├── PROJECT_DOCUMENTATION.md        # Previous documentation
-├── implementation_plan.md          # Implementation roadmap
-├── taxonomy.json                   # Master taxonomy: all object categories, subcategories, items
-├── check-taxonomy.js               # Utility to validate taxonomy.json
-├── reorder-taxonomy.js             # Utility to reorder taxonomy.json entries
-├── xray_scanner_object_taxonomy.html # Visual HTML taxonomy viewer
-├── meeting.txt                     # Meeting notes
-│
-├── backend/                        # Node.js + Express + PostgreSQL backend
-│   ├── package.json
-│   ├── src/
-│   │   ├── server.js               # Main Express server (760 lines, 18+ API endpoints)
-│   │   ├── schema.sql              # PostgreSQL schema (9 tables)
-│   │   ├── taxonomy.js             # Full taxonomy reference data (~3270 lines)
-│   │   ├── api/
-│   │   │   └── datasetGenerator.js # Generates PNG composites + JSON annotations
-│   │   └── lib/
-│   │       ├── geometry.js         # Server-side geometry (point-in-polygon, transforms)
-│   │       └── renderCanvas.js     # Server-side canvas rendering (node-canvas, Beer-Lambert)
-│   ├── data/
-│   │   ├── library_images/         # Uploaded image files stored here
-│   │   ├── exports/                # Single-image export outputs
-│   │   ├── collage_images/         # Batch-generated collage outputs
-│   │   └── customization_exports/  # Customization page exports
-│   ├── designed_images/            # Pre-designed test images (currently empty)
-│   └── scripts/                    # Build/seed scripts
-│
-├── frontend/                       # React + TypeScript + Vite frontend
-│   ├── package.json
-│   ├── index.html                  # SPA entry point
-│   ├── vite.config.ts              # Vite dev server config (port 5174)
-│   ├── tsconfig.json               # TypeScript config
-│   ├── tailwind.config.js          # Tailwind CSS with custom design tokens
-│   ├── postcss.config.js           # PostCSS config
-│   ├── eslint.config.js            # ESLint config
-│   └── src/
-│       ├── main.tsx                # React 18 entry point
-│       ├── App.tsx                 # Root component with routing
-│       ├── index.css               # Tailwind + custom CSS animations
-│       ├── pages/                  # 5 main pages
-│       │   ├── UploadPage.tsx      # File upload with valid region editor
-│       │   ├── LibraryPage.tsx     # Browse/search/select items
-│       │   ├── CollagePage.tsx     # View & export generated combinations
-│       │   ├── CustomizationPage.tsx # Interactive canvas editor
-│       │   └── SavedPage.tsx       # View saved layouts
-│       ├── components/             # Reusable UI components
-│       │   ├── upload/             # Upload-related components
-│       │   ├── customization/      # Canvas editor components
-│       │   ├── library/            # Library browsing components
-│       │   ├── collage/            # Collage preview components
-│       │   └── ValidRegionEditor.tsx # Shape-drawing editor for valid regions
-│       ├── lib/                    # Core logic
-│       │   ├── xrayRenderer.ts     # Frontend Beer-Lambert rendering (canvas API)
-│       │   ├── geometry.ts         # Geometry utilities (point-in-polygon, transforms)
-│       │   ├── customizationHelpers.ts # Object placement + pixel value calculation
-│       │   └── api.ts              # API helper functions
-│       ├── types/                  # TypeScript type definitions
-│       │   ├── customization.ts    # SceneObject type
-│       │   ├── geometry.ts         # Point type
-│       │   └── library.ts          # Item, Taxonomy types
-│       ├── stencils/               # Stencil type system
-│       │   └── types.ts            # StencilKind, StencilId types
-│       ├── config/                 # Configuration
-│       │   └── categories.ts       # Category styles, normalization, mapping
-│       └── hooks/                  # Custom React hooks
-│
-└── data_synthesis/                 # Python scripts for preparing raw X-ray data
-    ├── dumpread.py                 # Read .dump files (raw X-ray scanner format)
-    ├── extract_tips.py             # Extract threat items from .tip files
-    ├── convert_tips_to_png.py      # Convert .tip files to PNG images
-    ├── fix_threat_dimensions.py    # Resize threat images to standard dimensions
-    ├── check_tip.py                # Validate .tip file format
-    ├── bags_easy/                  # Easy bag scan files (.dump, .pgm, .png)
-    ├── bags_medium/                # Medium difficulty bag scans
-    ├── bags_hard/                  # Hard bag scans
-    ├── guns/                       # Gun threat images
-    └── knife/                      # Knife threat images
+|-- package.json                    # Root npm scripts orchestrating frontend/backend
+|-- package-lock.json               # Root npm lockfile
+|-- README.md                       # Short project readme
+|-- DETAILED_PROJECT_DOCUMENTATION.md # This complete project documentation
+|-- taxonomy.json                   # Master object taxonomy used for upload classification
+|-- check-taxonomy.js               # Utility to validate taxonomy.json
+|-- reorder-taxonomy.js             # Utility to reorder taxonomy.json entries
+|
+|-- backend/                        # Node.js + Express + PostgreSQL backend
+|   |-- package.json
+|   |-- package-lock.json
+|   |-- src/
+|   |   |-- server.js               # Main Express server and REST API
+|   |   |-- schema.sql              # PostgreSQL schema
+|   |   |-- taxonomy.js             # Taxonomy reference/seed data
+|   |   |-- api/
+|   |   |   `-- datasetGenerator.js  # Generates composites, manifests, labels
+|   |   `-- lib/
+|   |       |-- geometry.js          # Server-side geometry and placement checks
+|   |       `-- renderCanvas.js      # Server-side Beer-Lambert rendering via node-canvas
+|   |-- data/
+|   |   |-- library_images/          # Uploaded/imported library images
+|   |   |-- exports/                 # Single-scene export folders
+|   |   |-- collage_images/          # Batch dataset/collage output folders
+|   |   |-- customization_exports/   # Customization/export output area
+|   |   `-- xray.db                 # Local SQLite artifact/placeholder; runtime uses PostgreSQL
+|   `-- scripts/                    # Seeding, import, image organization, stencil utilities
+|
+|-- frontend/                       # React + TypeScript + Vite frontend
+|   |-- package.json
+|   |-- package-lock.json
+|   |-- index.html                  # SPA entry point
+|   |-- vite.config.ts              # Vite dev/build config
+|   |-- tsconfig.json               # TypeScript config
+|   |-- tsconfig.node.json          # Node-side TypeScript config for tooling
+|   |-- tailwind.config.js          # Tailwind CSS design tokens
+|   |-- postcss.config.js           # PostCSS config
+|   |-- eslint.config.js            # ESLint config
+|   |-- dist/                       # Built frontend output currently present in repo
+|   `-- src/
+|       |-- main.tsx                # React 18 entry point
+|       |-- App.tsx                 # Root component, UploadProvider, routing/nav
+|       |-- index.css               # Tailwind base + project CSS
+|       |-- vite-env.d.ts           # Vite TypeScript environment declarations
+|       |-- context/
+|       |   `-- UploadContext.tsx    # Shared upload staging/context state
+|       |-- pages/                  # Upload, Library, Collage, Customization, Saved pages
+|       |-- components/             # Upload, library, collage, customization, help UI
+|       |-- lib/                    # Rendering, geometry, customization helpers
+|       |-- types/                  # Library, geometry, customization TS types
+|       |-- stencils/               # Stencil type definitions
+|       `-- config/                 # Category labels, colors, normalization helpers
+|
+|-- data_synthesis/                 # Raw scanner conversion utilities and source samples
+|   |-- dumpread.py                 # Reads .dump files and emits PGM/color PNG outputs
+|   |-- tipread.py                  # Reads .tip files and emits low/high-energy PNGs
+|   |-- bags_easy/                  # Easy bag scans (.dump.pgm + color PNG)
+|   |-- bags_medium/                # Medium bag scans (.dump.pgm + color PNG)
+|   |-- bags_hard/                  # Hard bag scans (.dump.pgm + color PNG)
+|   |-- guns/                       # Gun .tip files and sample PNGs
+|   `-- knife/                      # Knife .tip files and sample PNGs
+|
+|-- extracted_synthesis/            # Extracted single PNG assets from synthesis inputs
+`-- extracted_files_low_high/       # Low/high-energy extracted PNG channels plus R channel for bags
 ```
 
 ### Why This Structure?
@@ -189,11 +174,11 @@ The valid region data is stored as JSONB (JSON Binary), which PostgreSQL handles
 #### `package.json`
 - **Name:** `synthetic-xray-prototype`
 - **Purpose:** Monorepo orchestrator. Defines scripts that delegate to frontend/backend:
-  - `npm run dev` → starts both frontend and backend concurrently
+  - `npm run dev` -> runs `dev:backend` then `dev:frontend` in sequence; for active development, run backend and frontend in separate terminals
   - `npm run dev:frontend` → starts Vite dev server on port 5174
   - `npm run dev:backend` → starts Express server on port 8080
   - `npm run build` → builds frontend for production
-- **No dependencies** — this is just a script runner
+- **Dependency note:** root currently includes `canvas` and mostly acts as a script runner for frontend/backend tasks.
 
 #### `taxonomy.json`
 - **Purpose:** Master reference data defining all object categories, subcategories, and individual items
@@ -204,9 +189,12 @@ The valid region data is stored as JSONB (JSON Binary), which PostgreSQL handles
 - **Purpose:** Utility scripts for validating and reordering `taxonomy.json`
 - **Usage:** `node check-taxonomy.js` to validate structure, `node reorder-taxonomy.js` to sort entries
 
-#### `xray_scanner_object_taxonomy.html`
-- **Purpose:** Visual HTML page that renders the taxonomy as an interactive tree view
-- **Usage:** Open in browser to visually inspect the taxonomy hierarchy
+#### `DETAILED_PROJECT_DOCUMENTATION.md`
+- **Purpose:** The living project map you are reading now
+- **Maintenance:** Update this when source files, APIs, scripts, or data folders change
+
+#### `package-lock.json`
+- **Purpose:** Locks the root npm dependency graph, currently including the shared `canvas` dependency
 
 ---
 
@@ -219,9 +207,11 @@ The valid region data is stored as JSONB (JSON Binary), which PostgreSQL handles
 - **Key scripts:**
   - `dev` / `start` — runs `src/server.js`
   - `seed` — seeds taxonomy into database
-  - `generate-predefined-stencils` — generates 29 SVG stencil files
+  - `generate-predefined-stencils` - generates predefined stencil assets/types
+  - `seed-full-library` / `seed-combined-library` - seed library data.
+  - `organize-images`, `rename-images`, `generate-organize-test-images` - maintain local image assets.
 
-#### `backend/src/server.js` (760 lines) — THE MAIN SERVER
+#### `backend/src/server.js` — THE MAIN SERVER
 
 This is the heart of the backend. Here's what it does:
 
@@ -272,7 +262,7 @@ This is the heart of the backend. Here's what it does:
 9. Otherwise, inserts into `non_threat_items` table
 10. All done within a PostgreSQL transaction (BEGIN/COMMIT/ROLLBACK)
 
-#### `backend/src/schema.sql` (75 lines) — DATABASE SCHEMA
+#### `backend/src/schema.sql` — DATABASE SCHEMA
 
 Defines 9 tables:
 
@@ -329,12 +319,12 @@ saved_layouts (
 )
 ```
 
-#### `backend/src/taxonomy.js` (~3270 lines)
+#### `backend/src/taxonomy.js`
 - **Purpose:** Massive reference file defining the complete taxonomy of X-ray scannable objects
 - **Contains:** 7 top-level categories (bags, trays, clothing, electronics, food, threats, miscellaneous), ~43 subcategories, hundreds of individual items with filenames and pixel values
 - **Used by:** Seed scripts to populate the database and taxonomy.json
 
-#### `backend/src/api/datasetGenerator.js` (325 lines) — BATCH GENERATION ENGINE
+#### `backend/src/api/datasetGenerator.js` — BATCH GENERATION ENGINE
 
 Handles both single-image export and batch dataset generation:
 
@@ -355,7 +345,7 @@ Handles both single-image export and batch dataset generation:
    e. Generates YOLO-format bounding box annotations
    f. Saves PNG + JSON label file
 
-#### `backend/src/lib/renderCanvas.js` (141 lines) — SERVER-SIDE RENDERING
+#### `backend/src/lib/renderCanvas.js` — SERVER-SIDE RENDERING
 
 This is the server-side equivalent of `xrayRenderer.ts`. It uses `node-canvas` (a Node.js implementation of the Canvas API) to render X-ray composites:
 
@@ -394,11 +384,15 @@ This is the server-side equivalent of `xrayRenderer.ts`. It uses `node-canvas` (
 - Tailwind CSS imports + Inter font
 - Custom CSS animations: `slide-up`, `fade-in`, `slide-in-right`
 
+#### `context/UploadContext.tsx`
+- Provides shared upload staging state around the app via `UploadProvider`
+- Keeps upload-related page/component state out of the top-level router
+
 ---
 
 ### 5.4 Pages (`frontend/src/pages/`)
 
-#### `UploadPage.tsx` (172 lines) — FILE UPLOAD
+#### `UploadPage.tsx` — FILE UPLOAD
 
 **State Management:**
 - `files: File[]` — raw File objects from the browser
@@ -418,7 +412,7 @@ This is the server-side equivalent of `xrayRenderer.ts`. It uses `node-canvas` (
    - `FormData` containing all files
    - `metadata` JSON string with per-file category/subcategory/name/valid_region_points
 
-#### `LibraryPage.tsx` (529 lines) — ITEM BROWSER
+#### `LibraryPage.tsx` — ITEM BROWSER
 
 **Features:**
 - Fetches all items from `GET /api/items/categorized`
@@ -435,7 +429,7 @@ This is the server-side equivalent of `xrayRenderer.ts`. It uses `node-canvas` (
 1. User selects bags, threats, and other items
 2. Clicks "Generate Combinations" → navigates to CollagePage with selected items in `location.state`
 
-#### `CollagePage.tsx` (260 lines) — COMBINATION VIEWER & BATCH EXPORT
+#### `CollagePage.tsx` — COMBINATION VIEWER & BATCH EXPORT
 
 **How Combinations Are Generated:**
 1. Receives `selectedBags`, `selectedThreats`, `selectedOthers` from LibraryPage via `location.state`
@@ -455,7 +449,7 @@ This is the server-side equivalent of `xrayRenderer.ts`. It uses `node-canvas` (
 - Combinations stored in `sessionStorage` (survives page navigation)
 - Selection stored in `localStorage` (survives browser restart)
 
-#### `CustomizationPage.tsx` (779 lines) — INTERACTIVE CANVAS EDITOR
+#### `CustomizationPage.tsx` — INTERACTIVE CANVAS EDITOR
 
 This is the most complex page. It provides a full visual editor for arranging objects on a canvas.
 
@@ -540,7 +534,7 @@ When the user clicks Save, the editor:
 - Drag-and-drop zone that accepts files and folders
 - Visual feedback with dashed border and icon
 
-#### `upload/UploadFileQueue.tsx` (220 lines)
+#### `upload/UploadFileQueue.tsx`
 - Displays staged files with preview thumbnails
 - Edit button opens modal with category/subcategory/name/valid_region fields
 - For bags, shows "Edit valid region" button that opens ValidRegionEditor
@@ -583,7 +577,7 @@ When the user clicks Save, the editor:
 
 ### 5.6 Core Logic (`frontend/src/lib/`)
 
-#### `xrayRenderer.ts` (136 lines) — FRONTEND BEER-LAMBERT RENDERER
+#### `xrayRenderer.ts` — FRONTEND BEER-LAMBERT RENDERER
 
 This is the most important file for understanding how X-ray composites are rendered.
 
@@ -630,7 +624,7 @@ Images are loaded once and cached. URLs point to `http://localhost:8080/data/lib
 6. Draw grayscale image to visible canvas
 ```
 
-#### `geometry.ts` (76 lines) — GEOMETRY UTILITIES
+#### `geometry.ts` — GEOMETRY UTILITIES
 
 **`isPointInPolygon(point, polygon)` — Ray Casting Algorithm:**
 ```
@@ -660,7 +654,7 @@ For each point in the outline:
 **`lineSegmentsIntersect(p1,p2,p3,p4)` — CCW Method:**
 Uses counter-clockwise orientation test to detect segment intersection.
 
-#### `customizationHelpers.ts` (211 lines) — PLACEMENT & PIXEL MATH
+#### `customizationHelpers.ts` — PLACEMENT & PIXEL MATH
 
 **`getTransformedValidRegion(bag)` — Converts stored polygon to canvas coordinates:**
 ```
@@ -765,7 +759,7 @@ type CategorizedItems = Record<string, Record<string, Item[]>>;
 
 ### 5.8 Configuration (`frontend/src/config/`)
 
-#### `categories.ts` (151 lines)
+#### `categories.ts`
 
 **`CATEGORY_MAP`:** Maps category slugs to Tailwind CSS class sets for consistent styling:
 ```
@@ -1272,9 +1266,9 @@ Both implementations use the exact same Beer-Lambert algorithm, ensuring WYSIWYG
 
 ## 11. End-to-End Walkthrough
 
-### Simulating the Full Workflow with designed_images
+### Simulating the Full Workflow with Local Synthesis Assets
 
-Although the `backend/designed_images/` folder is currently empty, let's walk through the complete workflow as if we were using pre-designed images (like the bags and threats from `data_synthesis/`):
+The current repo uses assets from `data_synthesis/`, `extracted_synthesis/`, and `extracted_files_low_high/` as local source material for upload/import experiments:
 
 ### Step 1: Upload a Bag Image
 
@@ -1488,31 +1482,26 @@ data/collage_images/dataset-2024-01-15T10-30-00-000Z/
 
 ## 12. Data Synthesis Scripts
 
-The `data_synthesis/` folder contains Python scripts for preparing raw X-ray scanner data:
+The `data_synthesis/` folder contains the currently present Python utilities and raw/sample scanner assets:
 
 ### `dumpread.py`
-- Reads `.dump` files — raw binary format from X-ray scanners
-- Converts to viewable PGM (Portable GrayMap) format
+- Reads scanner `.dump` data and writes viewable `.pgm` plus colorized PNG outputs.
+- Used with `bags_easy/`, `bags_medium/`, and `bags_hard/` source files.
 
-### `extract_tips.py`
-- Extracts individual threat items from `.tip` files (threat image packages)
-
-### `convert_tips_to_png.py`
-- Converts extracted `.tip` files to standard PNG format for web display
-
-### `fix_threat_dimensions.py`
-- Resizes threat images to standard dimensions for consistent rendering
-
-### `check_tip.py`
-- Validates the format and integrity of `.tip` files
+### `tipread.py`
+- Reads `.tip` threat packages and extracts low/high-energy PNG channels.
+- Used with `guns/` and `knife/` source files.
 
 ### Data Folders
-- `bags_easy/`, `bags_medium/`, `bags_hard/` — Bag scans of varying complexity
-- `guns/` — Gun threat images (.tip files and PNGs)
-- `knife/` — Knife threat images
+- `bags_easy/`, `bags_medium/`, `bags_hard/` - Bag scans grouped by difficulty, with `.dump.pgm` and `_clr.png` derivatives.
+- `guns/` - Gun threat `.tip` files plus sample PNG previews.
+- `knife/` - Knife threat `.tip` files plus sample PNG previews.
 
-These scripts prepare the initial dataset that gets uploaded through the web interface.
+### Extracted Output Folders
+- `extracted_synthesis/` - Single PNG assets extracted from bags, guns, and knives for upload/import into the web library.
+- `extracted_files_low_high/` - Low/high-energy PNG channels; bag entries also include `_R.png` channel images.
 
+These scripts and extracted folders prepare the initial dataset that gets uploaded through the web interface or imported by backend scripts.
 ---
 
 ## Summary

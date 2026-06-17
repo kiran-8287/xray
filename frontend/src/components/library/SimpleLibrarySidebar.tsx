@@ -32,12 +32,7 @@ export default function SimpleLibrarySidebar({
   const categories = ['bags', 'threats', 'non-threats'];
 
   return (
-    <aside className="w-80 border-r border-border bg-nav flex flex-col overflow-y-auto flex-shrink-0 select-none">
-      <div className="p-4 border-b border-border bg-panel flex items-center justify-between flex-shrink-0">
-        <h3 className="font-semibold text-ink text-xs uppercase tracking-wider">Library</h3>
-        <span className="text-[10px] font-mono text-muted bg-surface px-2 py-0.5 rounded-full border border-border">{categories.length}</span>
-      </div>
-
+    <aside className="w-96 border-r border-border bg-nav flex flex-col overflow-y-auto flex-shrink-0 select-none shadow-sm">
       <div className="p-3 space-y-3 flex-1 overflow-y-auto">
         {['bags', 'threats', 'non-threats'].map((catKey) => {
           const config = getCategoryConfig(catKey);
@@ -46,67 +41,66 @@ export default function SimpleLibrarySidebar({
           const isCatActive = activeCategory === catKey;
           const selectedCount = itemsInCat.filter((item) => selectedItems.has(item.id)).length;
           return (
-            <div key={catKey} className="space-y-1 bg-panel/30 rounded-xl border border-border/60 p-1.5">
+            <div key={catKey} className="space-y-2 bg-panel/30 rounded-2xl border border-border/60 p-2 shadow-sm transition-all hover:border-border/80">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
                     setActiveCategory(catKey);
                     setActiveSubcategory('all');
                   }}
-                  className={`flex-1 flex items-center gap-2 px-2.5 py-1.5 rounded-lg ${isCatActive ? 'bg-panel border-border shadow-sm font-semibold' : 'hover:bg-panel'}`}
+                  className={`flex-1 flex items-center gap-3 px-3 py-2 rounded-xl transition-all ${isCatActive ? 'bg-panel border-border shadow-sm font-bold text-accent' : 'hover:bg-panel/50 text-ink'}`}
                 >
-                  <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${config.bg} ${config.text}`}>
+                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm transition-transform group-hover:scale-105 ${config.bg} ${config.text}`}>
                     <Folder size={14} />
                   </div>
-                  <span className="text-xs truncate">{config.label}</span>
-                  <span className="ml-auto text-[10px] font-mono text-muted bg-surface px-1.5 py-0.5 rounded-full border border-border">{itemsInCat.length}</span>
+                  <span className="text-xs font-bold uppercase tracking-tight truncate">{config.label}</span>
+                  <span className="ml-auto text-[10px] font-bold font-mono text-muted/70 bg-surface px-2 py-0.5 rounded-full border border-border">{itemsInCat.length}</span>
                 </button>
                 <button
                   onClick={() => onSelectAllCategory(catKey)}
-                  className="rounded-md border border-border bg-surface px-2 py-1 text-[10px] font-semibold text-ink hover:border-accent/50 hover:text-accent"
+                  className="rounded-lg border border-border bg-surface px-3 py-1.5 text-[9px] font-bold text-accent hover:border-accent/50 hover:bg-accent/5 transition-all uppercase tracking-tighter"
                 >
-                  Select all
+                  SELECT ALL
                 </button>
                 <button
                   onClick={() => onDeleteCategory(catKey)}
-                  className="rounded-md border border-border bg-surface px-2 py-1 text-[10px] font-semibold text-ink hover:border-red-500/50 hover:text-red-600 flex items-center gap-1"
+                  className="rounded-lg border border-border bg-surface px-2 py-1.5 text-[9px] font-bold text-muted hover:border-red-500/50 hover:text-red-600 hover:bg-red-50 transition-all flex items-center justify-center"
                   title="Delete all items in this category"
                 >
-                  <Trash2 size={10} />
-                  Delete
+                  <Trash2 size={11} />
                 </button>
               </div>
 
-              <div className="pl-4 space-y-1 mt-2">
+              <div className="pl-4 space-y-1.5 mt-1 border-l border-border/40 ml-4">
                 <button
                   onClick={() => {
                     setActiveCategory(catKey);
                     setActiveSubcategory('all');
                   }}
-                  className={`flex items-center gap-2 px-2 py-1 rounded ${isCatActive && activeSubcategory === 'all' ? 'bg-panel border-border font-medium' : 'hover:bg-panel/40'}`}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all ${isCatActive && activeSubcategory === 'all' ? 'bg-panel border-border font-bold text-accent shadow-sm' : 'hover:bg-panel/40 text-muted'}`}
                 >
-                  <span className="text-[11px]">All {config.label}</span>
-                  <span className="ml-auto text-[9px] font-mono text-muted bg-surface px-1.5 py-0.2 rounded-full border border-border">{itemsInCat.length}</span>
+                  <span className="text-[11px] uppercase tracking-wide">All {config.label}</span>
+                  <span className="ml-auto text-[9px] font-bold font-mono text-muted/60 bg-surface/50 px-1.5 py-0.5 rounded-full border border-border/50">{itemsInCat.length}</span>
                 </button>
                 {Object.keys(subcats).map((subKey) => {
                   const selectedSubCount = (subcats[subKey] || []).filter((item) => selectedItems.has(item.id)).length;
                   return (
-                    <div key={subKey} className="flex items-center gap-2">
+                    <div key={subKey} className="flex items-center gap-2 group/sub">
                       <button
                         onClick={() => {
                           setActiveCategory(catKey);
                           setActiveSubcategory(subKey);
                         }}
-                        className={`flex-1 text-left px-2 py-1 rounded ${isCatActive && activeSubcategory === subKey ? 'bg-panel border-border font-medium' : 'hover:bg-panel/40'}`}
+                        className={`flex-1 text-left px-3 py-1.5 rounded-lg transition-all ${isCatActive && activeSubcategory === subKey ? 'bg-panel border-border font-bold text-accent shadow-sm' : 'hover:bg-panel/40 text-muted group-hover/sub:text-ink'}`}
                       >
-                        <span className="text-[11px] truncate">{subKey}</span>
-                        <span className="ml-2 text-[9px] font-mono text-muted bg-surface px-1.5 py-0.2 rounded-full border border-border">{(subcats[subKey] || []).length}</span>
+                        <span className="text-[11px] font-medium truncate">{subKey}</span>
+                        <span className="ml-2 text-[9px] font-bold font-mono text-muted/60 bg-surface/50 px-1.5 py-0.5 rounded-full border border-border/50">{(subcats[subKey] || []).length}</span>
                       </button>
                       <button
                         onClick={() => onSelectAllSubcategory(catKey, subKey)}
-                        className="rounded-md border border-border bg-surface px-2 py-1 text-[10px] font-semibold text-ink hover:border-accent/50 hover:text-accent"
+                        className="rounded-lg border border-border bg-surface px-3 py-1.5 text-[9px] font-bold text-accent hover:border-accent/50 hover:bg-accent/5 transition-all uppercase tracking-tighter"
                       >
-                        Select
+                        SELECT ALL
                       </button>
                     </div>
                   );
