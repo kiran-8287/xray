@@ -10,7 +10,8 @@ export default function UploadPage() {
   const { files, setFiles, staged, setStaged, clearAll } = useUploadContext();
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "success" | "error">("idle");
-  const [validation
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
+  const [folderName, setFolderName] = useState("My Upload");
   const [taxonomy, setTaxonomy] = useState<TaxonomyCategory[]>([]);
 
   const handleFilesSelected = (newFiles: File[]) => {
@@ -26,8 +27,36 @@ export default function UploadPage() {
   };
 
   const handleUpload = async () => {
+    // --- Validation ---
+    const missingCategory: string[] = [];
+    const missingBagsRegion: string[] = [];
+
+    staged.forEach((s) => {
+      if (!s.category || !s.subcategory) {
+        missingCategory.push(s.file.name);
+      }
+      if (s.category === "bags" && !s.valid_region_points) {
+        missingBagsRegion.push(s.file.name);
+      }
+    });
+
+    if (missingCategory.length > 0 || missingBagsRegion.length > 0) {
+      const lines: string[] = [];
+      if (missingCategory.length > 0) {
+        lines.push(`Set category & subcategory for: ${missingCategory.join(", ")}`);
+      }
+      if (missingBagsRegion.length > 0) {
+        lines.push(`Draw valid region for bags: ${missingBagsRegion.join(", ")}`);
+      }
+      setValidationMessage(lines.join(" | "));
+      setTimeout(() => setValidationMessage(null), 5000);
+      return;
+    }
+    // --- End Validation ---
+
     setUploading(true);
     setUploadStatus("idle");
+    setValidationMessage(null);
     try {
       const formData = new FormData();
       formData.append("folderName", folderName);
@@ -125,6 +154,16 @@ export default function UploadPage() {
             </div>
           )}
         </div>
+
+        {/* Validation Warning Toast */}
+        {validationMessage && (
+          <div className="fixed bottom-24 right-6 z-50 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex items-start gap-3 shadow-card animate-slide-up max-w-md">
+            <div className="w-5 h-5 bg-amber-500 rounded-full text-white flex items-center justify-center flex-shrink-0 mt-0.5">
+              <AlertTriangle size={14} />
+            </div>
+            <span className="text-sm font-medium">{validationMessage}</span>
+          </div>
+        )}
 
         {/* Selected files section - appears below the upload button when files are staged */}
         {staged.length > 0 && (
