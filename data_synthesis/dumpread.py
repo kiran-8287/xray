@@ -100,9 +100,16 @@ def ReadDump(filename, raw=False, FlippedAndRotated=False, DenoiseRequired=False
         return high, low, R
 
 
-def save_array_png(array, path: Path):
+def to_uint16(array):
+    """Convert a float64 array (values 0-65535) to uint16 for 16-bit PNG save."""
+    # Clip to valid uint16 range and convert
+    return np.clip(np.round(array), 0, 65535).astype(np.uint16)
+
+
+def save_array_png_16bit(array, path: Path):
+    """Save a float64 array as 16-bit PNG (full 0-65535 precision)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    img = cv2.normalize(array, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    img = to_uint16(array)
     return cv2.imwrite(str(path), img)
 
 
@@ -126,25 +133,25 @@ def convert_dump_to_png(input_root: Path, output_root: Path, channel_root: Path,
 
         high, low, R = ReadDump(str(src_path), raw=False)
         image_array = {"high": high, "low": low, "R": R}[source]
-        if save_array_png(image_array, out_path):
-            print(f"Converted {src_path} -> {out_path}")
+        if save_array_png_16bit(image_array, out_path):
+            print(f"Converted {src_path} -> {out_path}  (16-bit lossless)")
         else:
             print(f"Failed to save {out_path}")
 
         base_name = src_path.name[:-9]
-        for channel_name, channel_array in [("high", high), ("low", low), ("R", R)]:
+        for channel_name, channel_array in [("high", high), ("low", low)]:
             channel_path = channel_root / rel_path.parent / f"{base_name}_{channel_name}.png"
-            if save_array_png(channel_array, channel_path):
-                print(f"Saved {channel_name} channel {src_path} -> {channel_path}")
+            if save_array_png_16bit(channel_array, channel_path):
+                print(f"Saved {channel_name} channel {src_path} -> {channel_path}  (16-bit lossless)")
             else:
                 print(f"Failed to save {channel_name} channel {channel_path}")
 
-    print(f"Done. Converted {len(paths)} files to {output_root} and saved low/high/R files to {channel_root}")
+    print(f"Done. Converted {len(paths)} files to {output_root} and saved high/low channels to {channel_root}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Convert all .dump.pgm files under data_synthesis to 8-bit PNGs."
+        description="Convert all .dump.pgm files under data_synthesis to 16-bit lossless PNGs."
     )
     parser.add_argument(
         "--input-root",
@@ -160,8 +167,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--channel-root",
-        default=Path(__file__).resolve().parent.parent / "extracted_files_low_high_R",
-        help="Output folder for low/high/R PNG files (default: top-level extracted_files_low_high_R)",
+        default=Path(__file__).resolve().parent.parent / "extracted_files_low_high",
+        help="Output folder for low/high/R PNG files (default: top-level extracted_files_low_high)",
         type=Path,
     )
     parser.add_argument(

@@ -25,8 +25,8 @@ export default function UploadPage() {
     setFiles((prev) => [...prev, ...newFiles]);
     const newStaged = newFiles.map((f) => ({
       file: f,
-      category: "bags",
-      subcategory: "General",
+      category: "",
+      subcategory: "",
       name: f.name,
       valid_region_points: null,
     } as StagedItem));

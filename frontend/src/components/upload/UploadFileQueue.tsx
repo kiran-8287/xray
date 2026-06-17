@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef, useEffect } from "react";
 import type { TaxonomyCategory } from "../../types/library";
 import ValidRegionEditor from "../ValidRegionEditor";
-import { Trash2 } from "lucide-react";
+import { Trash2, Edit3 } from "lucide-react";
 import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName } from "../../config/categories";
 
 interface UploadFileQueueProps {
@@ -41,16 +41,18 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   }
 
   const selectedCategorySlug = useMemo(() => {
-    if (!editDraft?.category) return "bags";
+    if (!editDraft?.category) return "";
     const normalized = normalizeCategoryName(editDraft.category);
     return LIBRARIES.some((lib) => lib.slug === editDraft.category) ? editDraft.category : normalized;
   }, [editDraft]);
 
   const selectedCategory = useMemo(() => {
+    if (!selectedCategorySlug) return null;
     return LIBRARIES.find((lib) => lib.slug === selectedCategorySlug) || LIBRARIES[0];
   }, [selectedCategorySlug]);
 
   const subcategoryOptions = useMemo(() => {
+    if (!selectedCategory) return [];
     return getLibrarySubcategories(taxonomy, selectedCategory.slug);
   }, [taxonomy, selectedCategory]);
 
@@ -59,6 +61,14 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   }, []);
 
   const handleCategoryChange = (categoryValue: string) => {
+    if (!categoryValue) {
+      setEditDraft({
+        ...editDraft,
+        category: "",
+        subcategory: "",
+      });
+      return;
+    }
     const subcategories = getLibrarySubcategories(taxonomy, categoryValue);
     setEditDraft({
       ...editDraft,
@@ -71,8 +81,9 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     setEditDraft({ ...editDraft, subcategory: subcategoryValue });
 
     // Attempt to fetch canonical valid region for this subcategory
+    if (!subcategoryValue || !selectedCategory) return;
     try {
-      const categorySlug = selectedCategory ? selectedCategory.slug : editDraft?.category;
+      const categorySlug = selectedCategory.slug;
       const subSlug = String(subcategoryValue).toLowerCase().replace(/\s+/g, "-");
       const res = await fetch(`http://localhost:8080/api/subcategories/${categorySlug}/${subSlug}`);
       const data = await res.json();
@@ -80,7 +91,6 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         setEditDraft((d: any) => ({ ...d, valid_region_points: data.subcategory.valid_region_points }));
       }
     } catch (err) {
-      // ignore fetch errors, leave editDraft as-is
       console.warn('Failed to fetch subcategory valid region', err);
     }
   };
@@ -93,7 +103,67 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     setIsValidRegionEditorOpen(false);
   };
 
-  function removeIndex(idx: number) {
+  // Simple canvas component that draws the image + valid region overlay
+function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; validRegionPoints: any; alt: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const img = new Image();
+    img.onload = () => {
+      // Set canvas to 64x64 (match the w-16 h-16 class)
+      canvas.width = 64;
+      canvas.height = 64;
+      ctx.clearRect(0, 0, 64, 64);
+      ctx.drawImage(img, 0, 0, 64, 64);
+
+      // Draw valid region overlay if points exist
+      if (validRegionPoints) {
+        let points: { x: number; y: number }[] = [];
+        // Support both direct points array and { simplifiedPoints, shapes } format
+        const raw = Array.isArray(validRegionPoints)
+          ? validRegionPoints
+          : validRegionPoints.simplifiedPoints || validRegionPoints.shapes?.[0]?.points || [];
+        points = raw.map((p: any) => ({
+          x: typeof p.x === "number" && p.x <= 1 ? p.x * 64 : p.x,
+          y: typeof p.y === "number" && p.y <= 1 ? p.y * 64 : p.y,
+        }));
+
+        if (points.length >= 2) {
+          ctx.save();
+          ctx.strokeStyle = "rgba(37, 99, 235, 0.9)";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([3, 2]);
+          ctx.fillStyle = "rgba(37, 99, 235, 0.25)";
+          ctx.beginPath();
+          ctx.moveTo(points[0].x, points[0].y);
+          for (let i = 1; i < points.length; i++) {
+            ctx.lineTo(points[i].x, points[i].y);
+          }
+          if (points.length > 2) ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    };
+    img.src = src;
+  }, [src, validRegionPoints]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="w-16 h-16 object-contain bg-white border border-border rounded-lg"
+      title={alt}
+    />
+  );
+}
+
+function removeIndex(idx: number) {
     const copy = [...staged];
     copy.splice(idx, 1);
     setStaged(copy);
@@ -103,41 +173,149 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     setFiles(filesCopy);
   }
 
+  // Handle inline category dropdown change (for the row display)
+  function handleInlineCategoryChange(idx: number, categoryValue: string) {
+    const copy = [...staged];
+    if (!categoryValue) {
+      copy[idx] = { ...copy[idx], category: "", subcategory: "" };
+    } else {
+      const subcategories = getLibrarySubcategories(taxonomy, categoryValue);
+      copy[idx] = {
+        ...copy[idx],
+        category: categoryValue,
+        subcategory: subcategories[0]?.name || "General",
+      };
+    }
+    setStaged(copy);
+  }
+
+  function handleInlineSubcategoryChange(idx: number, subcategoryValue: string) {
+    const copy = [...staged];
+    copy[idx] = { ...copy[idx], subcategory: subcategoryValue };
+    setStaged(copy);
+  }
+
+  function getInlineSubcategoryOptions(categorySlug: string) {
+    if (!categorySlug) return [];
+    return getLibrarySubcategories(taxonomy, categorySlug);
+  }
+
+  const handleInlineValidRegion = (idx: number) => {
+    setEditingIndex(idx);
+    setEditDraft({ ...staged[idx] });
+    setIsValidRegionEditorOpen(true);
+  };
+
   return (
-    <div className="bg-panel rounded-2xl border border-border shadow-card overflow-hidden flex flex-col max-h-[560px]">
+    <div className="bg-panel rounded-2xl border border-border shadow-card overflow-hidden flex flex-col">
       <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-nav flex-shrink-0">
-        <span className="text-sm font-semibold text-ink">Staged Collage</span>
+        <span className="text-sm font-semibold text-ink">Staged Items</span>
         <span className="bg-surface text-muted text-xs font-mono px-2.5 py-0.5 rounded-full border border-border">{staged.length}</span>
       </div>
 
-      <ul className="divide-y divide-border overflow-y-auto flex-1">
-        {staged.map((s, idx) => {
-          const file = s.file as File;
-          const preview = URL.createObjectURL(file);
-          return (
-            <li key={idx} className="px-5 py-3 hover:bg-surface transition-colors even:bg-surface/30">
-              <div className="flex gap-3 items-start">
-                <img src={preview} alt={file.name} className="w-20 h-20 object-contain bg-white border border-border rounded-lg" />
-                <div className="flex-1 min-w-0">
-                  <p className="truncate text-sm font-medium text-ink" title={file.name}>{file.name}</p>
-                  <p className="text-xs text-muted">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                  <p className="text-xs mt-2"><strong>Category:</strong> {s.category} • <strong>Sub:</strong> {s.subcategory}</p>
-                  <p className="text-xs"><strong>Name:</strong> {s.name}</p>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <button onClick={() => openEdit(idx)} className="px-3 py-1 text-sm rounded-xl border border-border bg-surface">Edit</button>
-                  <button onClick={() => removeIndex(idx)} className="px-3 py-1 text-sm rounded-xl border border-border text-rose-600">Remove</button>
-                </div>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-max divide-y divide-border">
+          <thead className="bg-surface/50">
+            <tr className="text-xs font-semibold text-muted uppercase tracking-wider">
+              <th className="text-left py-2.5 px-3 w-24">Image</th>
+              <th className="text-left py-2.5 px-3">Category</th>
+              <th className="text-left py-2.5 px-3">Subcategory</th>
+              <th className="text-left py-2.5 px-3">Name</th>
+              <th className="text-left py-2.5 px-3">Valid Region</th>
+              <th className="text-right py-2.5 px-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {staged.map((s, idx) => {
+              const file = s.file as File;
+              const preview = URL.createObjectURL(file);
+              const isBags = s.category === "bags";
+              const inlineSubOptions = getInlineSubcategoryOptions(s.category);
 
-      <div className="px-5 py-3.5 bg-nav border-t border-border flex-shrink-0">
-        <button onClick={() => { setFiles([]); setStaged([]); }} className="px-4 py-2 rounded-xl border border-border text-sm font-medium text-muted hover:bg-surface flex items-center gap-2">
+              return (
+                <tr key={idx} className="hover:bg-surface/50 transition-colors even:bg-surface/20">
+                  <td className="py-2 px-3">
+                    <ThumbnailWithRegion
+                      src={preview}
+                      validRegionPoints={s.valid_region_points}
+                      alt={file.name}
+                    />
+                  </td>
+                  <td className="py-2 px-3">
+                    <select
+                      className="w-32 p-1.5 border border-border rounded-lg text-xs bg-white"
+                      value={s.category || ""}
+                      onChange={(e) => handleInlineCategoryChange(idx, e.target.value)}
+                      disabled={uploading}
+                    >
+                      <option value="">NONE</option>
+                      {categoryOptions.map((category) => (
+                        <option key={category.slug} value={category.slug}>{category.name}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="py-2 px-3">
+                    <select
+                      className="w-32 p-1.5 border border-border rounded-lg text-xs bg-white"
+                      value={s.subcategory || ""}
+                      onChange={(e) => handleInlineSubcategoryChange(idx, e.target.value)}
+                      disabled={uploading || !s.category}
+                    >
+                      <option value="">NONE</option>
+                      {inlineSubOptions.length > 0 ? (
+                        inlineSubOptions.map((sub) => (
+                          <option key={sub.slug} value={sub.name}>{sub.name}</option>
+                        ))
+                      ) : (
+                        s.category ? <option value="General">General</option> : null
+                      )}
+                    </select>
+                  </td>
+                  <td className="py-2 px-3">
+                    <span className="text-sm text-ink truncate block max-w-[200px]" title={file.name}>
+                      {s.name || file.name}
+                    </span>
+                    <span className="text-xs text-muted">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
+                  </td>
+                  <td className="py-2 px-3">
+                    {isBags ? (
+                      <button
+                        type="button"
+                        onClick={() => handleInlineValidRegion(idx)}
+                        className="text-xs px-2.5 py-1.5 rounded-lg border border-border bg-surface hover:bg-surface/80 transition-colors flex items-center gap-1"
+                      >
+                        <Edit3 size={12} />
+                        {s.valid_region_points ? "Edit" : "Set"}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted/50">—</span>
+                    )}
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    <button
+                      onClick={() => removeIndex(idx)}
+                      className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 transition-colors"
+                      title="Remove"
+                      disabled={uploading}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-5 py-3 bg-nav border-t border-border flex-shrink-0 flex justify-between items-center">
+        <button
+          onClick={() => { setFiles([]); setStaged([]); }}
+          className="px-4 py-2 rounded-xl border border-border text-sm font-medium text-muted hover:bg-surface flex items-center gap-2"
+        >
           <Trash2 size={15} /> Clear All
         </button>
+        <span className="text-xs text-muted">{staged.length} item{staged.length !== 1 ? 's' : ''} staged</span>
       </div>
 
       {/* Edit Modal */}
@@ -156,7 +334,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   value={selectedCategory?.slug || editDraft.category || ""}
                   onChange={(e) => handleCategoryChange(e.target.value)}
                 >
-                  <option value="">Select category</option>
+                  <option value="">NONE</option>
                   {categoryOptions.map((category) => (
                     <option key={category.slug} value={category.slug}>{category.name}</option>
                   ))}
@@ -167,13 +345,13 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   value={editDraft.subcategory || ""}
                   onChange={(e) => handleSubcategoryChange(e.target.value)}
                 >
-                  <option value="">Select subcategory</option>
+                  <option value="">NONE</option>
                   {subcategoryOptions.length > 0 ? (
                     subcategoryOptions.map((sub) => (
                       <option key={sub.slug} value={sub.name}>{sub.name}</option>
                     ))
                   ) : (
-                    <option value="General">General</option>
+                    editDraft.category ? <option value="General">General</option> : null
                   )}
                 </select>
                 <label className="text-xs text-muted mt-2 block">Item Name</label>
