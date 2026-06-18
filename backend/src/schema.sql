@@ -43,16 +43,6 @@
     PRIMARY KEY (category_slug, slug)
   );
 
-  -- Dedicated table for canonical bag-subcategory valid regions (preferred over embedding in subcategories)
-  CREATE TABLE IF NOT EXISTS bag_subcategory_valid_regions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    category_slug VARCHAR(100) NOT NULL REFERENCES categories(slug) ON DELETE CASCADE,
-    subcategory_slug VARCHAR(100) NOT NULL,
-    valid_region_points JSONB,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (category_slug, subcategory_slug)
-  );
-
   -- Generic threat/non-threat mapping tables for clearer classification
   CREATE TABLE IF NOT EXISTS threat_items (
     item_id UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,

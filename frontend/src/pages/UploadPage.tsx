@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import type { TaxonomyCategory } from "../types/library";
-import { CheckCircle2, AlertCircle, Upload as UploadIcon, AlertTriangle } from "lucide-react";
+import { CheckCircle2, AlertCircle, Upload as UploadIcon, AlertTriangle, Wand2 } from "lucide-react";
 import UploadDropZone from "../components/upload/UploadDropZone";
 import UploadFileQueue from "../components/upload/UploadFileQueue";
-import { LIBRARY_PREFIXES } from "../config/categories";
+import { LIBRARY_PREFIXES, LIBRARIES, getLibrarySubcategories } from "../config/categories";
 import { useUploadContext } from "../context/UploadContext";
 
 export default function UploadPage() {
@@ -13,9 +13,13 @@ export default function UploadPage() {
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [folderName, setFolderName] = useState("My Upload");
   const [taxonomy, setTaxonomy] = useState<TaxonomyCategory[]>([]);
+  const [massCategory, setMassCategory] = useState("");
+  const [massSubcategory, setMassSubcategory] = useState("");
+  const [selectedForMass, setSelectedForMass] = useState<Set<number>>(new Set());
 
   const handleFilesSelected = (newFiles: File[]) => {
     setFiles((prev) => [...prev, ...newFiles]);
+    const startIdx = staged.length;
     const newStaged = newFiles.map((f) => ({
       file: f,
       category: "",
@@ -24,6 +28,14 @@ export default function UploadPage() {
       valid_region_points: null,
     }));
     setStaged((prev) => [...prev, ...newStaged]);
+    // Auto-select only the newly added files in mass panel
+    const newIndices = new Set<number>();
+    for (let i = startIdx; i < startIdx + newFiles.length; i++) {
+      newIndices.add(i);
+    }
+    setSelectedForMass(newIndices);
+    setMassCategory("");
+    setMassSubcategory("");
   };
 
   const handleUpload = async () => {
@@ -117,8 +129,48 @@ export default function UploadPage() {
     fetchTaxonomy();
   }, []);
 
+  const massSubcategoryOptions = useMemo(() => {
+    if (!massCategory) return [];
+    return getLibrarySubcategories(taxonomy, massCategory);
+  }, [taxonomy, massCategory]);
+
+  const handleMassApply = () => {
+    if (!massCategory) return;
+    setStaged((prev) =>
+      prev.map((s, idx) => {
+        if (!selectedForMass.has(idx)) return s;
+        const subcats = getLibrarySubcategories(taxonomy, massCategory);
+        return {
+          ...s,
+          category: massCategory,
+          subcategory: massSubcategory || subcats[0]?.name || "General",
+        };
+      })
+    );
+    // Keep panel open for reuse; reset category/subcategory but keep selection
+    setMassCategory("");
+    setMassSubcategory("");
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedForMass.size === staged.length) {
+      setSelectedForMass(new Set());
+    } else {
+      setSelectedForMass(new Set(staged.map((_, i) => i)));
+    }
+  };
+
+  const toggleSelect = (idx: number) => {
+    setSelectedForMass((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
   return (
-    <div className="max-w-5xl mx-auto py-10 px-6 animate-fade-in">
+    <div className="max-w-7xl mx-auto py-10 px-6 animate-fade-in">
       {/* Hero Header */}
       <div className="border-l-4 border-accent pl-4 mb-8">
         <h2 className="text-3xl font-bold text-ink tracking-tight">Upload Images</h2>
@@ -127,6 +179,89 @@ export default function UploadPage() {
       <div className="space-y-6">
         {/* Dropzone at the top - the file picker */}
         <UploadDropZone onFilesSelected={handleFilesSelected} />
+
+        {/* Mass Assign Panel - always visible when files are staged */}
+        {staged.length > 0 && (
+          <div className="bg-panel rounded-2xl border border-border p-5 shadow-card">
+            <div className="flex items-center gap-2 mb-3">
+              <Wand2 size={16} className="text-accent" />
+              <span className="text-sm font-semibold text-ink">Mass Assign Category</span>
+            </div>
+
+            {/* File selector with checkboxes */}
+            <div className="mb-3 max-h-40 overflow-y-auto border border-border rounded-lg bg-white">
+              <div className="flex items-center gap-2 p-2 border-b border-border bg-gray-50">
+                <input
+                  type="checkbox"
+                  checked={selectedForMass.size === staged.length}
+                  onChange={toggleSelectAll}
+                  className="rounded border-gray-300"
+                />
+                <span className="text-xs font-medium text-muted">Select All</span>
+              </div>
+              {staged.map((s, idx) => (
+                <label key={idx} className="flex items-center gap-2 p-2 hover:bg-gray-50 cursor-pointer border-b border-border last:border-b-0">
+                  <input
+                    type="checkbox"
+                    checked={selectedForMass.has(idx)}
+                    onChange={() => toggleSelect(idx)}
+                    className="rounded border-gray-300"
+                  />
+                  <span className="text-xs text-ink truncate flex-1">#{idx + 1} {s.file.name}</span>
+                  {s.category && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/10 text-accent font-medium">
+                      {s.category}
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-muted font-medium">Category</label>
+                <select
+                  className="w-36 p-2 border border-border rounded-lg text-xs bg-white"
+                  value={massCategory}
+                  onChange={(e) => {
+                    setMassCategory(e.target.value);
+                    setMassSubcategory("");
+                  }}
+                >
+                  <option value="">Select category</option>
+                  {LIBRARIES.map((cat) => (
+                    <option key={cat.slug} value={cat.slug}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-muted font-medium">Subcategory</label>
+                <select
+                  className="w-36 p-2 border border-border rounded-lg text-xs bg-white"
+                  value={massSubcategory}
+                  onChange={(e) => setMassSubcategory(e.target.value)}
+                  disabled={!massCategory}
+                >
+                  <option value="">Select subcategory</option>
+                    {massSubcategoryOptions.length > 0 ? (
+                      massSubcategoryOptions.map((sub: any) => (
+                        <option key={sub.slug} value={sub.name}>{sub.name}</option>
+                      ))
+                  ) : (
+                    massCategory ? <option value="General">General</option> : null
+                  )}
+                </select>
+              </div>
+              <button
+                onClick={handleMassApply}
+                disabled={!massCategory || selectedForMass.size === 0}
+                className="px-4 py-2 rounded-xl bg-accent text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+              >
+                Apply to Selected ({selectedForMass.size})
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Upload Button below dropzone */}
         <div className="bg-panel rounded-2xl border border-border p-6 shadow-card">
@@ -176,6 +311,9 @@ export default function UploadPage() {
             uploading={uploading}
             handleUpload={handleUpload}
             taxonomy={taxonomy}
+            selectedForMass={selectedForMass}
+            onToggleSelect={toggleSelect}
+            onSelectAll={toggleSelectAll}
           />
         )}
       </div>

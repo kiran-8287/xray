@@ -296,12 +296,6 @@ threats (
 categories (slug PK, name, type)
 subcategories (slug, category_slug FK, name, valid_region_points JSONB)
 
--- Canonical bag valid regions per subcategory
-bag_subcategory_valid_regions (
-    category_slug, subcategory_slug,
-    valid_region_points JSONB
-)
-
 -- Classification mapping tables
 threat_items (item_id PK, subcategory_slug, threat_type, severity)
 non_threat_items (item_id PK, subcategory_slug)
@@ -399,13 +393,16 @@ This is the server-side equivalent of `xrayRenderer.ts`. It uses `node-canvas` (
 
 **How Upload Works:**
 1. User drags files into `UploadDropZone` → `handleFilesSelected()` creates `StagedItem[]` with default category="" and subcategory="" (NONE)
-2. `UploadFileQueue` displays staged files in a horizontal table with columns: #, Image, Category, Subcategory, Name, Valid Region, Actions
-3. Category and Subcategory dropdowns default to NONE; users select inline from available options
-4. For bags items, a "Set" / "Edit" button opens the ValidRegionEditor
+2. A **Mass Assign Category** panel appears immediately with checkboxes for each file; newly added files are auto-selected
+   - User can pick a category + subcategory and click "Apply to Selected" to mass-assign only the checked items
+   - Panel stays visible after applying for reuse; re-adding files auto-selects only the new ones
+3. `UploadFileQueue` displays staged files in a horizontal table with columns: #, Image, Category, Subcategory, Name, Valid Region, Actions
+4. Category and Subcategory dropdowns default to NONE; users select inline from available options
+5. For bags items, a "Set" / "Edit" button opens the ValidRegionEditor
    - The thumbnail canvas shows a visual overlay of the valid region when drawn using a `<canvas>` element
-5. **Upload validation:** All items must have category/subcategory selected and bags must have a valid region drawn before upload
+6. **Upload validation:** All items must have category/subcategory selected and bags must have a valid region drawn before upload
    - Warning toasts use serial numbers (#1, #2, etc.) to identify items needing attention
-6. Clicking "Upload" sends a `POST /api/upload` with:
+7. Clicking "Upload" sends a `POST /api/upload` with:
    - `FormData` containing all files
    - `metadata` JSON string with per-file category/subcategory/name/valid_region_points
 
@@ -532,11 +529,13 @@ When the user clicks Save, the editor:
 - Visual feedback with dashed border and icon
 
 #### `upload/UploadFileQueue.tsx`
-- Displays staged files in a horizontal table with columns: #, Image (canvas with valid region overlay), Category dropdown, Subcategory dropdown, Name/size, Valid Region button, Remove button
+- Displays staged files in a horizontal table with columns: checkbox, #, Image (canvas with valid region overlay), Category dropdown, Subcategory dropdown, Name/size, Valid Region button, Remove button
+- Checkboxes in each row sync with the Mass Assign panel selection, enabling bulk delete and mass category assignment from the table
 - Category/Subcategory dropdowns default to NONE, selectable inline per row
 - For bags, shows "Set" / "Edit" button that opens ValidRegionEditor directly
 - Thumbnail is a `<canvas>` element that renders the image + a semi-transparent blue polygon overlay showing the valid region when drawn
-- Fetches canonical valid region for subcategory when subcategory changes
+- Footer includes "Delete Selected (N)" button for bulk removal of checked items
+- Valid region is stored per-bag in the `bags` table; no subcategory-level fetch on subcategory change
 
 #### `customization/CanvasArea.tsx`
 - Renders the main canvas with X-ray composite
@@ -793,10 +792,10 @@ This is crucial because uploaded files might have various category names, but th
 └──────┬───────┘
        │ 1:N
        ▼
-┌──────────────────┐     ┌─────────────────────────────┐
-│  subcategories   │     │ bag_subcategory_valid_regions │
-│ (slug, cat_slug) │     │ (canonical valid regions)     │
-│ valid_region JSONB│     └─────────────────────────────┘
+┌──────────────────┐
+│  subcategories   │
+│ (slug, cat_slug) │
+│ valid_region JSONB│
 └──────────────────┘
 
 ┌──────────────────┐

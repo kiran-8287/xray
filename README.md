@@ -20,17 +20,19 @@ npm --prefix frontend install
 
 ## Database Setup
 
-The backend connects to PostgreSQL with these defaults (from `backend/src/server.js`):
+The backend connects to PostgreSQL using environment variables. Create a `.env` file in the `backend/` directory (see `backend/.env.example` if available) or set them directly:
 
-- **User:** `postgres`
-- **Password:** `SaiKiran2166`
-- **Database:** `xray_db`
-- **Host:** `localhost`
-- **Port:** `5432`
-
-Override with environment variables: `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGHOST`, `PGPORT`.
+| Variable | Default | Description |
+|---|---|---|
+| `PGUSER` | `postgres` | PostgreSQL username |
+| `PGPASSWORD` | *(required)* | PostgreSQL password |
+| `PGDATABASE` | `xray_db` | Database name |
+| `PGHOST` | `localhost` | Database host |
+| `PGPORT` | `5432` | Database port |
 
 The schema initializes automatically from `backend/src/schema.sql` when the backend starts.
+
+> **Note:** Never commit real credentials to version control. Use a `.env` file (add it to `.gitignore`) or set environment variables in your deployment environment.
 
 ## Running
 

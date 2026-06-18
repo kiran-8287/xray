@@ -12,6 +12,9 @@ interface UploadFileQueueProps {
   uploading: boolean;
   handleUpload: () => void;
   taxonomy: TaxonomyCategory[];
+  selectedForMass: Set<number>;
+  onToggleSelect: (idx: number) => void;
+  onSelectAll: () => void;
 }
 
 // Simple canvas component that draws the image + valid region overlay
@@ -74,7 +77,7 @@ function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; val
   );
 }
 
-export default function UploadFileQueue({ files, staged, setStaged, setFiles, uploading, handleUpload, taxonomy }: UploadFileQueueProps) {
+export default function UploadFileQueue({ files, staged, setStaged, setFiles, uploading, handleUpload, taxonomy, selectedForMass, onToggleSelect, onSelectAll }: UploadFileQueueProps) {
   if (files.length === 0) {
     return null;
   }
@@ -137,22 +140,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     });
   };
 
-  const handleSubcategoryChange = async (subcategoryValue: string) => {
+  const handleSubcategoryChange = (subcategoryValue: string) => {
     setEditDraft({ ...editDraft, subcategory: subcategoryValue });
-
-    // Attempt to fetch canonical valid region for this subcategory
-    if (!subcategoryValue || !selectedCategory) return;
-    try {
-      const categorySlug = selectedCategory.slug;
-      const subSlug = String(subcategoryValue).toLowerCase().replace(/\s+/g, "-");
-      const res = await fetch(`http://localhost:8080/api/subcategories/${categorySlug}/${subSlug}`);
-      const data = await res.json();
-      if (data.ok && data.subcategory && data.subcategory.valid_region_points) {
-        setEditDraft((d: any) => ({ ...d, valid_region_points: data.subcategory.valid_region_points }));
-      }
-    } catch (err) {
-      console.warn('Failed to fetch subcategory valid region', err);
-    }
   };
 
   const handleValidRegionSave = (points: any, shapes?: any) => {
@@ -217,6 +206,14 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         <table className="w-full min-w-max divide-y divide-border">
           <thead className="bg-surface/50">
             <tr className="text-xs font-semibold text-muted uppercase tracking-wider">
+              <th className="text-left py-3 px-4 w-10">
+                <input
+                  type="checkbox"
+                  checked={selectedForMass.size === staged.length && staged.length > 0}
+                  onChange={onSelectAll}
+                  className="rounded border-gray-300"
+                />
+              </th>
               <th className="text-left py-3 px-4 w-10">#</th>
               <th className="text-left py-3 px-4 w-28">Image</th>
               <th className="text-left py-3 px-4">Category</th>
@@ -235,6 +232,14 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
               return (
                 <tr key={idx} className="hover:bg-surface/50 transition-colors even:bg-surface/20">
+                  <td className="py-3 px-4 align-top">
+                    <input
+                      type="checkbox"
+                      checked={selectedForMass.has(idx)}
+                      onChange={() => onToggleSelect(idx)}
+                      className="rounded border-gray-300"
+                    />
+                  </td>
                   <td className="py-3 px-4 align-top text-sm font-mono text-muted">
                     {idx + 1}
                   </td>
@@ -314,10 +319,21 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
       <div className="px-5 py-3 bg-nav border-t border-border flex-shrink-0 flex justify-between items-center">
         <button
-          onClick={() => { setFiles([]); setStaged([]); }}
-          className="px-4 py-2 rounded-xl border border-border text-sm font-medium text-muted hover:bg-surface flex items-center gap-2"
+          onClick={() => {
+            const selectedSet = new Set<number>();
+            staged.forEach((_, idx) => {
+              if (selectedForMass.has(idx)) selectedSet.add(idx);
+            });
+            if (selectedSet.size === 0) return;
+            const newStaged = staged.filter((_, idx) => !selectedSet.has(idx));
+            const newFiles = files.filter((_, idx) => !selectedSet.has(idx));
+            setStaged(newStaged);
+            setFiles(newFiles);
+          }}
+          disabled={selectedForMass.size === 0}
+          className="px-4 py-2 rounded-xl border border-border text-sm font-medium text-rose-600 hover:bg-rose-50 flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          <Trash2 size={15} /> Clear All
+          <Trash2 size={15} /> Delete Selected ({selectedForMass.size})
         </button>
         <span className="text-xs text-muted">{staged.length} item{staged.length !== 1 ? 's' : ''} staged</span>
       </div>
