@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Image, AlertTriangle, CheckCircle2, X, XCircle, Trash2 } from "lucide-react";
-import type { Item, TaxonomyCategory, CategorizedItems } from "../types/library";
+import type { Item, CategorizedItems } from "../types/library";
 import { LIBRARIES, getCategoryConfig, getLibrarySubcategories, mergeCategorizedItems, normalizeCategoryName } from "../config/categories";
 import SimpleLibrarySidebar from "../components/library/SimpleLibrarySidebar";
 import LibraryToolbar from "../components/library/LibraryToolbar";
@@ -16,7 +16,6 @@ type ConfirmDialog = { message: string; onConfirm: () => void; onCancel: () => v
 export default function LibraryPage() {
   const navigate = useNavigate();
   const [categorizedItems, setCategorizedItems] = useState<CategorizedItems>({});
-  const [taxonomy, setTaxonomy] = useState<TaxonomyCategory[]>([]);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem("selectedItemIds");
@@ -62,7 +61,6 @@ export default function LibraryPage() {
 
   useEffect(() => {
     fetchCategorizedItems();
-    fetchTaxonomy();
   }, []);
 
   useEffect(() => {
@@ -84,18 +82,6 @@ export default function LibraryPage() {
     } catch (err) {
       console.error("Failed to fetch categorized items:", err);
       showNotification("error", "Unable to load library items.");
-    }
-  };
-
-  const fetchTaxonomy = async () => {
-    try {
-      const res = await fetch("http://localhost:8080/api/taxonomy");
-      const data = await res.json();
-      if (data.ok) {
-        setTaxonomy(data.taxonomy);
-      }
-    } catch (err) {
-      console.error("Failed to fetch taxonomy:", err);
     }
   };
 
@@ -215,13 +201,13 @@ export default function LibraryPage() {
     : activeCategory;
 
   const selectedCategory = LIBRARIES.find((lib) => lib.slug === selectedItemCategorySlug) || LIBRARIES[0];
-  const subcategoryOptions = getLibrarySubcategories(taxonomy, selectedCategory.slug);
+  const subcategoryOptions = getLibrarySubcategories(selectedCategory.slug);
 
   const handleCategoryChange = (categoryValue: string) => {
     setEditDraft((prev) => ({
       ...prev!,
       category: categoryValue,
-      subcategory: getLibrarySubcategories(taxonomy, categoryValue)[0]?.name || "General",
+      subcategory: getLibrarySubcategories(categoryValue)[0]?.name || "General",
     }));
   };
 
@@ -302,7 +288,6 @@ export default function LibraryPage() {
       <div className="flex flex-1 overflow-hidden">
         <SimpleLibrarySidebar
           categorizedItems={categorizedItems}
-          taxonomy={taxonomy}
           activeCategory={activeCategory}
           setActiveCategory={(category) => {
             setActiveCategory(category);

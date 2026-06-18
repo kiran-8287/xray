@@ -29,29 +29,6 @@ await fs.mkdir(collageImagesRoot, { recursive: true });
 // Serve static files from data directory
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
 
-// Load taxonomy
-let taxonomy = [];
-try {
-  const taxonomyData = await fs.readFile(path.join(__dirname, "../../taxonomy.json"), "utf8");
-  taxonomy = JSON.parse(taxonomyData);
-} catch (err) {
-  console.warn("Warning: taxonomy.json not found, will use filename parsing as fallback");
-}
-
-// Create a map from filename to taxonomy item for quick lookup
-const filenameToItem = new Map();
-for (const category of taxonomy) {
-  for (const subcategory of category.subcategories) {
-    for (const item of subcategory.items) {
-      filenameToItem.set(item.filename.toLowerCase(), {
-        ...item,
-        displayCategory: category.name,
-        displaySubcategory: subcategory.name
-      });
-    }
-  }
-}
-
 // PostgreSQL connection
 const pool = new pg.Pool({
   user: process.env.PGUSER || "postgres",
@@ -103,36 +80,6 @@ async function initializeDatabase() {
     await client.query("ALTER TABLE items ADD COLUMN IF NOT EXISTS mask_path VARCHAR(255)");
     console.log("Database schema initialized and migrated");
 
-    // Seed the three main categories and default subcategories
-    try {
-      await client.query(
-        "INSERT INTO categories (slug, name, type) VALUES ($1,$2,$3) ON CONFLICT (slug) DO NOTHING",
-        ["bags", "Bags", "primary"]
-      );
-      await client.query(
-        "INSERT INTO categories (slug, name, type) VALUES ($1,$2,$3) ON CONFLICT (slug) DO NOTHING",
-        ["threats", "Threats", "primary"]
-      );
-      await client.query(
-        "INSERT INTO categories (slug, name, type) VALUES ($1,$2,$3) ON CONFLICT (slug) DO NOTHING",
-        ["non-threats", "Non-Threats", "primary"]
-      );
-
-      await client.query(
-        "INSERT INTO subcategories (slug, category_slug, name) VALUES ($1,$2,$3) ON CONFLICT (category_slug, slug) DO NOTHING",
-        ["general", "bags", "General"]
-      );
-      await client.query(
-        "INSERT INTO subcategories (slug, category_slug, name) VALUES ($1,$2,$3) ON CONFLICT (category_slug, slug) DO NOTHING",
-        ["general", "threats", "General"]
-      );
-      await client.query(
-        "INSERT INTO subcategories (slug, category_slug, name) VALUES ($1,$2,$3) ON CONFLICT (category_slug, slug) DO NOTHING",
-        ["general", "non-threats", "General"]
-      );
-    } catch (seedErr) {
-      console.warn("Warning: failed to seed categories/subcategories:", seedErr);
-    }
   } catch (err) {
     console.error("Error initializing database schema:", err);
   } finally {
@@ -145,46 +92,6 @@ async function initializeDatabase() {
 // ------------------------------
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "synthetic-xray-backend" });
-});
-
-// Get taxonomy merged with DB categories/subcategories
-app.get("/api/taxonomy", async (_req, res) => {
-  try {
-    const client = await pool.connect();
-    try {
-      const categoriesResult = await client.query("SELECT slug, name FROM categories");
-      const subcategoriesResult = await client.query("SELECT slug, category_slug, name, valid_region_points FROM subcategories");
-
-      const merged = taxonomy.map((cat) => ({ ...cat, subcategories: [...(cat.subcategories || [])] }));
-
-      for (const dbCat of categoriesResult.rows) {
-        const existingCat = merged.find((cat) => cat.slug === dbCat.slug || cat.name.toLowerCase() === dbCat.name.toLowerCase());
-        if (!existingCat) {
-          merged.push({ name: dbCat.name, slug: dbCat.slug, subcategories: [] });
-        }
-      }
-
-      for (const dbSub of subcategoriesResult.rows) {
-        const category = merged.find((cat) => cat.slug === dbSub.category_slug);
-        if (!category) continue;
-        const existingSub = (category.subcategories || []).find((sub) => sub.slug === dbSub.slug);
-        if (!existingSub) {
-          category.subcategories = [...(category.subcategories || []), {
-            name: dbSub.name,
-            slug: dbSub.slug,
-            items: []
-          }];
-        }
-      }
-
-      res.json({ ok: true, taxonomy: merged });
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
 });
 
 app.post("/api/export", async (req, res) => {
@@ -354,78 +261,6 @@ function normalizeCategory(cat) {
     }
   });
 
-// Create a new category
-app.post('/api/categories', async (req, res) => {
-  const { slug, name, type } = req.body;
-  if (!slug || !name) return res.status(400).json({ ok: false, error: 'Missing slug or name' });
-  try {
-    const client = await pool.connect();
-    try {
-      await client.query('INSERT INTO categories (slug, name, type) VALUES ($1,$2,$3) ON CONFLICT (slug) DO NOTHING', [slug, name, type || null]);
-      res.json({ ok: true });
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
-});
-
-// Create a new subcategory
-app.post('/api/subcategories', async (req, res) => {
-  const { category_slug, slug, name, valid_region_points } = req.body;
-  if (!category_slug || !slug || !name) return res.status(400).json({ ok: false, error: 'Missing fields' });
-  try {
-    const client = await pool.connect();
-    try {
-      await client.query('INSERT INTO subcategories (slug, category_slug, name, valid_region_points) VALUES ($1,$2,$3,$4) ON CONFLICT (category_slug, slug) DO NOTHING', [slug, category_slug, name, valid_region_points || null]);
-      res.json({ ok: true });
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
-});
-
-// Get a subcategory (including canonical valid region)
-app.get('/api/subcategories/:category_slug/:slug', async (req, res) => {
-  const { category_slug, slug } = req.params;
-  try {
-    const client = await pool.connect();
-    try {
-      const result = await client.query('SELECT * FROM subcategories WHERE category_slug = $1 AND slug = $2', [category_slug, slug]);
-      if (result.rows.length === 0) return res.status(404).json({ ok: false, error: 'Not found' });
-      res.json({ ok: true, subcategory: result.rows[0] });
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
-});
-
-// Update a subcategory's valid region points
-app.put('/api/subcategories/:category_slug/:slug', async (req, res) => {
-  const { category_slug, slug } = req.params;
-  const { valid_region_points } = req.body;
-  try {
-    const client = await pool.connect();
-    try {
-      await client.query('UPDATE subcategories SET valid_region_points = $1 WHERE category_slug = $2 AND slug = $3', [valid_region_points || null, category_slug, slug]);
-      res.json({ ok: true });
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
-});
-
 // Saved layouts endpoints
 app.get('/api/saved-layouts', async (_req, res) => {
   try {
@@ -521,45 +356,23 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
     // No upload sessions: insert items directly into `items` table
 
     for (const file of files) {
-      // First try to find item in taxonomy by filename
-      const taxonomyItem = filenameToItem.get(file.originalname.toLowerCase());
-      
+      // Classify by filename prefix only
+      const filename = file.originalname.toLowerCase();
       let category, subcategory, name, pixelValue;
-      
-      if (taxonomyItem) {
-        category = taxonomyItem.category;
-        subcategory = taxonomyItem.subcategory;
-        name = taxonomyItem.name;
-        pixelValue = 32767;
+
+      if (filename.startsWith("bag")) {
+        category = "bags";
+        pixelValue = 42000 + Math.floor(Math.random() * 10000);
+      } else if (filename.startsWith("threat")) {
+        category = "threats";
+        pixelValue = 10000 + Math.floor(Math.random() * 10000);
       } else {
-        // Fallback to filename parsing
-        const filename = file.originalname.toLowerCase();
-        if (filename.startsWith("bag")) {
-          category = "bags";
-          pixelValue = 42000 + Math.floor(Math.random() * 10000);
-        } else if (filename.startsWith("threat")) {
-          category = "threats";
-          pixelValue = 10000 + Math.floor(Math.random() * 10000);
-        } else if (filename.startsWith("tray")) {
-          category = "trays";
-          pixelValue = 50000 + Math.floor(Math.random() * 10000);
-        } else if (filename.startsWith("cloth")) {
-          category = "clothes";
-          pixelValue = 30000 + Math.floor(Math.random() * 15000);
-        } else if (filename.startsWith("electronics")) {
-          category = "electronics";
-          pixelValue = 15000 + Math.floor(Math.random() * 15000);
-        } else if (filename.startsWith("food")) {
-          category = "food";
-          pixelValue = 35000 + Math.floor(Math.random() * 15000);
-        } else {
-          category = "misc";
-          pixelValue = 32767;
-        }
-        const parsed = parseFilename(file.originalname);
-        subcategory = parsed.subcategory;
-        name = parsed.name;
+        category = "non-threats";
+        pixelValue = 32767;
       }
+      const parsed = parseFilename(file.originalname);
+      subcategory = parsed.subcategory;
+      name = parsed.name;
 
       // If metadata provided for this file, allow overrides and extra data
       const fileMeta = metadataByName[file.originalname] || {};
@@ -594,16 +407,6 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
       if (category === "bags") {
         const vr = fileMeta.valid_region_points ? fileMeta.valid_region_points : null;
         await client.query("INSERT INTO bags (item_id, valid_region_points) VALUES ($1, $2)", [item.id, vr]);
-
-        // Upsert canonical valid region into subcategories table when provided
-        if (subcategory && vr) {
-          const subSlug = String(subcategory).toLowerCase().replace(/\s+/g, "-");
-          await client.query(
-            `INSERT INTO subcategories (slug, category_slug, name, valid_region_points) VALUES ($1,$2,$3,$4)
-              ON CONFLICT (category_slug, slug) DO UPDATE SET valid_region_points = EXCLUDED.valid_region_points`,
-            [subSlug, category, subcategory, vr]
-          );
-        }
       } else if (category === "threats") {
         await client.query("INSERT INTO threats (item_id, threat_type, severity) VALUES ($1, NULL, NULL)", [item.id]);
       } else {

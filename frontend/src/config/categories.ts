@@ -1,5 +1,9 @@
 import { StencilKind } from "../stencils/types";
-import type { TaxonomyCategory, TaxonomySubcategory } from "../types/library";
+
+export interface LibrarySubcategory {
+  name: string;
+  slug: string;
+}
 
 export interface CategoryStyle {
   bg: string;
@@ -65,16 +69,32 @@ export function mergeCategorizedItems(categorized: any): any {
   return merged;
 }
 
-export function getLibrarySubcategories(taxonomy: TaxonomyCategory[] = [], librarySlug: string): TaxonomySubcategory[] {
-  const seen: Record<string, boolean> = {};
-  return taxonomy
-    .filter((category) => normalizeCategoryName(category.slug || category.name) === librarySlug)
-    .flatMap((category) => category.subcategories || [])
-    .filter((subcategory) => {
-      if (seen[subcategory.slug]) return false;
-      seen[subcategory.slug] = true;
-      return true;
-    });
+const SUBCATEGORY_MAP: Record<string, LibrarySubcategory[]> = {
+  bags: [
+    { name: "General", slug: "general" },
+    { name: "Backpack", slug: "backpack" },
+    { name: "Laptop Bag", slug: "laptop-bag" },
+    { name: "Duffel Bag", slug: "duffel-bag" },
+    { name: "Suitcase", slug: "suitcase" },
+  ],
+  threats: [
+    { name: "General", slug: "general" },
+    { name: "Firearms", slug: "firearms" },
+    { name: "Knives", slug: "knives" },
+    { name: "Explosives", slug: "explosives" },
+  ],
+  "non-threats": [
+    { name: "General", slug: "general" },
+    { name: "Clothing", slug: "clothing" },
+    { name: "Electronics", slug: "electronics" },
+    { name: "Food", slug: "food" },
+    { name: "Toiletries", slug: "toiletries" },
+    { name: "Miscellaneous", slug: "miscellaneous" },
+  ],
+};
+
+export function getLibrarySubcategories(librarySlug: string): LibrarySubcategory[] {
+  return SUBCATEGORY_MAP[librarySlug] || SUBCATEGORY_MAP["non-threats"];
 }
 
 export const getCategoryConfig = (category: string): CategoryStyle => {

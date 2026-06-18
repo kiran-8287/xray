@@ -1,5 +1,4 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
-import type { TaxonomyCategory } from "../../types/library";
 import ValidRegionEditor from "../ValidRegionEditor";
 import { Trash2, Edit3 } from "lucide-react";
 import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName } from "../../config/categories";
@@ -11,7 +10,6 @@ interface UploadFileQueueProps {
   setFiles: (files: File[]) => void;
   uploading: boolean;
   handleUpload: () => void;
-  taxonomy: TaxonomyCategory[];
   selectedForMass: Set<number>;
   onToggleSelect: (idx: number) => void;
   onSelectAll: () => void;
@@ -77,7 +75,7 @@ function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; val
   );
 }
 
-export default function UploadFileQueue({ files, staged, setStaged, setFiles, uploading, handleUpload, taxonomy, selectedForMass, onToggleSelect, onSelectAll }: UploadFileQueueProps) {
+export default function UploadFileQueue({ files, staged, setStaged, setFiles, uploading, handleUpload, selectedForMass, onToggleSelect, onSelectAll }: UploadFileQueueProps) {
   if (files.length === 0) {
     return null;
   }
@@ -116,8 +114,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
   const subcategoryOptions = useMemo(() => {
     if (!selectedCategory) return [];
-    return getLibrarySubcategories(taxonomy, selectedCategory.slug);
-  }, [taxonomy, selectedCategory]);
+    return getLibrarySubcategories(selectedCategory.slug);
+  }, [selectedCategory]);
 
   const categoryOptions = useMemo(() => {
     return LIBRARIES;
@@ -132,7 +130,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
       });
       return;
     }
-    const subcategories = getLibrarySubcategories(taxonomy, categoryValue);
+    const subcategories = getLibrarySubcategories(categoryValue);
     setEditDraft({
       ...editDraft,
       category: categoryValue,
@@ -168,7 +166,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     if (!categoryValue) {
       copy[idx] = { ...copy[idx], category: "", subcategory: "" };
     } else {
-      const subcategories = getLibrarySubcategories(taxonomy, categoryValue);
+      const subcategories = getLibrarySubcategories(categoryValue);
       copy[idx] = {
         ...copy[idx],
         category: categoryValue,
@@ -186,7 +184,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
   function getInlineSubcategoryOptions(categorySlug: string) {
     if (!categorySlug) return [];
-    return getLibrarySubcategories(taxonomy, categorySlug);
+    return getLibrarySubcategories(categorySlug);
   }
 
   const handleInlineValidRegion = (idx: number) => {

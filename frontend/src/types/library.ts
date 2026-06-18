@@ -19,17 +19,6 @@ export interface Item {
   polygon_json?: Point[] | string;
 }
 
-export interface TaxonomySubcategory {
-  name: string;
-  slug: string;
-  items: any[];
-}
-
-export interface TaxonomyCategory {
-  name: string;
-  slug: string;
-  subcategories: TaxonomySubcategory[];
-}
 
 export interface CategorizedItems {
   [category: string]: {

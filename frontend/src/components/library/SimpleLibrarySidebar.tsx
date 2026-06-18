@@ -5,7 +5,6 @@ import { getCategoryConfig } from '../../config/categories';
 
 interface Props {
   categorizedItems: Record<string, Record<string, Item[]>>;
-  taxonomy?: any[];
   activeCategory: string;
   setActiveCategory: (c: string) => void;
   activeSubcategory: string;

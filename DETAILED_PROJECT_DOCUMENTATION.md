@@ -61,10 +61,6 @@ xray1/                              # Root project directory
 |-- package-lock.json               # Root npm lockfile
 |-- README.md                       # Short project readme
 |-- DETAILED_PROJECT_DOCUMENTATION.md # This complete project documentation
-|-- taxonomy.json                   # Master object taxonomy used for upload classification
-|-- check-taxonomy.js               # Utility to validate taxonomy.json
-|-- reorder-taxonomy.js             # Utility to reorder taxonomy.json entries
-|
 |-- backend/                        # Node.js + Express + PostgreSQL backend
 |   |-- package.json
 |   |-- package-lock.json
@@ -180,14 +176,6 @@ The valid region data is stored as JSONB (JSON Binary), which PostgreSQL handles
   - `npm run build` → builds frontend for production
 - **Dependency note:** root currently includes `canvas` and mostly acts as a script runner for frontend/backend tasks.
 
-#### `taxonomy.json`
-- **Purpose:** Master reference data defining all object categories, subcategories, and individual items
-- **Structure:** Array of category objects, each containing subcategories, each containing items with filenames
-- **Used by:** Backend loads this at startup to build a `filenameToItem` map for auto-classifying uploaded files
-
-#### `check-taxonomy.js` / `reorder-taxonomy.js`
-- **Purpose:** Utility scripts for validating and reordering `taxonomy.json`
-- **Usage:** `node check-taxonomy.js` to validate structure, `node reorder-taxonomy.js` to sort entries
 
 #### `DETAILED_PROJECT_DOCUMENTATION.md`
 - **Purpose:** The living project map you are reading now
@@ -215,8 +203,7 @@ This is the heart of the backend. Here's what it does:
 **Startup Sequence:**
 1. Creates Express app with CORS and JSON body parsing (12MB limit for large payloads)
 2. Sets up static file serving: `app.use('/data', express.static('data'))` — this is how the frontend accesses uploaded images
-3. Loads `taxonomy.json` and builds a `filenameToItem` Map for O(1) filename lookups
-4. Connects to PostgreSQL database (`xray_db`)
+3. Connects to PostgreSQL database (`xray_db`)
 5. Sets up Multer for file uploads (stores files with UUID filenames to `data/library_images/`)
 6. Creates required directories (`exports/`, `library_images/`, `collage_images/`)
 7. Initializes database schema by running `schema.sql`
@@ -228,7 +215,6 @@ This is the heart of the backend. Here's what it does:
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/api/health` | GET | Health check |
-| `/api/taxonomy` | GET | Get merged taxonomy (file + DB) |
 | `/api/upload` | POST | Upload images with metadata |
 | `/api/items/categorized` | GET | Get all items organized by category/subcategory |
 | `/api/items/:id` | GET | Get single item details |
@@ -249,8 +235,7 @@ This is the heart of the backend. Here's what it does:
 
 **Upload Flow in Detail (`POST /api/upload`):**
 1. Multer receives files, saves each with a UUID filename to `data/library_images/`
-2. For each file, tries to find it in `taxonomy.json` by original filename
-3. If not found, uses filename prefix heuristics (starts with "bag" → bags, etc.)
+2. For each file, classifies by filename prefix (starts with "bag" → bags, "threat" → threats, else → non-threats)
 4. Allows metadata overrides from the request body
 5. Detects actual image dimensions using `node-canvas` `loadImage()`
 6. Inserts row into `items` table with all metadata

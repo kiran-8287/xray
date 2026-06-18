@@ -28,21 +28,6 @@
 
   -- legacy tables `electronics`, `clothes`, and `trays` removed in favor of `non_threat_items`
 
-  -- New tables for categorized taxonomy and saved layouts
-  CREATE TABLE IF NOT EXISTS categories (
-    slug VARCHAR(100) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    type VARCHAR(50)
-  );
-
-  CREATE TABLE IF NOT EXISTS subcategories (
-    slug VARCHAR(100) NOT NULL,
-    category_slug VARCHAR(100) NOT NULL REFERENCES categories(slug) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    valid_region_points JSONB,
-    PRIMARY KEY (category_slug, slug)
-  );
-
   -- Generic threat/non-threat mapping tables for clearer classification
   CREATE TABLE IF NOT EXISTS threat_items (
     item_id UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,

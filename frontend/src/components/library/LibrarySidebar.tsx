@@ -1,11 +1,10 @@
 import React from "react";
 import { ChevronRight, Folder, Check, Trash2 } from "lucide-react";
-import type { Item, UploadSession, TaxonomyCategory } from "../../types/library";
+import type { Item, UploadSession } from "../../types/library";
 import { getCategoryConfig, normalizeCategoryName } from "../../config/categories";
 
 interface LibrarySidebarProps {
   sessions: UploadSession[];
-  taxonomy: TaxonomyCategory[];
   activeSessionId: string | null;
   setActiveSessionId: (id: string | null) => void;
   activeCategory: string;
@@ -24,7 +23,6 @@ interface LibrarySidebarProps {
 
 export default function LibrarySidebar({
   sessions,
-  taxonomy,
   activeSessionId,
   setActiveSessionId,
   activeCategory,
@@ -63,32 +61,6 @@ export default function LibrarySidebar({
     return <Folder size={14} />;
   };
 
-  const getDisplayNames = (categorySlug: string, subcategorySlug: string) => {
-    let displayCategory = categorySlug;
-    let displaySubcategory = subcategorySlug;
-    
-    for (const cat of taxonomy) {
-      let matches = false;
-      if (categorySlug === 'bags' && cat.slug.toLowerCase().includes('bag')) matches = true;
-      else if (categorySlug === 'trays' && cat.slug.toLowerCase().includes('tray')) matches = true;
-      else if (categorySlug === 'clothes' && cat.slug.toLowerCase().includes('cloth')) matches = true;
-      else if (categorySlug === 'electronics' && cat.slug.toLowerCase().includes('electronics')) matches = true;
-      else if (categorySlug === 'food' && cat.slug.toLowerCase().includes('food')) matches = true;
-      else if (categorySlug === 'threats' && cat.slug.toLowerCase().includes('threat')) matches = true;
-      
-      if (matches) {
-        displayCategory = cat.name;
-        for (const subcat of cat.subcategories) {
-          if (subcat.slug === subcategorySlug) {
-            displaySubcategory = subcat.name;
-            break;
-          }
-        }
-        break;
-      }
-    }
-    return { displayCategory, displaySubcategory };
-  };
 
   return (
     <aside className="w-72 border-r border-border bg-nav flex flex-col overflow-y-auto flex-shrink-0 select-none">
@@ -294,7 +266,7 @@ export default function LibrarySidebar({
                                     const isSubActive = isCatActive && activeSubcategory === subKey;
                                     const isSubSelected = subItems.length > 0 && subItems.every(item => selectedItems.has(item.id));
                                     const isSubPartialSelected = subItems.some(item => selectedItems.has(item.id)) && !isSubSelected;
-                                    const { displaySubcategory } = getDisplayNames(categoryKey, subKey);
+                                    const displaySubcategory = subKey;
 
                                     return (
                                       <div key={subKey} className="flex items-center gap-1 group/sub">

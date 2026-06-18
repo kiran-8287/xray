@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import type { TaxonomyCategory } from "../types/library";
 import { CheckCircle2, AlertCircle, Upload as UploadIcon, AlertTriangle, Wand2 } from "lucide-react";
 import UploadDropZone from "../components/upload/UploadDropZone";
 import UploadFileQueue from "../components/upload/UploadFileQueue";
-import { LIBRARY_PREFIXES, LIBRARIES, getLibrarySubcategories } from "../config/categories";
+import { LIBRARIES, getLibrarySubcategories } from "../config/categories";
 import { useUploadContext } from "../context/UploadContext";
 
 export default function UploadPage() {
@@ -12,7 +11,6 @@ export default function UploadPage() {
   const [uploadStatus, setUploadStatus] = useState<"idle" | "success" | "error">("idle");
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [folderName, setFolderName] = useState("My Upload");
-  const [taxonomy, setTaxonomy] = useState<TaxonomyCategory[]>([]);
   const [massCategory, setMassCategory] = useState("");
   const [massSubcategory, setMassSubcategory] = useState("");
   const [selectedForMass, setSelectedForMass] = useState<Set<number>>(new Set());
@@ -28,7 +26,6 @@ export default function UploadPage() {
       valid_region_points: null,
     }));
     setStaged((prev) => [...prev, ...newStaged]);
-    // Auto-select only the newly added files in mass panel
     const newIndices = new Set<number>();
     for (let i = startIdx; i < startIdx + newFiles.length; i++) {
       newIndices.add(i);
@@ -39,7 +36,6 @@ export default function UploadPage() {
   };
 
   const handleUpload = async () => {
-    // --- Validation ---
     const missingCategory: string[] = [];
     const missingBagsRegion: string[] = [];
 
@@ -65,7 +61,6 @@ export default function UploadPage() {
       setTimeout(() => setValidationMessage(null), 5000);
       return;
     }
-    // --- End Validation ---
 
     setUploading(true);
     setUploadStatus("idle");
@@ -73,11 +68,9 @@ export default function UploadPage() {
     try {
       const formData = new FormData();
       formData.append("folderName", folderName);
-      // Append files and metadata
       staged.forEach((s) => {
         formData.append("images", s.file);
       });
-      // Build metadata array describing each file
       const metadata = staged.map((s) => ({
         originalname: s.file.name,
         category: s.category,
@@ -95,7 +88,6 @@ export default function UploadPage() {
       const data = await res.json();
       if (data.ok) {
         setUploadStatus("success");
-        // Clear files on success after small delay
         setTimeout(() => {
           clearAll();
         }, 1000);
@@ -107,39 +99,23 @@ export default function UploadPage() {
       setUploadStatus("error");
     } finally {
       setUploading(false);
-      // Dismiss toast after 3500ms
       setTimeout(() => {
-          setUploadStatus("idle");
+        setUploadStatus("idle");
       }, 3500);
     }
   };
 
-  useEffect(() => {
-    const fetchTaxonomy = async () => {
-      try {
-        const res = await fetch("http://localhost:8080/api/taxonomy");
-        const data = await res.json();
-        if (data.ok && Array.isArray(data.taxonomy)) {
-          setTaxonomy(data.taxonomy);
-        }
-      } catch (err) {
-        console.error("Failed to fetch taxonomy:", err);
-      }
-    };
-    fetchTaxonomy();
-  }, []);
-
   const massSubcategoryOptions = useMemo(() => {
     if (!massCategory) return [];
-    return getLibrarySubcategories(taxonomy, massCategory);
-  }, [taxonomy, massCategory]);
+    return getLibrarySubcategories(massCategory);
+  }, [massCategory]);
 
   const handleMassApply = () => {
     if (!massCategory) return;
     setStaged((prev) =>
       prev.map((s, idx) => {
         if (!selectedForMass.has(idx)) return s;
-        const subcats = getLibrarySubcategories(taxonomy, massCategory);
+        const subcats = getLibrarySubcategories(massCategory);
         return {
           ...s,
           category: massCategory,
@@ -147,7 +123,6 @@ export default function UploadPage() {
         };
       })
     );
-    // Keep panel open for reuse; reset category/subcategory but keep selection
     setMassCategory("");
     setMassSubcategory("");
   };
@@ -171,16 +146,13 @@ export default function UploadPage() {
 
   return (
     <div className="max-w-7xl mx-auto py-10 px-6 animate-fade-in">
-      {/* Hero Header */}
       <div className="border-l-4 border-accent pl-4 mb-8">
         <h2 className="text-3xl font-bold text-ink tracking-tight">Upload Images</h2>
       </div>
 
       <div className="space-y-6">
-        {/* Dropzone at the top - the file picker */}
         <UploadDropZone onFilesSelected={handleFilesSelected} />
 
-        {/* Mass Assign Panel - always visible when files are staged */}
         {staged.length > 0 && (
           <div className="bg-panel rounded-2xl border border-border p-5 shadow-card">
             <div className="flex items-center gap-2 mb-3">
@@ -188,7 +160,6 @@ export default function UploadPage() {
               <span className="text-sm font-semibold text-ink">Mass Assign Category</span>
             </div>
 
-            {/* File selector with checkboxes */}
             <div className="mb-3 max-h-40 overflow-y-auto border border-border rounded-lg bg-white">
               <div className="flex items-center gap-2 p-2 border-b border-border bg-gray-50">
                 <input
@@ -243,10 +214,10 @@ export default function UploadPage() {
                   disabled={!massCategory}
                 >
                   <option value="">Select subcategory</option>
-                    {massSubcategoryOptions.length > 0 ? (
-                      massSubcategoryOptions.map((sub: any) => (
-                        <option key={sub.slug} value={sub.name}>{sub.name}</option>
-                      ))
+                  {massSubcategoryOptions.length > 0 ? (
+                    massSubcategoryOptions.map((sub: any) => (
+                      <option key={sub.slug} value={sub.name}>{sub.name}</option>
+                    ))
                   ) : (
                     massCategory ? <option value="General">General</option> : null
                   )}
@@ -263,7 +234,6 @@ export default function UploadPage() {
           </div>
         )}
 
-        {/* Upload Button below dropzone */}
         <div className="bg-panel rounded-2xl border border-border p-6 shadow-card">
           <button
             onClick={handleUpload}
@@ -280,7 +250,6 @@ export default function UploadPage() {
             )}
           </button>
 
-          {/* Empty state text when no files are selected */}
           {staged.length === 0 && (
             <div className="mt-4 text-center">
               <p className="text-sm font-medium text-muted">No files selected</p>
@@ -291,7 +260,6 @@ export default function UploadPage() {
           )}
         </div>
 
-        {/* Validation Warning Toast */}
         {validationMessage && (
           <div className="fixed bottom-24 right-6 z-50 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex items-start gap-3 shadow-card animate-slide-up max-w-md">
             <div className="w-5 h-5 bg-amber-500 rounded-full text-white flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -301,7 +269,6 @@ export default function UploadPage() {
           </div>
         )}
 
-        {/* Selected files section - appears below the upload button when files are staged */}
         {staged.length > 0 && (
           <UploadFileQueue
             files={files}
@@ -310,7 +277,6 @@ export default function UploadPage() {
             setFiles={setFiles}
             uploading={uploading}
             handleUpload={handleUpload}
-            taxonomy={taxonomy}
             selectedForMass={selectedForMass}
             onToggleSelect={toggleSelect}
             onSelectAll={toggleSelectAll}
@@ -318,7 +284,6 @@ export default function UploadPage() {
         )}
       </div>
 
-      {/* Floating Status Toasts */}
       {uploadStatus === "success" && (
         <div className="fixed bottom-6 right-6 z-50 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-4 flex items-center gap-3 shadow-card animate-slide-up">
           <div className="w-5 h-5 bg-emerald-500 rounded-full text-white flex items-center justify-center flex-shrink-0">
