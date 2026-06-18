@@ -83,7 +83,7 @@ xray1/                              # Root project directory
 |   |   |-- collage_images/          # Batch dataset/collage output folders
 |   |   |-- customization_exports/   # Customization/export output area
 |   |   `-- xray.db                 # Local SQLite artifact/placeholder; runtime uses PostgreSQL
-|   `-- scripts/                    # Seeding, import, image organization, stencil utilities
+|   `-- scripts/                    # (Removed — all seed/import scripts deleted)
 |
 |-- frontend/                       # React + TypeScript + Vite frontend
 |   |-- package.json
@@ -205,11 +205,8 @@ The valid region data is stored as JSONB (JSON Binary), which PostgreSQL handles
 - **Type:** `"module"` (ESM imports)
 - **Key dependencies:** express, cors, multer, pg, uuid, canvas
 - **Key scripts:**
-  - `dev` / `start` — runs `src/server.js`
-  - `seed` — seeds taxonomy into database
-  - `generate-predefined-stencils` - generates predefined stencil assets/types
-  - `seed-full-library` / `seed-combined-library` - seed library data.
-  - `organize-images`, `rename-images`, `generate-organize-test-images` - maintain local image assets.
+  - `dev` — runs `src/server.js` with file watching
+  - `start` — runs `src/server.js`
 
 #### `backend/src/server.js` — THE MAIN SERVER
 
@@ -401,14 +398,14 @@ This is the server-side equivalent of `xrayRenderer.ts`. It uses `node-canvas` (
 - `uploadStatus: "idle" | "success" | "error"` — toast notification state
 
 **How Upload Works:**
-1. User drags files into `UploadDropZone` → `handleFilesSelected()` creates `StagedItem[]` with default category="bags"
-2. `UploadFileQueue` displays staged files with Edit/Remove buttons
-3. Clicking Edit opens a modal where user can:
-   - Change category (bags/threats/non-threats)
-   - Change subcategory (fetched from taxonomy)
-   - Rename the item
-   - **Draw a valid region** (for bags only) using `ValidRegionEditor`
-4. Clicking "Upload" sends a `POST /api/upload` with:
+1. User drags files into `UploadDropZone` → `handleFilesSelected()` creates `StagedItem[]` with default category="" and subcategory="" (NONE)
+2. `UploadFileQueue` displays staged files in a horizontal table with columns: #, Image, Category, Subcategory, Name, Valid Region, Actions
+3. Category and Subcategory dropdowns default to NONE; users select inline from available options
+4. For bags items, a "Set" / "Edit" button opens the ValidRegionEditor
+   - The thumbnail canvas shows a visual overlay of the valid region when drawn using a `<canvas>` element
+5. **Upload validation:** All items must have category/subcategory selected and bags must have a valid region drawn before upload
+   - Warning toasts use serial numbers (#1, #2, etc.) to identify items needing attention
+6. Clicking "Upload" sends a `POST /api/upload` with:
    - `FormData` containing all files
    - `metadata` JSON string with per-file category/subcategory/name/valid_region_points
 
@@ -535,9 +532,10 @@ When the user clicks Save, the editor:
 - Visual feedback with dashed border and icon
 
 #### `upload/UploadFileQueue.tsx`
-- Displays staged files with preview thumbnails
-- Edit button opens modal with category/subcategory/name/valid_region fields
-- For bags, shows "Edit valid region" button that opens ValidRegionEditor
+- Displays staged files in a horizontal table with columns: #, Image (canvas with valid region overlay), Category dropdown, Subcategory dropdown, Name/size, Valid Region button, Remove button
+- Category/Subcategory dropdowns default to NONE, selectable inline per row
+- For bags, shows "Set" / "Edit" button that opens ValidRegionEditor directly
+- Thumbnail is a `<canvas>` element that renders the image + a semi-transparent blue polygon overlay showing the valid region when drawn
 - Fetches canonical valid region for subcategory when subcategory changes
 
 #### `customization/CanvasArea.tsx`

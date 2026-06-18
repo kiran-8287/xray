@@ -217,6 +217,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         <table className="w-full min-w-max divide-y divide-border">
           <thead className="bg-surface/50">
             <tr className="text-xs font-semibold text-muted uppercase tracking-wider">
+              <th className="text-left py-3 px-4 w-10">#</th>
               <th className="text-left py-3 px-4 w-28">Image</th>
               <th className="text-left py-3 px-4">Category</th>
               <th className="text-left py-3 px-4">Subcategory</th>
@@ -234,6 +235,9 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
               return (
                 <tr key={idx} className="hover:bg-surface/50 transition-colors even:bg-surface/20">
+                  <td className="py-3 px-4 align-top text-sm font-mono text-muted">
+                    {idx + 1}
+                  </td>
                   <td className="py-3 px-4 align-top">
                     <ThumbnailWithRegion
                       src={preview}

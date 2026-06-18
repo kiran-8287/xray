@@ -31,22 +31,23 @@ export default function UploadPage() {
     const missingCategory: string[] = [];
     const missingBagsRegion: string[] = [];
 
-    staged.forEach((s) => {
+    staged.forEach((s, i) => {
+      const sn = `#${i + 1}`;
       if (!s.category || !s.subcategory) {
-        missingCategory.push(s.file.name);
+        missingCategory.push(sn);
       }
       if (s.category === "bags" && !s.valid_region_points) {
-        missingBagsRegion.push(s.file.name);
+        missingBagsRegion.push(sn);
       }
     });
 
     if (missingCategory.length > 0 || missingBagsRegion.length > 0) {
       const lines: string[] = [];
       if (missingCategory.length > 0) {
-        lines.push(`Set category & subcategory for: ${missingCategory.join(", ")}`);
+        lines.push(`Set category & subcategory for item(s) ${missingCategory.join(", ")}`);
       }
       if (missingBagsRegion.length > 0) {
-        lines.push(`Draw valid region for bags: ${missingBagsRegion.join(", ")}`);
+        lines.push(`Draw valid region for bag item(s) ${missingBagsRegion.join(", ")}`);
       }
       setValidationMessage(lines.join(" | "));
       setTimeout(() => setValidationMessage(null), 5000);

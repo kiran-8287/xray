@@ -5,15 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/server.js",
-    "start": "node src/server.js",
-    "seed": "node scripts/seed-taxonomy.js",
-    "seed-test-images": "node scripts/generate-test-images.js",
-    "generate-organize-test-images": "node scripts/generate-and-organize-test-images.js",
-    "generate-predefined-stencils": "node scripts/generate-predefined-stencils.js",
-    "organize-images": "node scripts/organize-library-images.js",
-    "seed-full-library": "node scripts/seed-full-library.js",
-    "seed-combined-library": "node scripts/seed-combined-library.js",
-    "rename-images": "node scripts/rename-library-images.js"
+    "start": "node src/server.js"
   },
   "dependencies": {
     "canvas": "^3.2.3",
