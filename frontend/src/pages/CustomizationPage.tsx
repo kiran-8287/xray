@@ -3,7 +3,6 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { 
   ZoomIn, ZoomOut, Maximize2, Sliders, ShieldAlert, ShieldCheck
 } from "lucide-react";
-import type { StencilKind } from "../stencils/types";
 import type { SceneObject } from "../types/customization";
 import type { Item } from "../types/library";
 import { 
@@ -12,10 +11,80 @@ import {
   getTransformedValidRegion 
 } from "../lib/customizationHelpers";
 import { getRectCorners } from "../lib/geometry";
+import { computeObjectStats, type ObjectPixelStats } from "../lib/xrayRenderer";
 import ScannedBagsSidebar from "../components/customization/ScannedBagsSidebar";
 import WorkspaceToolbar from "../components/customization/WorkspaceToolbar";
 import CanvasArea from "../components/customization/CanvasArea";
-import { getCategoryConfig, mergeCategorizedItems, getStencilKind, normalizeCategoryName } from "../config/categories";
+function normalizeCategoryName(cat: string): string {
+  const normalized = (cat || "").toLowerCase().trim();
+  if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) {
+    return "non-threats";
+  }
+  if (normalized.includes("bag")) return "bags";
+  if (normalized.includes("threat") || normalized.includes("electronic") || normalized === "electronics") return "threats";
+  return "non-threats";
+}
+
+function mergeCategorizedItems(categorized: any): any {
+  if (!categorized) return null;
+  const merged: any = {};
+  for (const [catKey, subcats] of Object.entries(categorized)) {
+    const normalized = normalizeCategoryName(catKey);
+    if (!merged[normalized]) {
+      merged[normalized] = {};
+    }
+    for (const [subKey, items] of Object.entries(subcats || {})) {
+      if (!merged[normalized][subKey]) {
+        merged[normalized][subKey] = [];
+      }
+      if (Array.isArray(items)) {
+        merged[normalized][subKey].push(...items);
+      }
+    }
+  }
+  return merged;
+}
+
+const CATEGORY_MAP: Record<string, { bg: string; text: string; border: string; borderAccent: string; label: string; slug: string }> = {
+  bags: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", borderAccent: "border-blue-500", label: "Bags", slug: "bags" },
+  trays: { bg: "bg-slate-50", text: "text-slate-700", border: "border-slate-200", borderAccent: "border-slate-500", label: "Trays", slug: "trays" },
+  clothing: { bg: "bg-green-50", text: "text-green-700", border: "border-green-200", borderAccent: "border-green-500", label: "Clothing", slug: "clothing" },
+  clothes: { bg: "bg-green-50", text: "text-green-700", border: "border-green-200", borderAccent: "border-green-500", label: "Clothes", slug: "clothes" },
+  electronics: { bg: "bg-violet-50", text: "text-violet-700", border: "border-violet-200", borderAccent: "border-violet-500", label: "Electronics", slug: "electronics" },
+  "food-drink": { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", borderAccent: "border-amber-500", label: "Food & Drink", slug: "food-drink" },
+  food: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", borderAccent: "border-amber-500", label: "Food", slug: "food" },
+  "threat-prohibited-objects": { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threat-prohibited-objects" },
+  threats: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threats" },
+  threat: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threat" },
+  "non-threats": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", borderAccent: "border-gray-500", label: "Non-Threats", slug: "non-threats" },
+  bag: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", borderAccent: "border-blue-500", label: "Bags", slug: "bag" },
+  tray: { bg: "bg-slate-50", text: "text-slate-700", border: "border-slate-200", borderAccent: "border-slate-500", label: "Trays", slug: "tray" },
+  "toiletries-medical": { bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200", borderAccent: "border-sky-500", label: "Toiletries & Medical", slug: "toiletries-medical" },
+  "stationery-office": { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200", borderAccent: "border-indigo-500", label: "Stationery & Office", slug: "stationery-office" },
+  stationary: { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200", borderAccent: "border-indigo-500", label: "Stationary", slug: "stationary" },
+  "sports-outdoors": { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", borderAccent: "border-emerald-500", label: "Sports & Outdoors", slug: "sports-outdoors" },
+  miscellaneous: { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", borderAccent: "border-gray-500", label: "Miscellaneous", slug: "miscellaneous" },
+  misc: { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", borderAccent: "border-gray-500", label: "Misc", slug: "misc" },
+  lag: { bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200", borderAccent: "border-sky-500", label: "LAG", slug: "lag" },
+};
+
+function getCategoryConfig(category: string): { bg: string; text: string; border: string; borderAccent: string; label: string; slug: string } {
+  const normalized = normalizeCategoryName(category);
+  return CATEGORY_MAP[normalized] || CATEGORY_MAP.miscellaneous;
+}
+
+function getStencilKind(category: string): string {
+  const normalized = category.toLowerCase();
+  if (normalized.includes("bag")) return "bag";
+  if (normalized.includes("tray")) return "tray";
+  if (normalized.includes("threat") || normalized.includes("prohibited")) return "threat";
+  if (normalized.includes("cloth")) return "clothes";
+  if (normalized.includes("electronics")) return "electronics";
+  if (normalized.includes("food") || normalized.includes("drink")) return "food";
+  if (normalized.includes("stationery") || normalized.includes("stationary") || normalized.includes("office")) return "stationary";
+  if (normalized.includes("lag")) return "lag";
+  return "stationary"; // fallback
+}
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
@@ -38,6 +107,7 @@ export default function CustomizationPage() {
   const [zoom, setZoom] = useState(1);
   const [lastSavedTime, setLastSavedTime] = useState<number>(0);
   const [categorizedList, setCategorizedList] = useState<any>(null);
+  const [pixelStats, setPixelStats] = useState<Map<string, ObjectPixelStats>>(new Map());
   const hasInitialized = useRef(false);
 
   // Fetch all scanned bags from DB on mount
@@ -61,6 +131,30 @@ export default function CustomizationPage() {
     const bagId = searchParams.get("bagId") || "";
     const threatId = searchParams.get("threatId") || "";
     const otherIds = searchParams.get("otherIds") || "";
+    const precomputedId = searchParams.get("precomputed") || "";
+
+    // 1. Check if we have pre-computed objects from combination generator
+    if (precomputedId) {
+      const storageKey = `xray_workspace_precomputed_${precomputedId}`;
+      try {
+        const saved = sessionStorage.getItem(storageKey);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setObjects(parsed);
+            setHistory([parsed]);
+            setHistoryIndex(0);
+            // Clean up the session storage
+            sessionStorage.removeItem(storageKey);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Error loading pre-computed workspace:", err);
+      }
+    }
+
+    // 2. Check localStorage for previously saved workspace
     const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
     try {
       const saved = localStorage.getItem(storageKey);
@@ -77,6 +171,7 @@ export default function CustomizationPage() {
       console.error("Error loading saved workspace:", err);
     }
 
+    // 3. Fall back to random generation
     buildAndSetObjects(categorizedList, searchParams, setObjects, setHistory, setHistoryIndex);
   }, [categorizedList]);
 
@@ -147,7 +242,7 @@ export default function CustomizationPage() {
         originalPixelValue: bagItem.pixel_value,
         currentPixelValue: bagItem.pixel_value,
         oldPixelValue: null,
-        stencilId: "suitcase",
+        stencilId: "bag",
         filepath: bagItem.filepath,
         polygonOutline: bagOutline,
         transform: {
@@ -194,7 +289,7 @@ export default function CustomizationPage() {
         originalPixelValue: item.pixel_value,
         currentPixelValue: item.pixel_value,
         oldPixelValue: null,
-        stencilId: "tshirt",
+        stencilId: "item",
         filepath: item.filepath,
         polygonOutline: itemOutline,
         transform: { x: pos.x, y: pos.y, width: w, height: h, rotation: pos.rotation ?? Math.random() * 360 },
@@ -231,7 +326,7 @@ export default function CustomizationPage() {
         originalPixelValue: threatItem.pixel_value,
         currentPixelValue: threatItem.pixel_value,
         oldPixelValue: null,
-        stencilId: "gun",
+        stencilId: "threat",
         filepath: threatItem.filepath,
         polygonOutline: threatOutline,
         transform: { x: pos.x, y: pos.y, width: w, height: h, rotation: pos.rotation ?? Math.random() * 360 },
@@ -306,7 +401,7 @@ export default function CustomizationPage() {
       originalPixelValue: item.pixel_value,
       currentPixelValue: item.pixel_value,
       oldPixelValue: null,
-      stencilId: "tshirt",
+      stencilId: "item",
       filepath: item.filepath,
       polygonOutline: itemOutline,
       transform: {
@@ -450,6 +545,17 @@ export default function CustomizationPage() {
     }
     setIsDragging(false);
     setIsRotating(false);
+    computeStats();
+  };
+
+  const computeStats = () => {
+    const canvas = document.querySelector("canvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const imageData = ctx.getImageData(0, 0, 800, 600);
+    const stats = computeObjectStats(objects, imageData);
+    setPixelStats(new Map(stats));
   };
 
   const handleExport = async () => {
@@ -474,6 +580,7 @@ export default function CustomizationPage() {
           currentPixelValue: obj.currentPixelValue,
           oldPixelValue: obj.oldPixelValue,
           polygonOutline: obj.polygonOutline,
+          layer: obj.layer,
           segmentation: corners,
         };
       });
@@ -519,6 +626,11 @@ export default function CustomizationPage() {
   const outOfBoundsObjects = objects.filter(
     obj => bagObject && obj.library === "threat" && !isObjectInsideContainer(obj, bagObject)
   );
+
+  // Compute stats when selection changes
+  useEffect(() => {
+    computeStats();
+  }, [selectedObjectId, objects]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-56px)] bg-surface overflow-hidden animate-fade-in text-sm">
@@ -718,10 +830,29 @@ export default function CustomizationPage() {
                         <span className="text-[11px] text-muted uppercase tracking-wider">Original</span>
                         <span className="font-mono text-ink text-xs font-semibold">{selectedObj.originalPixelValue}</span>
                       </div>
-                      <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
-                        <span className="text-[11px] text-muted uppercase tracking-wider">Synthesized</span>
-                        <span className="font-mono text-accent-sky text-xs font-semibold">{selectedObj.currentPixelValue}</span>
-                      </div>
+                      {(() => {
+                        const stats = pixelStats.get(selectedObj.id);
+                        if (!stats) {
+                          return (
+                            <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
+                              <span className="text-[11px] text-muted uppercase tracking-wider">Synthesized</span>
+                              <span className="font-mono text-accent-sky text-xs font-semibold">{selectedObj.currentPixelValue}</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="bg-panel rounded-xl border border-accent/30 px-3 py-2 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] text-muted uppercase tracking-wider">Synthesized</span>
+                              <span className="font-mono text-accent-sky text-xs font-semibold">{stats.synthesizedMean}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] text-muted">
+                              <span>Range</span>
+                              <span className="font-mono">{stats.min} – {stats.max}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>

@@ -636,6 +636,20 @@ For each point in the outline:
 **`lineSegmentsIntersect(p1,p2,p3,p4)` — CCW Method:**
 Uses counter-clockwise orientation test to detect segment intersection.
 
+#### `xrayPhysics.ts` — PIXEL COMBINATION UTILITIES
+
+**`combinePixels(i1, i2)` — Direct multiplication:**
+```
+result = (i1 × i2) / 65535
+```
+This is the core per-pixel combination formula. It preserves full 16-bit precision.
+
+**`to16Bit(value)` / `to8Bit(value)` — Range conversion:**
+```
+to16Bit: 8-bit (0-255) → 16-bit (0-65535): value × 257
+to8Bit: 16-bit (0-65535) → 8-bit (0-255): value / 257
+```
+
 #### `customizationHelpers.ts` — PLACEMENT & PIXEL MATH
 
 **`getTransformedValidRegion(bag)` — Converts stored polygon to canvas coordinates:**
@@ -667,14 +681,11 @@ Uses counter-clockwise orientation test to detect segment intersection.
 3. Fallback: return centroid of valid region
 ```
 
-**`calculatePixelValues(objs, threatOnly)` — Overlap Pixel Calculation:**
+**`calculatePixelValues(objs, threatOnly)` — DEPRECATED**
 ```
-For each object:
-  If it overlaps with a lower-layer object:
-    newPixelValue = (originalPixelValue × overlappingPixelValue) / 65535
-    
-This simulates X-ray absorption stacking:
-  Two objects in the same spot absorb more X-rays = darker pixel
+@deprecated — Used a simplified single-value-per-object approach.
+Replaced by computeObjectStats() in xrayRenderer.ts which computes
+per-pixel statistics from the actual rendered composite.
 ```
 
 ---
@@ -1178,7 +1189,7 @@ Response: { ok: true, datasetId, outputDir, files: [{ image, label }], manifest 
 
 ---
 
-## 10. The Beer-Lambert X-Ray Rendering Physics
+## 10. X-Ray Rendering Physics
 
 ### The Science
 
@@ -1201,36 +1212,63 @@ Where:
 1. **Start with white** (I = 65535, meaning no absorption = empty space)
 
 2. **For each object layer (back to front):**
-   - The object's pixel value represents its attenuation: `μ = -ln(pixelValue / 65535)`
-   - The alpha channel represents thickness: `t = alpha / 255`
-   - Accumulate density: `density += μ × t`
+   - Read the actual grayscale pixel value from the source image (0-65535)
+   - Skip near-white background pixels (treated as transparent)
+   - Apply per-pixel combination: `result = (result × srcPixel) / 65535`
 
-3. **Convert accumulated density to intensity:**
+3. **Convert 16-bit result back to 8-bit for display:**
    ```
-   I = 65535 × e^(-density)
-   gray = round((I / 65535) × 255)
+   gray = round((result / 65535) × 255)
    ```
+
+### The Direct Multiplication Formula
+
+Instead of the Beer-Lambert attenuation approach, we use **direct multiplication** which is simpler and preserves full precision:
+
+```
+For each pixel (x,y):
+  result = 65535  // start with white (transparent)
+  
+  For each object (bottom layer to top layer):
+    If pixel is inside the object's drawn image:
+      srcPixel = actual grayscale value from source image (0-65535)
+      result = (result × srcPixel) / 65535
+  
+  // Convert to display
+  gray = round((result / 65535) × 255)
+```
+
+**Why this works:** When two materials overlap, the X-ray passes through both. The combined transmission is the product of individual transmissions. This is mathematically equivalent to Beer-Lambert for thin materials but simpler to compute and easier to understand.
 
 ### Example Pixel Values
 
-| Object | Pixel Value | μ (attenuation) | Visual Result |
-|--------|-------------|-----------------|---------------|
-| Air/Empty | 65535 | 0 | White |
-| Cloth | 40000 | 0.49 | Light gray |
-| Plastic | 30000 | 0.76 | Medium gray |
-| Electronics | 15000 | 1.44 | Dark gray |
-| Metal (gun) | 5000 | 2.60 | Very dark |
-| Dense metal | 1000 | 4.16 | Nearly black |
+| Object | Pixel Value | Visual Result |
+|--------|-------------|---------------|
+| Air/Empty | 65535 | White |
+| Cloth | 40000 | Light gray |
+| Plastic | 30000 | Medium gray |
+| Electronics | 15000 | Dark gray |
+| Metal (gun) | 5000 | Very dark |
+| Dense metal | 1000 | Nearly black |
 
 ### Multi-Layer Stacking
 
-When two objects overlap, their densities add up:
+When two objects overlap, their pixel values multiply:
 ```
-Total density = density_object1 + density_object2
-Resulting intensity = 65535 × e^(-total_density)
+result = (I1 × I2) / 65535
 ```
 
 This means overlapping objects appear darker than either alone — exactly like real X-ray imaging.
+
+### Background Handling
+
+Source images often have white or near-white backgrounds. These are **skipped entirely** during compositing:
+```
+If pixel is near-white (R≥245, G≥245, B≥245):
+  Skip this pixel (treat as transparent)
+```
+
+This prevents white backgrounds from creating light patches in the composite.
 
 ### Frontend vs Backend Rendering
 
@@ -1240,9 +1278,27 @@ This means overlapping objects appear darker than either alone — exactly like 
 | Used for | Real-time preview | Batch export |
 | Image source | HTTP URLs | Local filesystem |
 | Performance | Interactive (60fps) | One-shot (slower) |
-| Physics | Identical | Identical |
+| Physics | Direct multiplication | Direct multiplication |
+| Precision | 16-bit internal buffer | 16-bit internal buffer |
 
-Both implementations use the exact same Beer-Lambert algorithm, ensuring WYSIWYG: what you see in the browser is what gets exported.
+Both implementations use the exact same algorithm, ensuring WYSIWYG: what you see in the browser is what gets exported.
+
+### Per-Object Pixel Statistics
+
+After rendering the composite, we compute per-object statistics by:
+
+1. Rendering each object individually to get its alpha mask
+2. At each pixel where the object appears, reading the synthesized value from the final composite
+3. Computing mean, min, and max of those values
+
+This gives accurate per-object statistics derived from actual rendered pixels, not approximated single values.
+
+**Files involved:**
+- `frontend/src/lib/xrayPhysics.ts` — `combinePixels()`, `to16Bit()`, `to8Bit()`
+- `frontend/src/lib/xrayRenderer.ts` — `drawXRayComposite()`, `computeObjectStats()`
+- `frontend/src/pages/CustomizationPage.tsx` — displays stats in Properties panel
+
+**Deprecated:** `calculatePixelValues()` in `customizationHelpers.ts` used a simplified single-value-per-object approach and is no longer used.
 
 ---
 

@@ -184,6 +184,11 @@ export const doObjectsOverlap = (obj1: SceneObject, obj2: SceneObject): boolean 
   );
 };
 
+/**
+ * @deprecated This function uses a simplified single-value-per-object approach
+ * that is not accurate. Use computeObjectStats from xrayRenderer.ts instead,
+ * which computes per-pixel statistics from the actual rendered composite.
+ */
 export const calculatePixelValues = (objs: SceneObject[], threatOnly = false): SceneObject[] => {
   return objs.map((obj) => {
     let newPixelValue = obj.originalPixelValue;

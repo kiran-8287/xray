@@ -39,6 +39,9 @@ export default function SimpleLibrarySidebar({
           const itemsInCat = Object.values(subcats).flat();
           const isCatActive = activeCategory === catKey;
           const selectedCount = itemsInCat.filter((item) => selectedItems.has(item.id)).length;
+          const allSelected = itemsInCat.length > 0 && itemsInCat.every(item => selectedItems.has(item.id));
+          const someSelected = selectedCount > 0 && !allSelected;
+
           return (
             <div key={catKey} className="space-y-2 bg-panel/30 rounded-2xl border border-border/60 p-2 shadow-sm transition-all hover:border-border/80">
               <div className="flex items-center gap-2">
@@ -56,8 +59,23 @@ export default function SimpleLibrarySidebar({
                   <span className="ml-auto text-[10px] font-bold font-mono text-muted/70 bg-surface px-2 py-0.5 rounded-full border border-border">{itemsInCat.length}</span>
                 </button>
                 <button
-                  onClick={() => onSelectAllCategory(catKey)}
-                  className="rounded-lg border border-border bg-surface px-3 py-1.5 text-[9px] font-bold text-accent hover:border-accent/50 hover:bg-accent/5 transition-all uppercase tracking-tighter"
+                  onClick={() => {
+                    if (allSelected) {
+                      // Deselect all in this category
+                      setSelectedItems((prev) => {
+                        const next = new Set(prev);
+                        itemsInCat.forEach((item) => next.delete(item.id));
+                        return next;
+                      });
+                    } else {
+                      onSelectAllCategory(catKey);
+                    }
+                  }}
+                  className={`rounded-lg border px-3 py-1.5 text-[9px] font-bold uppercase tracking-tighter transition-all ${
+                    someSelected || allSelected
+                      ? 'border-accent bg-accent/10 text-accent hover:bg-accent/20 hover:border-accent/70'
+                      : 'border-border bg-surface text-muted hover:border-accent/50 hover:bg-accent/5 hover:text-accent'
+                  }`}
                 >
                   SELECT ALL
                 </button>
@@ -82,7 +100,10 @@ export default function SimpleLibrarySidebar({
                   <span className="ml-auto text-[9px] font-bold font-mono text-muted/60 bg-surface/50 px-1.5 py-0.5 rounded-full border border-border/50">{itemsInCat.length}</span>
                 </button>
                 {Object.keys(subcats).map((subKey) => {
-                  const selectedSubCount = (subcats[subKey] || []).filter((item) => selectedItems.has(item.id)).length;
+                  const subItems = subcats[subKey] || [];
+                  const isSubAllSelected = subItems.length > 0 && subItems.every((item) => selectedItems.has(item.id));
+                  const isSubSomeSelected = subItems.some((item) => selectedItems.has(item.id)) && !isSubAllSelected;
+
                   return (
                     <div key={subKey} className="flex items-center gap-2 group/sub">
                       <button
@@ -93,11 +114,26 @@ export default function SimpleLibrarySidebar({
                         className={`flex-1 text-left px-3 py-1.5 rounded-lg transition-all ${isCatActive && activeSubcategory === subKey ? 'bg-panel border-border font-bold text-accent shadow-sm' : 'hover:bg-panel/40 text-muted group-hover/sub:text-ink'}`}
                       >
                         <span className="text-[11px] font-medium truncate">{subKey}</span>
-                        <span className="ml-2 text-[9px] font-bold font-mono text-muted/60 bg-surface/50 px-1.5 py-0.5 rounded-full border border-border/50">{(subcats[subKey] || []).length}</span>
+                        <span className="ml-2 text-[9px] font-bold font-mono text-muted/60 bg-surface/50 px-1.5 py-0.5 rounded-full border border-border/50">{subItems.length}</span>
                       </button>
                       <button
-                        onClick={() => onSelectAllSubcategory(catKey, subKey)}
-                        className="rounded-lg border border-border bg-surface px-3 py-1.5 text-[9px] font-bold text-accent hover:border-accent/50 hover:bg-accent/5 transition-all uppercase tracking-tighter"
+                        onClick={() => {
+                          if (isSubAllSelected) {
+                            // Deselect all in this subcategory
+                            setSelectedItems((prev) => {
+                              const next = new Set(prev);
+                              subItems.forEach((item) => next.delete(item.id));
+                              return next;
+                            });
+                          } else {
+                            onSelectAllSubcategory(catKey, subKey);
+                          }
+                        }}
+                        className={`rounded-lg border px-3 py-1.5 text-[9px] font-bold uppercase tracking-tighter transition-all ${
+                          isSubSomeSelected || isSubAllSelected
+                            ? 'border-accent bg-accent/10 text-accent hover:bg-accent/20 hover:border-accent/70'
+                            : 'border-border bg-surface text-muted hover:border-accent/50 hover:bg-accent/5 hover:text-accent'
+                        }`}
                       >
                         SELECT ALL
                       </button>

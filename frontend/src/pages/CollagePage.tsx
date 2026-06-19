@@ -1,15 +1,12 @@
-import React, { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Filter, Plus, ShieldAlert, ShieldCheck, Database, Loader2, CheckCircle2, XCircle, Grid3X3, BookOpen } from "lucide-react";
+import React, { useEffect, useState, useCallback } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Plus, Database, Loader2, CheckCircle2, XCircle, Grid3X3, BookOpen, ChevronLeft, ChevronRight, Settings2, AlertTriangle, List, X } from "lucide-react";
 import type { Item } from "../types/library";
+import type { CombinatorialResult, FailureLog } from "../types/customization";
 import SyntheticPreview from "../components/collage/SyntheticPreview";
+import { generateCombinations } from "../lib/combinationGenerator";
 
-type Combination = {
-  id: string;
-  bag: Item;
-  threat?: Item;
-  others: Item[];
-};
+const ITEMS_PER_PAGE = 20;
 
 export default function CollagePage() {
   const navigate = useNavigate();
@@ -18,8 +15,34 @@ export default function CollagePage() {
     | { selectedBags?: Item[]; selectedThreats?: Item[]; selectedOthers?: Item[]; densityPreset?: "empty" | "few" | "filled" }
     | undefined;
 
-  // Try to restore combinations from sessionStorage first (survives page navigations)
-  const [combinations, setCombinations] = useState<Combination[]>(() => {
+  // Selections from library (restored from localStorage on refresh)
+  const [selectedBags, setSelectedBags] = useState<Item[]>(() => {
+    try {
+      const saved = localStorage.getItem("selectedBags");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [selectedThreats, setSelectedThreats] = useState<Item[]>(() => {
+    try {
+      const saved = localStorage.getItem("selectedThreats");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [selectedOthers, setSelectedOthers] = useState<Item[]>(() => {
+    try {
+      const saved = localStorage.getItem("selectedOthers");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
+  const [kValue, setKValue] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("collageKValue");
+      return saved ? parseInt(saved) : 20;
+    } catch { return 20; }
+  });
+
+  const [combinations, setCombinations] = useState<CombinatorialResult[]>(() => {
     try {
       const cached = sessionStorage.getItem("collageCombinations");
       if (cached) {
@@ -31,12 +54,125 @@ export default function CollagePage() {
     return [];
   });
 
+  const [failures, setFailures] = useState<FailureLog[]>(() => {
+    try {
+      const cached = sessionStorage.getItem("collageFailures");
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState("");
+  const [currentPage, setCurrentPage] = useState(0);
+  const [showLogs, setShowLogs] = useState(false);
+
   const [exportState, setExportState] = useState<{
     status: "idle" | "generating" | "success" | "error";
     message: string;
     datasetId?: string;
     outputDir?: string;
   }>({ status: "idle", message: "" });
+
+  // Whenever new data arrives via location state, persist it
+  useEffect(() => {
+    if (!locationState || !locationState.selectedBags || locationState.selectedBags.length === 0) {
+      return;
+    }
+
+    const { selectedBags: bags, selectedThreats: threats, selectedOthers: others } = locationState;
+
+    setSelectedBags(bags);
+    setSelectedThreats(threats || []);
+    setSelectedOthers(others || []);
+
+    // Persist to localStorage
+    try {
+      localStorage.setItem("selectedBags", JSON.stringify(bags));
+      localStorage.setItem("selectedThreats", JSON.stringify(threats || []));
+      localStorage.setItem("selectedOthers", JSON.stringify(others || []));
+    } catch (err) {
+      console.error("Error saving collage state to localStorage:", err);
+    }
+  }, [locationState]);
+
+  // Persist combinations and failures to sessionStorage
+  useEffect(() => {
+    try {
+      if (combinations.length > 0) {
+        sessionStorage.setItem("collageCombinations", JSON.stringify(combinations));
+      }
+      if (failures.length > 0) {
+        sessionStorage.setItem("collageFailures", JSON.stringify(failures));
+      }
+    } catch (err) {
+      console.error("Error saving to sessionStorage:", err);
+    }
+  }, [combinations, failures]);
+
+  // Persist K value
+  useEffect(() => {
+    localStorage.setItem("collageKValue", String(kValue));
+  }, [kValue]);
+
+  const handleGenerate = useCallback(async () => {
+    if (selectedBags.length === 0) return;
+
+    setIsGenerating(true);
+    setGenerationProgress(`Generating ${kValue} combinations...`);
+
+    // Use setTimeout to allow UI to update before blocking
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    try {
+      const density = (localStorage.getItem("densityPreset") as "empty" | "few" | "filled") || "filled";
+      const { results, failures: genFailures } = generateCombinations(
+        selectedBags,
+        selectedThreats,
+        selectedOthers,
+        kValue,
+        density
+      );
+
+      setCombinations(results);
+      setFailures(genFailures);
+      setCurrentPage(0);
+      setGenerationProgress(`Generated ${results.length} combinations${results.length < kValue ? ` (only ${results.length} unique placements possible)` : ""}`);
+      
+      setTimeout(() => setGenerationProgress(""), 3000);
+    } catch (err) {
+      console.error("Generation error:", err);
+      setGenerationProgress("Error generating combinations. Check console for details.");
+      setTimeout(() => setGenerationProgress(""), 5000);
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [selectedBags, selectedThreats, selectedOthers, kValue]);
+
+  const handleOpenCombination = (comb: CombinatorialResult) => {
+    // Store the pre-computed objects in sessionStorage so CustomizationPage can load them
+    const storageKey = `xray_workspace_precomputed_${comb.id}`;
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(comb.objects));
+    } catch (err) {
+      console.error("Error saving precomputed objects:", err);
+    }
+
+    const queryParams = new URLSearchParams();
+    queryParams.set("bagId", comb.bag.id);
+    if (comb.threat) queryParams.set("threatId", comb.threat.id);
+    if (comb.others.length > 0) {
+      queryParams.set("otherIds", comb.others.map((o) => o.id).join(","));
+    }
+    // Add flag to indicate we have pre-computed objects
+    queryParams.set("precomputed", comb.id);
+
+    navigate(`/customize?${queryParams.toString()}`);
+  };
 
   const handleExportDataset = async () => {
     setExportState({ status: "generating", message: "Generating high-resolution PNG scans & YOLO annotations..." });
@@ -76,84 +212,27 @@ export default function CollagePage() {
     }
   };
 
-  // Whenever new data arrives via location state, persist it and regenerate combinations
-  useEffect(() => {
-    // Only process if we have fresh data from Library via location state
-    if (!locationState || !locationState.selectedBags || locationState.selectedBags.length === 0) {
-      return;
-    }
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(combinations.length / ITEMS_PER_PAGE));
+  const paginatedCombinations = combinations.slice(
+    currentPage * ITEMS_PER_PAGE,
+    (currentPage + 1) * ITEMS_PER_PAGE
+  );
 
-    const { selectedBags, selectedThreats, selectedOthers, densityPreset } = locationState;
-    const bags = selectedBags;
-    const threats = selectedThreats || [];
-    const others = selectedOthers || [];
-    const density = densityPreset || "filled";
-
-    // Persist to localStorage so it survives even sessionStorage clearing
-    try {
-      localStorage.setItem("selectedBags", JSON.stringify(bags));
-      localStorage.setItem("selectedThreats", JSON.stringify(threats));
-      localStorage.setItem("selectedOthers", JSON.stringify(others));
-      localStorage.setItem("densityPreset", density);
-    } catch (err) {
-      console.error("Error saving collage state to localStorage:", err);
-    }
-
-    const combos: Combination[] = [];
-
-    bags.forEach((bag) => {
-      // First, combo with just bag and random others
-      const cleanOthers = density === "empty" ? [] : (density === "few" ? others.slice(0, 2) : others);
-      combos.push({
-        id: `${bag.id}-clean`,
-        bag,
-        others: cleanOthers,
-      });
-
-      // Then, bag + each threat + random others
-      threats.forEach((threat) => {
-        // Client-side validation: if threat exists but bag lacks a valid placement region, skip combo
-        const bagHasValidRegion = bag.valid_region_points && (Array.isArray(bag.valid_region_points) ? bag.valid_region_points.length > 0 : true);
-        if (!bagHasValidRegion) {
-          return; // skip this permutation
-        }
-        const threatOthers = density === "empty" ? [] : (density === "few" ? others.slice(0, 1) : others);
-        combos.push({
-          id: `${bag.id}-${threat.id}`,
-          bag,
-          threat,
-          others: threatOthers,
-        });
-      });
-    });
-
-    setCombinations(combos);
-  }, [locationState]);
-
-  // Persist combinations to sessionStorage whenever they change (survives page navigations)
-  useEffect(() => {
-    try {
-      if (combinations.length > 0) {
-        sessionStorage.setItem("collageCombinations", JSON.stringify(combinations));
-      }
-    } catch (err) {
-      console.error("Error saving combinations to sessionStorage:", err);
-    }
-  }, [combinations]);
+  const hasSelections = selectedBags.length > 0;
+  const hasFailures = failures.length > 0;
 
   return (
     <div className="max-w-6xl mx-auto py-8 px-6 animate-fade-in text-sm">
       {/* Header Row */}
       <div className="flex items-end justify-between mb-8 border-l-4 border-accent pl-4">
         <div>
-          <h2 className="text-3xl font-bold text-ink tracking-tight"></h2>
+          <h2 className="text-3xl font-bold text-ink tracking-tight">Collage Generator</h2>
           <p className="text-sm text-muted mt-1">
+            {selectedBags.length} bag{selectedBags.length !== 1 ? "s" : ""}, {selectedThreats.length} threat{selectedThreats.length !== 1 ? "s" : ""}, {selectedOthers.length} non-threat{selectedOthers.length !== 1 ? "s" : ""} selected
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="px-4 py-2 text-sm font-medium text-muted bg-panel hover:bg-surface hover:text-ink border border-border hover:border-muted/50 rounded-xl transition-all flex items-center gap-1.5 shadow-card" title="Filter">
-            <Filter size={15} />
-          </button>
           <button
             onClick={handleExportDataset}
             disabled={exportState.status === "generating" || combinations.length === 0}
@@ -173,6 +252,52 @@ export default function CollagePage() {
           >
             <Plus size={15} />
           </button>
+        </div>
+      </div>
+
+      {/* Configuration Bar: K Input + Generate */}
+      <div className="mb-6 p-4 bg-panel rounded-2xl border border-border shadow-card flex flex-col sm:flex-row items-start sm:items-center gap-4">
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Settings2 size={16} className="text-muted" />
+          <span className="text-xs font-semibold text-muted uppercase tracking-wider">Combinations</span>
+        </div>
+        <div className="flex items-center gap-3 flex-1 flex-wrap">
+          <div className="flex items-center gap-2">
+            <label htmlFor="k-input" className="text-xs text-muted">Generate</label>
+            <input
+              id="k-input"
+              type="number"
+              min={1}
+              max={10000}
+              value={kValue}
+              onChange={(e) => {
+                const val = parseInt(e.target.value) || 1;
+                setKValue(Math.max(1, Math.min(10000, val)));
+              }}
+              className="w-24 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink font-mono text-center focus:outline-none focus:border-accent"
+            />
+            <span className="text-xs text-muted">unique combinations</span>
+          </div>
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating || !hasSelections}
+            className="px-5 py-2 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover hover:opacity-95 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="animate-spin" size={15} />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Settings2 size={15} />
+                Generate
+              </>
+            )}
+          </button>
+          {generationProgress && (
+            <span className="text-xs text-muted animate-pulse">{generationProgress}</span>
+          )}
         </div>
       </div>
 
@@ -216,7 +341,7 @@ export default function CollagePage() {
       )}
 
       {/* Grid */}
-      {combinations.length === 0 ? (
+      {combinations.length === 0 && failures.length === 0 ? (
         <div className="text-center py-24 bg-panel rounded-2xl border border-border shadow-card">
           <div className="w-16 h-16 bg-surface rounded-full flex items-center justify-center mx-auto mb-4 border border-border">
             <Grid3X3 size={28} className="text-muted/40" />
@@ -234,26 +359,131 @@ export default function CollagePage() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {combinations.map((comb) => {
-            const queryParams = new URLSearchParams();
-            queryParams.set("bagId", comb.bag.id);
-            if (comb.threat) queryParams.set("threatId", comb.threat.id);
-            if (comb.others.length > 0) {
-              queryParams.set("otherIds", comb.others.map((o) => o.id).join(","));
-            }
-            
-            return (
-              <Link
-                key={comb.id}
-                to={`/customize?${queryParams.toString()}`}
-                className="bg-panel rounded-2xl border border-border p-4 shadow-card hover:shadow-card-hover hover:border-accent/40 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer overflow-hidden group"
+        <>
+          {/* Summary bar with logs toggle */}
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-xs text-muted">
+              {combinations.length > 0
+                ? `Showing ${currentPage * ITEMS_PER_PAGE + 1}–${Math.min((currentPage + 1) * ITEMS_PER_PAGE, combinations.length)} of ${combinations.length} combinations`
+                : "0 combinations generated"}
+              {failures.length > 0 && (
+                <span className="ml-2 text-rose-600 font-medium">
+                  · {failures.length} failure{failures.length !== 1 ? "s" : ""}
+                </span>
+              )}
+            </p>
+            {failures.length > 0 && (
+              <button
+                onClick={() => setShowLogs(!showLogs)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${
+                  showLogs
+                    ? "bg-rose-50 border-rose-200 text-rose-700"
+                    : "bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100"
+                }`}
               >
-                <SyntheticPreview bag={comb.bag} threat={comb.threat} others={comb.others} />
-              </Link>
-            );
-          })}
-        </div>
+                {showLogs ? <X size={14} /> : <AlertTriangle size={14} />}
+                {showLogs ? "Hide Logs" : `${failures.length} Issue${failures.length !== 1 ? "s" : ""}`}
+              </button>
+            )}
+          </div>
+
+          {/* Logs Panel */}
+          {showLogs && failures.length > 0 && (
+            <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl shadow-card">
+              <div className="flex items-center gap-2 mb-3">
+                <AlertTriangle size={16} className="text-rose-600" />
+                <h3 className="text-sm font-semibold text-rose-800">Generation Issues</h3>
+                <span className="text-xs text-rose-500 ml-1">({failures.length} total)</span>
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {failures.map((f, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 bg-white rounded-xl border border-rose-100 text-xs space-y-1"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-rose-800">
+                        {f.bagName} ← {f.threatName}
+                      </span>
+                      <span className="text-rose-500 font-mono">
+                        {f.actual}/{f.expected}
+                      </span>
+                    </div>
+                    <p className="text-rose-600 leading-relaxed">{f.reason}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Combination Grid */}
+          {combinations.length > 0 && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {paginatedCombinations.map((comb) => (
+                  <button
+                    key={comb.id}
+                    onClick={() => handleOpenCombination(comb)}
+                    className="bg-panel rounded-2xl border border-border p-4 shadow-card hover:shadow-card-hover hover:border-accent/40 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer overflow-hidden group text-left w-full"
+                  >
+                    <SyntheticPreview
+                      objects={comb.objects}
+                      bagName={comb.bag.name}
+                      threatName={comb.threat?.name}
+                      othersCount={comb.others.length}
+                    />
+                  </button>
+                ))}
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-2 mt-8">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                    disabled={currentPage === 0}
+                    className="p-2 rounded-xl border border-border bg-panel hover:bg-surface disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                  >
+                    <ChevronLeft size={16} className="text-muted" />
+                  </button>
+                  
+                  {Array.from({ length: totalPages }, (_, i) => i).map((page) => {
+                    const showPage = page === 0 || page === totalPages - 1 || 
+                      Math.abs(page - currentPage) <= 1;
+                    const showEllipsis = page === currentPage - 2 || page === currentPage + 2;
+                    
+                    if (!showPage && !showEllipsis) return null;
+                    if (!showPage && showEllipsis) {
+                      return <span key={page} className="text-muted text-xs px-1">...</span>;
+                    }
+                    
+                    return (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`min-w-[36px] h-9 rounded-xl text-sm font-medium transition-all ${
+                          page === currentPage
+                            ? "bg-accent text-white shadow-btn"
+                            : "border border-border bg-panel text-muted hover:bg-surface hover:text-ink"
+                        }`}
+                      >
+                        {page + 1}
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                    disabled={currentPage >= totalPages - 1}
+                    className="p-2 rounded-xl border border-border bg-panel hover:bg-surface disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                  >
+                    <ChevronRight size={16} className="text-muted" />
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </>
       )}
     </div>
   );
