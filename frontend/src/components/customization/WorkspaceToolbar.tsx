@@ -1,6 +1,6 @@
 import React from "react";
 import { 
-  Undo2, Redo2, Save, Trash2, RotateCw, Settings, ChevronUp, ChevronDown, 
+  Undo2, Redo2, Save, Trash2, RotateCw, Settings, 
   Layers, Layout, Shuffle
 } from "lucide-react";
 
@@ -14,10 +14,6 @@ interface WorkspaceToolbarProps {
   handleUndo: () => void;
   handleRedo: () => void;
   setShowValidRegion: (val: boolean) => void;
-  handleSendToBack: () => void;
-  handleMoveLayerDown: () => void;
-  handleMoveLayerUp: () => void;
-  handleBringToFront: () => void;
   handleDeleteSelected: () => void;
   handleExport: () => void;
   handleRandomize: () => void;
@@ -33,10 +29,6 @@ export default function WorkspaceToolbar({
   handleUndo,
   handleRedo,
   setShowValidRegion,
-  handleSendToBack,
-  handleMoveLayerDown,
-  handleMoveLayerUp,
-  handleBringToFront,
   handleDeleteSelected,
   handleExport,
   handleRandomize,
@@ -89,38 +81,6 @@ export default function WorkspaceToolbar({
       {selectedObjectId && (
         <>
           <div className="w-px h-5 bg-border mx-1" />
-          {/* Layer actions */}
-          <button
-            onClick={handleSendToBack}
-            className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface cursor-pointer"
-            title="Send to Back"
-          >
-            <ChevronDown size={16} />
-          </button>
-          <button
-            onClick={handleMoveLayerDown}
-            className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface cursor-pointer"
-            title="Move Layer Down"
-          >
-            <Layers size={16} />
-          </button>
-          <button
-            onClick={handleMoveLayerUp}
-            className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface cursor-pointer"
-            title="Move Layer Up"
-          >
-            <Layers size={16} className="rotate-180" />
-          </button>
-          <button
-            onClick={handleBringToFront}
-            className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface cursor-pointer"
-            title="Bring to Front"
-          >
-            <ChevronUp size={16} />
-          </button>
-
-          <div className="w-px h-5 bg-border mx-1" />
-
           {/* Delete button */}
           <button
             onClick={handleDeleteSelected}

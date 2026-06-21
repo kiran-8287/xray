@@ -33,8 +33,10 @@ import {
   AlertTriangle,
   ArrowUp,
   ArrowDown,
-  Download
+  Download,
+  Wand2
 } from 'lucide-react';
+import { extractValidRegion } from '../lib/validRegionExtractor';
 
 interface Point {
   x: number;
@@ -114,6 +116,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [editingLabelText, setEditingLabelText] = useState("");
   const [expandedLayerId, setExpandedLayerId] = useState<string | null>(null);
+  const [isAutoDetecting, setIsAutoDetecting] = useState(false);
 
   // -------------------------------
   // Helpers
@@ -124,6 +127,72 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
     const id = createId();
     setToasts(prev => [...prev, { id, type, message }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 2500);
+  };
+
+  const handleAutoDetectRegion = async () => {
+    if (!imageSrc || isAutoDetecting) return;
+    
+    setIsAutoDetecting(true);
+    showToast('info', 'Analyzing image to detect valid region...');
+    
+    try {
+      const points = await extractValidRegion(imageSrc);
+      
+      if (points.length < 3) {
+        showToast('warning', 'Could not detect valid region. Please draw it manually.');
+        setIsAutoDetecting(false);
+        return;
+      }
+      
+      // Convert normalized points to canvas coordinates
+      const canvasPoints = points.map(p => ({
+        x: p.x * imageDimensions.width,
+        y: p.y * imageDimensions.height
+      }));
+      
+      // Calculate bounding box
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      canvasPoints.forEach(p => {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      });
+      
+      // Create a new polygon shape from the detected region
+      const newPolyCount = polygonCount + 1;
+      setPolygonCount(newPolyCount);
+      
+      const newShape: Shape = {
+        id: createId(),
+        type: 'polygon',
+        isPositive: true,
+        points: canvasPoints,
+        x: minX,
+        y: minY,
+        width: maxX - minX,
+        height: maxY - minY,
+        radius: 0,
+        visible: true,
+        locked: false,
+        label: `Auto-detected Region ${newPolyCount}`,
+        opacity: 0.35
+      };
+      
+      // Clear existing shapes and add the new one
+      const updatedShapes = [newShape];
+      setShapes(updatedShapes);
+      setHistory([updatedShapes.map(s => ({ ...s }))]);
+      setHistoryIndex(0);
+      setSelectedShapeId(newShape.id);
+      
+      showToast('success', `Valid region detected with ${points.length} points. You can edit it if needed.`);
+    } catch (error) {
+      console.error('Auto-detection error:', error);
+      showToast('warning', 'Error detecting region. Please draw it manually.');
+    } finally {
+      setIsAutoDetecting(false);
+    }
   };
 
   const snap = (v: number) => gridSnap ? Math.round(v / gridSize) * gridSize : v;
@@ -416,7 +485,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
       }
     }
     
-    simplifiedPoints = simplifiedPoints.map(p => ({
+    simplifiedPoints = simplifiedPoints.map((p: Point) => ({
       x: p.x / canvas.width,
       y: p.y / canvas.height
     }));
@@ -1706,6 +1775,17 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
             </button>
           </div>
           
+          {/* Auto-detect button */}
+          <button
+            onClick={handleAutoDetectRegion}
+            disabled={isAutoDetecting || !imageDimensions.width}
+            className="px-3 py-1.5 bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white rounded-xl text-xs font-semibold border border-[#A78BFA] hover:opacity-90 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+            title="Auto-detect valid region from bag image"
+          >
+            <Wand2 size={14} />
+            {isAutoDetecting ? 'Detecting...' : 'Auto-detect Region'}
+          </button>
+
           {/* Actions */}
           <div className="flex items-center gap-2 ml-auto">
             {selectedShapeId && (

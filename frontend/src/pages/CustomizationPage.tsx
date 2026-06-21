@@ -86,6 +86,23 @@ function getStencilKind(category: string): string {
   return "stationary"; // fallback
 }
 
+function getObjectSubcategory(obj: SceneObject, categorizedList: any): string | undefined {
+  if (obj.subcategory) return obj.subcategory;
+  if (!categorizedList) return undefined;
+
+  const allItems: Item[] = [];
+  Object.values(categorizedList).forEach((subcats: any) => {
+    Object.values(subcats).forEach((items: any) => {
+      if (Array.isArray(items)) {
+        allItems.push(...items);
+      }
+    });
+  });
+
+  const matched = allItems.find((item) => item.filepath === obj.filepath || item.name === obj.name);
+  return matched?.subcategory;
+}
+
 const CANVAS_W = 800;
 const CANVAS_H = 600;
 
@@ -98,10 +115,15 @@ export default function CustomizationPage() {
   const [historyIndex, setHistoryIndex] = useState(0);
   const [showValidRegion, setShowValidRegion] = useState(true);
   const [exportState, setExportState] = useState<{ status: "idle" | "saving" | "success" | "error"; message: string }>({ status: "idle", message: "" });
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [workspaceAnnotation, setWorkspaceAnnotation] = useState<string>(`Workspace ${new Date().toISOString()}`);
+  
   const canvasDivRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const rotationStartAngleRef = useRef(0);
+  const rotationStartRotationRef = useRef(0);
   const [activeLibrary, setActiveLibrary] = useState<string | null>(null);
   const [hasBag, setHasBag] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -239,6 +261,7 @@ export default function CustomizationPage() {
         id: "initial-bag",
         name: bagItem.name,
         library: getStencilKind(bagItem.category),
+        subcategory: bagItem.subcategory,
         originalPixelValue: bagItem.pixel_value,
         currentPixelValue: bagItem.pixel_value,
         oldPixelValue: null,
@@ -286,6 +309,7 @@ export default function CustomizationPage() {
         id: `random-object-${i}`,
         name: item.name,
         library: getStencilKind(item.category),
+        subcategory: item.subcategory,
         originalPixelValue: item.pixel_value,
         currentPixelValue: item.pixel_value,
         oldPixelValue: null,
@@ -323,6 +347,7 @@ export default function CustomizationPage() {
         id: "initial-threat",
         name: threatItem.name,
         library: getStencilKind(threatItem.category),
+        subcategory: threatItem.subcategory,
         originalPixelValue: threatItem.pixel_value,
         currentPixelValue: threatItem.pixel_value,
         oldPixelValue: null,
@@ -398,6 +423,7 @@ export default function CustomizationPage() {
       id: `custom-object-${Date.now()}`,
       name: item.name,
       library: getStencilKind(item.category),
+      subcategory: item.subcategory,
       originalPixelValue: item.pixel_value,
       currentPixelValue: item.pixel_value,
       oldPixelValue: null,
@@ -447,50 +473,7 @@ export default function CustomizationPage() {
     setSelectedObjectId(null);
   };
 
-  const handleBringToFront = () => {
-    if (!selectedObjectId) return;
-    const maxLayer = objects.length - 1;
-    const newObjects = objects.map((obj) =>
-      obj.id === selectedObjectId ? { ...obj, layer: maxLayer + 1 } : obj
-    );
-    pushHistory(newObjects);
-    setObjects(newObjects);
-  };
-
-  const handleSendToBack = () => {
-    if (!selectedObjectId) return;
-    const newObjects = objects.map((obj) =>
-      obj.id === selectedObjectId ? { ...obj, layer: -1 } : obj
-    );
-    pushHistory(newObjects);
-    setObjects(newObjects);
-  };
-
-  const handleMoveLayerUp = () => {
-    if (!selectedObjectId) return;
-    const selectedObj = objects.find((o) => o.id === selectedObjectId);
-    if (!selectedObj) return;
-    const newObjects = objects.map((obj) => {
-      if (obj.id === selectedObjectId) return { ...obj, layer: obj.layer + 1 };
-      if (obj.layer === selectedObj.layer + 1) return { ...obj, layer: obj.layer - 1 };
-      return obj;
-    });
-    pushHistory(newObjects);
-    setObjects(newObjects);
-  };
-
-  const handleMoveLayerDown = () => {
-    if (!selectedObjectId) return;
-    const selectedObj = objects.find((o) => o.id === selectedObjectId);
-    if (!selectedObj) return;
-    const newObjects = objects.map((obj) => {
-      if (obj.id === selectedObjectId) return { ...obj, layer: obj.layer - 1 };
-      if (obj.layer === selectedObj.layer - 1) return { ...obj, layer: obj.layer + 1 };
-      return obj;
-    });
-    pushHistory(newObjects);
-    setObjects(newObjects);
-  };
+  // Note: layer move controls were removed from the toolbar per request.
 
   const handleMouseDown = (e: React.MouseEvent, obj: SceneObject) => {
     e.stopPropagation();
@@ -504,6 +487,15 @@ export default function CustomizationPage() {
   const handleRotationMouseDown = (e: React.MouseEvent, obj: SceneObject) => {
     e.stopPropagation();
     setSelectedObjectId(obj.id);
+    if (!canvasDivRef.current) return;
+
+    const rect = canvasDivRef.current.getBoundingClientRect();
+    const centerX = obj.transform.x * zoom;
+    const centerY = obj.transform.y * zoom;
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    rotationStartAngleRef.current = Math.atan2(mouseY - centerY, mouseX - centerX) * (180 / Math.PI);
+    rotationStartRotationRef.current = obj.transform.rotation;
     setIsRotating(true);
   };
 
@@ -528,7 +520,9 @@ export default function CustomizationPage() {
       const mouseX = (e.clientX - rect.left) / zoom;
       const mouseY = (e.clientY - rect.top) / zoom;
 
-      const angle = Math.atan2(mouseY - centerY, mouseX - centerX) * (180 / Math.PI) + 90;
+      const currentAngle = Math.atan2(mouseY - centerY, mouseX - centerX) * (180 / Math.PI);
+      const deltaAngle = currentAngle - rotationStartAngleRef.current;
+      const angle = rotationStartRotationRef.current + deltaAngle;
 
       const newObjects = objects.map((obj) =>
         obj.id === selectedObjectId
@@ -559,6 +553,25 @@ export default function CustomizationPage() {
   };
 
   const handleExport = async () => {
+    // Recompute out-of-bounds now to avoid stale values
+    const bagObjectNow = objects.find(o => o.library === "bag");
+    const outOfBoundsNow = objects.filter(
+      obj => bagObjectNow && obj.library !== "bag" && !isObjectInsideContainer(obj, bagObjectNow)
+    );
+
+    if (outOfBoundsNow.length > 0) {
+      setExportState({ status: "error", message: `Cannot save: ${outOfBoundsNow.length} object(s) out of bounds.` });
+      setTimeout(() => setExportState({ status: "idle", message: "" }), 3000);
+      return;
+    }
+
+    // Open modal to let user add an annotation / name before actually saving
+    setWorkspaceAnnotation(`Workspace ${new Date().toISOString()}`);
+    setShowSaveModal(true);
+  };
+
+  const doSaveWorkspace = async (name: string) => {
+    setShowSaveModal(false);
     setExportState({ status: "saving", message: "Saving layout..." });
     try {
       const bagObject = objects.find(o => o.library === "bag");
@@ -595,7 +608,7 @@ export default function CustomizationPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: `Workspace ${new Date().toISOString()}`,
+          name,
           filepath: null,
           layout_json,
         }),
@@ -644,10 +657,6 @@ export default function CustomizationPage() {
         handleUndo={handleUndo}
         handleRedo={handleRedo}
         setShowValidRegion={setShowValidRegion}
-        handleSendToBack={handleSendToBack}
-        handleMoveLayerDown={handleMoveLayerDown}
-        handleMoveLayerUp={handleMoveLayerUp}
-        handleBringToFront={handleBringToFront}
         handleDeleteSelected={handleDeleteSelected}
         handleExport={handleExport}
         handleRandomize={handleRandomize}
@@ -661,6 +670,48 @@ export default function CustomizationPage() {
         }`}>
           {exportState.status === "success" ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
           <span className="font-semibold text-xs">{exportState.message}</span>
+        </div>
+      )}
+
+      {showSaveModal && (
+        <div className="fixed inset-0 z-[9999] flex items-start justify-center p-6 pt-20">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowSaveModal(false)} />
+          <div className="relative z-[10000] w-full max-w-xl bg-white rounded-2xl shadow-lg border border-border p-5">
+            <h3 className="text-sm font-semibold text-ink mb-2">Save Workspace</h3>
+            <p className="text-xs text-muted mb-3">Add an annotation describing the bag and objects (this becomes the workspace name)</p>
+            <label className="space-y-2 text-sm block">
+              <span className="text-muted text-xs">Annotation / Workspace name</span>
+              <textarea
+                value={workspaceAnnotation}
+                onChange={(e) => setWorkspaceAnnotation(e.target.value)}
+                className="min-h-[120px] w-full rounded-3xl border border-border bg-white p-3 text-sm text-ink resize-none"
+                placeholder="e.g. Medium backpack containing laptop, phone, charger, and a water bottle"
+              />
+            </label>
+            <div className="mt-2 text-xs text-muted">
+              <span>Minimum 10 characters required to enable Save.</span>
+            </div>
+
+            
+
+            <div className="flex items-center justify-end gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => setShowSaveModal(false)}
+                className="px-4 py-2 rounded-xl bg-panel border border-border text-sm text-muted hover:bg-surface"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => doSaveWorkspace(workspaceAnnotation.trim() || `Workspace ${new Date().toISOString()}`)}
+                className={`px-4 py-2 rounded-xl text-white font-semibold text-sm ${workspaceAnnotation.trim().length >= 10 ? 'bg-gradient-to-r from-accent to-accent-sky' : 'bg-surface text-muted cursor-not-allowed opacity-60'}`}
+                disabled={workspaceAnnotation.trim().length < 10}
+              >
+                Save Workspace
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -753,8 +804,8 @@ export default function CustomizationPage() {
                   <div className="space-y-1.5">
                     <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Object Info</span>
                     <div className="space-y-1.5">
-                      <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
-                        <span className="text-[11px] text-muted uppercase tracking-wider">Name</span>
+                      <div className="bg-panel rounded-xl border border-border px-3 py-2 space-y-1">
+                        <span className="text-[11px] text-muted uppercase tracking-wider block">Name</span>
                         <span className="text-xs font-semibold text-ink max-w-[100px] truncate">{selectedObj.name}</span>
                       </div>
                       <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
@@ -762,6 +813,10 @@ export default function CustomizationPage() {
                         <span className={`inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-md border ${config.bg} ${config.text} ${config.border}`}>
                           {selectedObj.library}
                         </span>
+                      </div>
+                      <div className="bg-panel rounded-xl border border-border px-3 py-2 space-y-1">
+                        <span className="text-[11px] text-muted uppercase tracking-wider block">Subcategory</span>
+                        <span className="text-xs font-semibold text-ink max-w-[100px] truncate">{getObjectSubcategory(selectedObj, categorizedList) || "General"}</span>
                       </div>
                     </div>
                   </div>
@@ -817,6 +872,34 @@ export default function CustomizationPage() {
                           <span className="font-mono text-muted text-xs">{Math.round(selectedObj.transform.y)} px</span>
                         )}
                       </div>
+
+                      {/* Rotation */}
+                      {selectedObj.library !== "bag" && (
+                        <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
+                          <span className="text-[11px] text-muted uppercase tracking-wider">Rotation</span>
+                          <input
+                            type="number"
+                            value={Math.round(selectedObj.transform.rotation)}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 0;
+                              const newObjects = objects.map((o) =>
+                                o.id === selectedObjectId
+                                  ? { ...o, transform: { ...o.transform, rotation: val } }
+                                  : o
+                              );
+                              setObjects(newObjects);
+                            }}
+                            onBlur={() => pushHistory(objects)}
+                            className="w-20 bg-surface border border-border rounded px-1.5 py-0.5 text-right font-mono text-xs text-ink focus:outline-none focus:border-accent"
+                          />
+                        </div>
+                      )}
+                      {selectedObj.library === "bag" && (
+                        <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
+                          <span className="text-[11px] text-muted uppercase tracking-wider">Rotation</span>
+                          <span className="font-mono text-muted text-xs">Fixed (0°)</span>
+                        </div>
+                      )}
 
                       {/* Width/Height and proportional scaling removed. Sizes are fixed by asset dimensions. */}
                     </div>

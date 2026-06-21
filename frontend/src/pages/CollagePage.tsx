@@ -1,10 +1,9 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Database, Loader2, CheckCircle2, XCircle, Grid3X3, BookOpen, ChevronLeft, ChevronRight, Settings2, AlertTriangle, List, X } from "lucide-react";
+import { Plus, Database, Loader2, CheckCircle2, XCircle, Grid3X3, BookOpen, ChevronLeft, ChevronRight, AlertTriangle, List, X } from "lucide-react";
 import type { Item } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import SyntheticPreview from "../components/collage/SyntheticPreview";
-import { generateCombinations } from "../lib/combinationGenerator";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -35,13 +34,6 @@ export default function CollagePage() {
     } catch { return []; }
   });
 
-  const [kValue, setKValue] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem("collageKValue");
-      return saved ? parseInt(saved) : 20;
-    } catch { return 20; }
-  });
-
   const [combinations, setCombinations] = useState<CombinatorialResult[]>(() => {
     try {
       const cached = sessionStorage.getItem("collageCombinations");
@@ -66,8 +58,6 @@ export default function CollagePage() {
     return [];
   });
 
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generationProgress, setGenerationProgress] = useState("");
   const [currentPage, setCurrentPage] = useState(0);
   const [showLogs, setShowLogs] = useState(false);
 
@@ -84,11 +74,19 @@ export default function CollagePage() {
       return;
     }
 
-    const { selectedBags: bags, selectedThreats: threats, selectedOthers: others } = locationState;
+    const { selectedBags: bags, selectedThreats: threats, selectedOthers: others, combinations: preCombinations, failures: preFailures } = locationState as any;
 
     setSelectedBags(bags);
     setSelectedThreats(threats || []);
     setSelectedOthers(others || []);
+    
+    // If combinations were pre-generated in LibraryPage, use them
+    if (preCombinations && preCombinations.length > 0) {
+      setCombinations(preCombinations);
+      if (preFailures) {
+        setFailures(preFailures);
+      }
+    }
 
     // Persist to localStorage
     try {
@@ -113,45 +111,6 @@ export default function CollagePage() {
       console.error("Error saving to sessionStorage:", err);
     }
   }, [combinations, failures]);
-
-  // Persist K value
-  useEffect(() => {
-    localStorage.setItem("collageKValue", String(kValue));
-  }, [kValue]);
-
-  const handleGenerate = useCallback(async () => {
-    if (selectedBags.length === 0) return;
-
-    setIsGenerating(true);
-    setGenerationProgress(`Generating ${kValue} combinations...`);
-
-    // Use setTimeout to allow UI to update before blocking
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    try {
-      const density = (localStorage.getItem("densityPreset") as "empty" | "few" | "filled") || "filled";
-      const { results, failures: genFailures } = generateCombinations(
-        selectedBags,
-        selectedThreats,
-        selectedOthers,
-        kValue,
-        density
-      );
-
-      setCombinations(results);
-      setFailures(genFailures);
-      setCurrentPage(0);
-      setGenerationProgress(`Generated ${results.length} combinations${results.length < kValue ? ` (only ${results.length} unique placements possible)` : ""}`);
-      
-      setTimeout(() => setGenerationProgress(""), 3000);
-    } catch (err) {
-      console.error("Generation error:", err);
-      setGenerationProgress("Error generating combinations. Check console for details.");
-      setTimeout(() => setGenerationProgress(""), 5000);
-    } finally {
-      setIsGenerating(false);
-    }
-  }, [selectedBags, selectedThreats, selectedOthers, kValue]);
 
   const handleOpenCombination = (comb: CombinatorialResult) => {
     // Store the pre-computed objects in sessionStorage so CustomizationPage can load them
@@ -252,52 +211,6 @@ export default function CollagePage() {
           >
             <Plus size={15} />
           </button>
-        </div>
-      </div>
-
-      {/* Configuration Bar: K Input + Generate */}
-      <div className="mb-6 p-4 bg-panel rounded-2xl border border-border shadow-card flex flex-col sm:flex-row items-start sm:items-center gap-4">
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Settings2 size={16} className="text-muted" />
-          <span className="text-xs font-semibold text-muted uppercase tracking-wider">Combinations</span>
-        </div>
-        <div className="flex items-center gap-3 flex-1 flex-wrap">
-          <div className="flex items-center gap-2">
-            <label htmlFor="k-input" className="text-xs text-muted">Generate</label>
-            <input
-              id="k-input"
-              type="number"
-              min={1}
-              max={10000}
-              value={kValue}
-              onChange={(e) => {
-                const val = parseInt(e.target.value) || 1;
-                setKValue(Math.max(1, Math.min(10000, val)));
-              }}
-              className="w-24 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink font-mono text-center focus:outline-none focus:border-accent"
-            />
-            <span className="text-xs text-muted">unique combinations</span>
-          </div>
-          <button
-            onClick={handleGenerate}
-            disabled={isGenerating || !hasSelections}
-            className="px-5 py-2 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover hover:opacity-95 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 className="animate-spin" size={15} />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Settings2 size={15} />
-                Generate
-              </>
-            )}
-          </button>
-          {generationProgress && (
-            <span className="text-xs text-muted animate-pulse">{generationProgress}</span>
-          )}
         </div>
       </div>
 

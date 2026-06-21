@@ -18,6 +18,7 @@ export type SceneObject = {
   initialWidth?: number;
   initialHeight?: number;
   layer: number;
+  subcategory?: string;
 };
 
 export type CombinatorialResult = {

@@ -1,7 +1,9 @@
 ﻿import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Image, AlertTriangle, CheckCircle2, X, XCircle, Trash2 } from "lucide-react";
+import { Image, AlertTriangle, CheckCircle2, X, XCircle, Trash2, Loader2, Settings2 } from "lucide-react";
 import type { Item, CategorizedItems } from "../types/library";
+import type { CombinatorialResult, FailureLog } from "../types/customization";
+import { generateCombinations } from "../lib/combinationGenerator";
 function normalizeCategoryName(cat: string): string {
   const normalized = (cat || "").toLowerCase().trim();
   if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) {
@@ -125,6 +127,41 @@ export default function LibraryPage() {
   const [editDraft, setEditDraft] = useState<{ category: string; subcategory: string; name: string } | null>(null);
   const [isItemSaving, setIsItemSaving] = useState(false);
   const notifCounter = React.useRef(0);
+
+  // K-combinations state
+  const [kValue, setKValue] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("libraryKValue");
+      return saved ? parseInt(saved) : 20;
+    } catch { return 20; }
+  });
+
+  const [combinations, setCombinations] = useState<CombinatorialResult[]>(() => {
+    try {
+      const cached = sessionStorage.getItem("collageCombinations");
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
+  const [failures, setFailures] = useState<FailureLog[]>(() => {
+    try {
+      const cached = sessionStorage.getItem("collageFailures");
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState("");
 
   const showNotification = useCallback((type: NotificationType, message: string, duration = 4000) => {
     const id = ++notifCounter.current;
@@ -330,7 +367,7 @@ export default function LibraryPage() {
     }
   };
 
-  const handleGenerateCollage = () => {
+  const handleGenerateCollage = async () => {
     const selectedBags: Item[] = [];
     const selectedThreats: Item[] = [];
     const selectedOthers: Item[] = [];
@@ -350,10 +387,95 @@ export default function LibraryPage() {
       }
     });
 
+    let nextCombinations = combinations;
+    let nextFailures = failures;
+
+    if (selectedBags.length > 0) {
+      const generated = await handleGenerate();
+      if (generated) {
+        nextCombinations = generated.results;
+        nextFailures = generated.failures;
+      }
+    }
+
     navigate("/collage", {
-      state: { selectedBags, selectedThreats, selectedOthers },
+      state: { selectedBags, selectedThreats, selectedOthers, combinations: nextCombinations, failures: nextFailures },
     });
   };
+
+  // K-combinations generation handler
+  const handleGenerate = useCallback(async () => {
+    const selectedBags: Item[] = [];
+    const selectedThreats: Item[] = [];
+    const selectedOthers: Item[] = [];
+
+    selectedItems.forEach((itemId) => {
+      for (const subcats of Object.values(categorizedItems)) {
+        for (const items of Object.values(subcats as Record<string, Item[]>)) {
+          const match = (items as Item[]).find((item) => item.id === itemId);
+          if (match) {
+            const normalizedCategory = normalizeCategoryName(match.category);
+            if (normalizedCategory === "bags") selectedBags.push(match);
+            else if (normalizedCategory === "threats") selectedThreats.push(match);
+            else selectedOthers.push(match);
+            return;
+          }
+        }
+      }
+    });
+
+    if (selectedBags.length === 0) return { results: combinations, failures };
+
+    setIsGenerating(true);
+    setGenerationProgress(`Generating ${kValue} combinations...`);
+
+    // Use setTimeout to allow UI to update before blocking
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    try {
+      const density = (localStorage.getItem("densityPreset") as "empty" | "few" | "filled") || "filled";
+      const { results, failures: genFailures } = generateCombinations(
+        selectedBags,
+        selectedThreats,
+        selectedOthers,
+        kValue,
+        density
+      );
+
+      setCombinations(results);
+      setFailures(genFailures);
+      setGenerationProgress(`Generated ${results.length} combinations${results.length < kValue ? ` (only ${results.length} unique placements possible)` : ""}`);
+      
+      setTimeout(() => setGenerationProgress(""), 3000);
+      return { results, failures: genFailures };
+    } catch (err) {
+      console.error("Generation error:", err);
+      setGenerationProgress("Error generating combinations. Check console for details.");
+      setTimeout(() => setGenerationProgress(""), 5000);
+      return { results: combinations, failures };
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [selectedItems, categorizedItems, kValue, combinations, failures]);
+
+  // Persist K value
+  useEffect(() => {
+    localStorage.setItem("libraryKValue", String(kValue));
+  }, [kValue]);
+
+  // Persist combinations and failures to sessionStorage
+  useEffect(() => {
+    try {
+      if (combinations.length > 0) {
+        sessionStorage.setItem("collageCombinations", JSON.stringify(combinations));
+      }
+      if (failures.length > 0) {
+        sessionStorage.setItem("collageFailures", JSON.stringify(failures));
+      }
+    } catch (err) {
+      console.error("Error saving to sessionStorage:", err);
+    }
+  }, [combinations, failures]);
 
   const subcategoriesData = categorizedItems[activeCategory] || {};
   const displayedItems = getDisplayItems();
@@ -465,6 +587,12 @@ export default function LibraryPage() {
         selectedCount={selectedItems.size}
         onClearSelection={() => setSelectedItems(new Set())}
         onGenerateCollage={handleGenerateCollage}
+        kValue={kValue}
+        setKValue={setKValue}
+        isGenerating={isGenerating}
+        generationProgress={generationProgress}
+        onGenerate={handleGenerate}
+        hasCombinations={combinations.length > 0}
       />
 
       {editingItem && editDraft && (

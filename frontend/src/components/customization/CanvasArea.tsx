@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useRef, useEffect } from "react";
 import { RotateCw, GripVertical } from "lucide-react";
 import type { SceneObject } from "../../types/customization";
 import { getTransformedValidRegion } from "../../lib/customizationHelpers";
+import { drawXRayComposite } from "../../lib/xrayRenderer";
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
@@ -31,20 +32,29 @@ export default function CanvasArea({
   handleMouseMove,
   handleMouseUp,
 }: CanvasAreaProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [bagImageDimensions, setBagImageDimensions] = React.useState<{ width: number; height: number } | null>(null);
-  
+  const onImagesLoadedRef = useRef<() => void>(() => {});
+
   const sortedObjects = [...objects].sort((a, b) => a.layer - b.layer);
   const bagObject = objects.find((o) => o.library === "bag");
   const validRegionPolygon = bagObject ? getTransformedValidRegion(bagObject, bagImageDimensions) : [];
 
-  // Get display dimensions that fit the bag image within the canvas
-  const bagImageUrl = bagObject?.filepath ? `${IMAGE_BASE_URL}${bagObject.filepath}` : null;
-  const bagTransform = bagObject?.transform;
-
-  // Handler to capture actual image dimensions for correct valid region scaling
   const handleBagImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
     const img = event.currentTarget;
     setBagImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+  };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    drawXRayComposite(canvas, objects, onImagesLoadedRef.current);
+  }, [objects]);
+
+  onImagesLoadedRef.current = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    drawXRayComposite(canvas, objects, onImagesLoadedRef.current);
   };
 
   return (
@@ -54,12 +64,6 @@ export default function CanvasArea({
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
-      {/* Dimension badge */}
-      <div className="absolute top-3 left-3 bg-panel/90 border border-border rounded-md px-2.5 py-1 text-xs font-mono text-muted shadow-card z-10 select-none">
-        Canvas {CANVAS_W} × {CANVAS_H} px
-      </div>
-
-      {/* Canvas container */}
       <div
         ref={canvasDivRef}
         className="bg-white border border-border rounded-2xl shadow-panel relative select-none overflow-hidden transition-transform duration-75"
@@ -70,7 +74,6 @@ export default function CanvasArea({
           transformOrigin: "center",
         }}
       >
-        {/* Grid Pattern background */}
         <svg className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-30">
           {Array.from({ length: CANVAS_W / 20 + 1 }).map((_, i) => (
             <line key={`v-${i}`} x1={i * 20} y1={0} x2={i * 20} y2={CANVAS_H} stroke="#E5E7EB" strokeWidth={1} />
@@ -80,30 +83,23 @@ export default function CanvasArea({
           ))}
         </svg>
 
-        {/* Base Bag Image - shown directly centered on the canvas */}
-        {bagImageUrl && bagTransform && (
-          <div
-            className="absolute pointer-events-none"
-            style={{
-              left: bagTransform.x - bagTransform.width / 2,
-              top: bagTransform.y - bagTransform.height / 2,
-              width: bagTransform.width,
-              height: bagTransform.height,
-              transform: `rotate(${bagTransform.rotation}deg)`,
-              zIndex: 1,
-            }}
-          >
-            <img
-              src={bagImageUrl}
-              alt={bagObject?.name || "Bag"}
-              className="w-full h-full object-contain pointer-events-none"
-              draggable={false}
-              onLoad={handleBagImageLoad}
-            />
-          </div>
+        <canvas
+          ref={canvasRef}
+          width={CANVAS_W}
+          height={CANVAS_H}
+          className="absolute top-0 left-0 w-full h-full pointer-events-none"
+          style={{ zIndex: 1 }}
+        />
+
+        {bagObject?.filepath && (
+          <img
+            src={`${IMAGE_BASE_URL}${bagObject.filepath}`}
+            alt=""
+            className="hidden"
+            onLoad={handleBagImageLoad}
+          />
         )}
 
-        {/* Valid region overlay (from database) */}
         {showValidRegion && validRegionPolygon.length > 0 && (
           <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-10">
             <polygon
@@ -116,67 +112,73 @@ export default function CanvasArea({
           </svg>
         )}
 
-        {/* Interactive Objects (threats, others placed on top of bag) */}
         {sortedObjects
           .filter((obj) => obj.library !== "bag")
           .map((obj) => {
             const isSelected = selectedObjectId === obj.id;
             const transform = obj.transform;
-            const imageUrl = obj.filepath ? `${IMAGE_BASE_URL}${obj.filepath}` : null;
 
             return (
-              <div
-                key={obj.id}
-                className={`absolute select-none group rounded-lg overflow-hidden ${
-                  isSelected ? "z-30" : "z-20"
-                }`}
-                style={{
-                  left: transform.x - transform.width / 2,
-                  top: transform.y - transform.height / 2,
-                  width: transform.width,
-                  height: transform.height,
-                  transform: `rotate(${transform.rotation}deg)`,
-                  cursor: "move",
-                }}
-                onMouseDown={(e) => handleMouseDown(e, obj)}
-              >
-                {/* Object image */}
-                {imageUrl && (
-                  <img
-                    src={imageUrl}
-                    alt={obj.name}
-                    className="w-full h-full object-contain pointer-events-none"
-                    draggable={false}
-                    style={{ opacity: 0.7, mixBlendMode: "multiply" }}
-                  />
-                )}
+              <React.Fragment key={obj.id}>
+                <div
+                  className={`absolute select-none rounded-lg overflow-visible ${
+                    isSelected ? "z-30" : "z-20"
+                  }`}
+                  style={{
+                    left: transform.x - transform.width / 2,
+                    top: transform.y - transform.height / 2,
+                    width: transform.width,
+                    height: transform.height,
+                    transform: `rotate(${transform.rotation}deg)`,
+                    cursor: "move",
+                  }}
+                  onMouseDown={(e) => handleMouseDown(e, obj)}
+                >
+                  {isSelected && (
+                    <div className="absolute inset-0 border-2 border-accent border-dashed pointer-events-none rounded-lg animate-pulse" />
+                  )}
+                </div>
 
-                {/* Selection border */}
-                {isSelected && (
-                  <div className="absolute inset-0 border-2 border-accent border-dashed pointer-events-none rounded-lg animate-pulse" />
-                )}
+                {isSelected && (() => {
+                  const angleRad = (transform.rotation * Math.PI) / 180;
+                  const topCenterX = transform.x + (transform.height / 2) * Math.sin(angleRad);
+                  const topCenterY = transform.y - (transform.height / 2) * Math.cos(angleRad);
 
-                {/* Rotation handle */}
+                  return (
+                    <div
+                      className="absolute z-40"
+                      style={{
+                        left: topCenterX,
+                        top: topCenterY,
+                        transform: `translateX(-50%) translateY(-100%)`,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="w-7 h-7 rounded-full border-2 border-accent bg-panel shadow-md text-accent hover:bg-accent hover:text-white cursor-grab active:cursor-grabbing transition-all flex items-center justify-center"
+                        onMouseDown={(e) => handleRotationMouseDown(e, obj)}
+                        title="Drag to rotate"
+                      >
+                        <RotateCw size={12} />
+                      </button>
+                    </div>
+                  );
+                })()}
+
                 {isSelected && (
                   <div
-                    className="absolute -top-9 left-1/2 -translate-x-1/2 w-7 h-7 bg-panel border border-border shadow-card hover:border-accent hover:text-accent rounded-full flex items-center justify-center cursor-alias z-40 transition-colors"
-                    onMouseDown={(e) => handleRotationMouseDown(e, obj)}
+                    className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-panel/90 border border-border rounded-md px-2 py-0.5 text-[10px] font-semibold text-ink whitespace-nowrap pointer-events-none shadow-card z-40"
+                    style={{
+                      left: transform.x,
+                    }}
                   >
-                    <RotateCw size={12} />
-                  </div>
-                )}
-
-                {/* Object name label */}
-                {isSelected && (
-                  <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-panel/90 border border-border rounded-md px-2 py-0.5 text-[10px] font-semibold text-ink whitespace-nowrap pointer-events-none shadow-card">
                     {obj.name}
                   </div>
                 )}
-              </div>
+              </React.Fragment>
             );
           })}
 
-        {/* Empty canvas state */}
         {!bagObject && (
           <div className="absolute inset-0 flex items-center justify-center z-10">
             <div className="text-center">
