@@ -10,25 +10,10 @@ export const getTransformedValidRegion = (
 ): Point[] => {
   // Use the polygon outline stored directly on the object (from DB polygon_json or valid_region)
   if (bag.polygonOutline && bag.polygonOutline.length >= 3) {
-    // Calculate the actual displayed size accounting for object-contain
-    let displayWidth = bag.transform.width;
-    let displayHeight = bag.transform.height;
-
-    if (actualImageDimensions && actualImageDimensions.width > 0 && actualImageDimensions.height > 0) {
-      const imageAspectRatio = actualImageDimensions.width / actualImageDimensions.height;
-      const containerAspectRatio = bag.transform.width / bag.transform.height;
-
-      // With object-contain, the image scales to fit within the container while maintaining aspect ratio
-      if (imageAspectRatio > containerAspectRatio) {
-        // Image is wider: constrained by width
-        displayWidth = bag.transform.width;
-        displayHeight = bag.transform.width / imageAspectRatio;
-      } else {
-        // Image is taller or square: constrained by height
-        displayHeight = bag.transform.height;
-        displayWidth = bag.transform.height * imageAspectRatio;
-      }
-    }
+    // Images are drawn stretched to fill the container via drawImage(),
+    // so use the full transform dimensions directly — no aspect-ratio correction needed.
+    const displayWidth = bag.transform.width;
+    const displayHeight = bag.transform.height;
 
     return getTransformedPolygon(
       { x: bag.transform.x, y: bag.transform.y },

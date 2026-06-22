@@ -241,9 +241,27 @@ export default function CustomizationPage() {
     if (bagItem) {
       let bagOutline = null;
       if (bagItem.valid_region_points) {
-        bagOutline = typeof bagItem.valid_region_points === "string"
+        const raw = typeof bagItem.valid_region_points === "string"
           ? JSON.parse(bagItem.valid_region_points)
           : bagItem.valid_region_points;
+        // Extract points from both formats:
+        // 1. Direct array of points: [{x,y}, {x,y}, ...]
+        // 2. Shapes format: { shapes: [...], simplifiedPoints: [{x,y}, ...] }
+        if (Array.isArray(raw)) {
+          bagOutline = raw;
+        } else if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+          if (raw.simplifiedPoints && Array.isArray(raw.simplifiedPoints)) {
+            bagOutline = raw.simplifiedPoints;
+          } else if (raw.shapes && Array.isArray(raw.shapes)) {
+            // Try to extract from first positive polygon shape
+            const positiveShape = raw.shapes.find((s: any) => s.isPositive !== false && s.points?.length >= 3);
+            if (positiveShape) {
+              bagOutline = positiveShape.points;
+            } else if (raw.shapes.length > 0 && raw.shapes[0].points) {
+              bagOutline = raw.shapes[0].points;
+            }
+          }
+        }
       }
       if (!bagOutline && bagItem.polygon_json) {
         bagOutline = typeof bagItem.polygon_json === "string"
