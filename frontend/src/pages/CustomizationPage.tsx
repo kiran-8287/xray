@@ -269,11 +269,12 @@ export default function CustomizationPage() {
           : bagItem.polygon_json;
       }
 
-      // Original bag images are square (512x512), so use a square container
-      // to keep valid region mapping correct (same scale for X and Y).
-      // Use a generous size: ~85% of the smallest canvas dimension = 510px
-      // This ensures the valid region polygon maps correctly and the bag is large enough.
-      const bagDisplaySize = Math.min(CANVAS_W, CANVAS_H) * 0.85;
+      // Use the bag's original pixel dimensions so the image renders 1:1
+      // and the valid region polygon maps correctly without any scaling.
+      // This preserves every pixel and keeps the valid region in sync
+      // across the editor and customization canvas.
+      const bagWidth = bagItem.width || bagItem.height || Math.min(CANVAS_W, CANVAS_H);
+      const bagHeight = bagItem.height || bagItem.width || Math.min(CANVAS_W, CANVAS_H);
 
       bagObject = {
         id: "initial-bag",
@@ -287,14 +288,14 @@ export default function CustomizationPage() {
         filepath: bagItem.filepath,
         polygonOutline: bagOutline,
         transform: {
-          x: CANVAS_W / 2,
-          y: CANVAS_H / 2,
-          width: bagDisplaySize,
-          height: bagDisplaySize,
+          x: bagWidth / 2,
+          y: bagHeight / 2,
+          width: bagWidth,
+          height: bagHeight,
           rotation: 0,
         },
-        initialWidth: bagDisplaySize,
-        initialHeight: bagDisplaySize,
+        initialWidth: bagWidth,
+        initialHeight: bagHeight,
         layer: layer++,
       };
       newObjects.push(bagObject);

@@ -93,7 +93,7 @@ function SavedLayoutPreview({ objects }: { objects: LayoutObject[] }) {
               <img
                 src={`${IMAGE_BASE_URL}${obj.filepath}`}
                 alt={obj.name || "Object"}
-                className="w-full h-full object-contain pointer-events-none"
+                className="w-full h-full object-fill pointer-events-none"
                 draggable={false}
               />
             </div>
