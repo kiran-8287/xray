@@ -152,6 +152,7 @@ export default function UploadPage() {
   const [massCategory, setMassCategory] = useState("");
   const [massSubcategory, setMassSubcategory] = useState("");
   const [selectedForMass, setSelectedForMass] = useState<Set<number>>(new Set());
+  const [confirmUpload, setConfirmUpload] = useState(false);
 
   const handleFilesSelected = (newFiles: File[]) => {
     setFiles((prev) => [...prev, ...newFiles]);
@@ -200,6 +201,11 @@ export default function UploadPage() {
       return;
     }
 
+    setConfirmUpload(true);
+  };
+
+  const doUpload = async () => {
+    setConfirmUpload(false);
     setUploading(true);
     setUploadStatus("idle");
     setValidationMessage(null);
@@ -419,6 +425,39 @@ export default function UploadPage() {
           />
         )}
       </div>
+
+      {/* Upload confirmation dialog */}
+      {confirmUpload && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-panel border border-border rounded-2xl shadow-2xl p-6 flex flex-col gap-4" style={{ maxWidth: 440, width: "90%" }}>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-900/40 border border-amber-700/50 flex items-center justify-center shrink-0">
+                <UploadIcon size={18} className="text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-ink mb-1">Confirm Upload</h3>
+                <p className="text-sm text-muted leading-relaxed">
+                  This will upload <strong className="text-ink">{staged.length} file{staged.length !== 1 ? 's' : ''}</strong> under folder "<strong className="text-ink">{folderName}</strong>". Only proceed if you trust this source.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end pt-1">
+              <button
+                onClick={() => setConfirmUpload(false)}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-surface border border-border text-ink hover:bg-nav transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={doUpload}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-accent hover:opacity-95 text-white transition-colors"
+              >
+                Upload
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {uploadStatus === "success" && (
         <div className="fixed bottom-6 right-6 z-50 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-4 flex items-center gap-3 shadow-card animate-slide-up">
