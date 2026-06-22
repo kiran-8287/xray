@@ -258,71 +258,70 @@ function generateThreatPlacements(
   threat: Item,
   target: number,
   density: "empty" | "few" | "filled",
-  nonThreats: Item[]
+  nonThreats: Item[],
+  existingUsed?: Set<string>
 ): { results: CombinatorialResult[]; failure: FailureLog | null } {
   const results: CombinatorialResult[] = [];
-  const usedPlacements = new Set<string>();
+  const usedPlacements = existingUsed ?? new Set<string>();
   const bagObj = createBagSceneObject(bag);
 
-  // Determine rotation step based on target
-  // For more targets, use finer rotation granularity
-  const rotationStep = target <= 12 ? 30 : target <= 24 ? 15 : target <= 72 ? 10 : 5;
-  const rotationAngles: number[] = [];
-  for (let angle = 0; angle < 360; angle += rotationStep) {
-    rotationAngles.push(angle);
-  }
-
-  // Get valid region bounds for position sampling
-  const validRegion = getTransformedValidRegion(bagObj);
-  let minX = 0, maxX = 0, minY = 0, maxY = 0;
-  if (validRegion.length >= 3) {
-    minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
-    validRegion.forEach((p: Point) => {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
-    });
-  }
-
-  const threatW = threat.width ? Math.round(threat.width) : 120;
-  const threatH = threat.height ? Math.round(threat.height) : 60;
-
-  // Generate grid of position candidates
-  const gridStep = Math.max(threatW, threatH) * 0.6; // spacing between grid points
-  const positionCandidates: { x: number; y: number }[] = [];
-
-  if (validRegion.length >= 3) {
-    for (let px = minX + threatW / 2; px <= maxX - threatW / 2; px += gridStep) {
-      for (let py = minY + threatH / 2; py <= maxY - threatH / 2; py += gridStep) {
-        positionCandidates.push({ x: px, y: py });
+  // Build an unbiased, shuffled candidate list (positions × rotations)
+  // and iterate through it without modulo cycling to avoid bias.
+  // The helper will return a shuffled Cartesian product of positions and rotations.
+  // Import placed candidates generator from placementUtils.
+  // (Positions are quantized to a grid and expanded with random samples.)
+  const candidates = (function () {
+    try {
+      // Lazy import to avoid circular dependency issues
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { buildPositionRotationCandidates } = require("./placementUtils");
+      return buildPositionRotationCandidates(bagObj, threat, target);
+    } catch (e) {
+      // Fallback to existing generation if import fails
+      const validRegion = getTransformedValidRegion(bagObj);
+      let minX = 0, maxX = 0, minY = 0, maxY = 0;
+      if (validRegion.length >= 3) {
+        minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
+        validRegion.forEach((p: Point) => {
+          if (p.x < minX) minX = p.x;
+          if (p.x > maxX) maxX = p.x;
+          if (p.y < minY) minY = p.y;
+          if (p.y > maxY) maxY = p.y;
+        });
       }
+      const threatW = threat.width ? Math.round(threat.width) : 120;
+      const threatH = threat.height ? Math.round(threat.height) : 60;
+      const gridStep = Math.max(threatW, threatH) * 0.6;
+      const positionCandidates: { x: number; y: number }[] = [];
+      if (validRegion.length >= 3) {
+        for (let px = minX + threatW / 2; px <= maxX - threatW / 2; px += gridStep) {
+          for (let py = minY + threatH / 2; py <= maxY - threatH / 2; py += gridStep) {
+            positionCandidates.push({ x: px, y: py });
+          }
+        }
+      }
+      if (positionCandidates.length < target * 2) {
+        for (let i = 0; i < target * 10; i++) {
+          const rx = minX + threatW / 2 + Math.random() * (maxX - minX - threatW || 0);
+          const ry = minY + threatH / 2 + Math.random() * (maxY - minY - threatH || 0);
+          positionCandidates.push({ x: rx, y: ry });
+        }
+      }
+      const rotationStep = target <= 12 ? 30 : target <= 24 ? 15 : target <= 72 ? 10 : 5;
+      const rotationAngles: number[] = [];
+      for (let angle = 0; angle < 360; angle += rotationStep) rotationAngles.push(angle);
+      const all: { x: number; y: number; rotation: number }[] = [];
+      for (const p of positionCandidates) for (const r of rotationAngles) all.push({ x: p.x, y: p.y, rotation: r });
+      return shuffleArray(all);
     }
-  }
+  })();
 
-  // If grid produced too few candidates, add random ones
-  if (positionCandidates.length < target * 2) {
-    for (let i = 0; i < target * 10; i++) {
-      const rx = minX + threatW / 2 + Math.random() * (maxX - minX - threatW);
-      const ry = minY + threatH / 2 + Math.random() * (maxY - minY - threatH);
-      positionCandidates.push({ x: rx, y: ry });
-    }
-  }
-
-  // Shuffle position candidates for variety
-  const shuffledPositions = shuffleArray(positionCandidates);
-
-  let attempts = 0;
   const maxAttempts = Math.max(target * 100, 2000);
 
-  for (let attempt = 0; attempt < maxAttempts && results.length < target; attempt++) {
-    // Pick a position candidate
-    const posIdx = attempt % shuffledPositions.length;
-    const pos = shuffledPositions[posIdx];
-
-    // Pick a rotation angle
-    const rotIdx = Math.floor(attempt / shuffledPositions.length) % rotationAngles.length;
-    const rotation = rotationAngles[rotIdx];
+  for (let idx = 0; idx < candidates.length && results.length < target && idx < maxAttempts; idx++) {
+    const cand = candidates[idx];
+    const pos = { x: cand.x, y: cand.y };
+    const rotation = cand.rotation;
 
     // Check if this placement is valid
     if (!tryPlaceThreat(threat, bagObj, pos.x, pos.y, rotation)) continue;
@@ -386,16 +385,15 @@ function generateThreatPlacements(
   if (results.length < target) {
     if (results.length === 0) {
       // Check if the issue is that the threat simply doesn't fit at all
-      let anyValidPlacement = false;
-      for (const angle of rotationAngles) {
-        if (shuffledPositions.length > 0) {
-          const testPos = shuffledPositions[0];
-          if (tryPlaceThreat(threat, bagObj, testPos.x, testPos.y, angle)) {
-            anyValidPlacement = true;
-            break;
+        let anyValidPlacement = false;
+        if (Array.isArray((candidates as any) || [])) {
+          for (const c of candidates as any[]) {
+            if (tryPlaceThreat(threat, bagObj, c.x, c.y, c.rotation)) {
+              anyValidPlacement = true;
+              break;
+            }
           }
         }
-      }
       failure = {
         bagName: bag.name,
         bagId: bag.id,
@@ -532,16 +530,26 @@ export function generateCombinations(
   const failures: FailureLog[] = [];
 
   if (threats.length > 0) {
-    // Distribute K across bags
+    // Build initial allocation per bag and per threat (round-robin remainder distribution)
     const combosPerBag = Math.floor(k / bags.length);
     const remainderBags = k % bags.length;
+
+    // Build pair entries with initial targets
+    type PairEntry = {
+      bag: Item;
+      threat: Item;
+      remaining: number;
+      used: Set<string>;
+      hasValidRegion: boolean;
+    };
+
+    const pairs: PairEntry[] = [];
 
     for (let bi = 0; bi < bags.length; bi++) {
       const bag = bags[bi];
       const bagTarget = combosPerBag + (bi < remainderBags ? 1 : 0);
       if (bagTarget <= 0) continue;
 
-      // Distribute bagTarget across threats
       const combosPerThreat = Math.floor(bagTarget / threats.length);
       const remainderThreats = bagTarget % threats.length;
 
@@ -550,28 +558,47 @@ export function generateCombinations(
         const threatTarget = combosPerThreat + (ti < remainderThreats ? 1 : 0);
         if (threatTarget <= 0) continue;
 
-        // Check if bag has valid region
-        const bagHasValidRegion = bag.valid_region_points &&
-          (Array.isArray(bag.valid_region_points) ? bag.valid_region_points.length > 0 : true);
-        if (!bagHasValidRegion) {
+        const hasValidRegion = !!(bag.valid_region_points && (Array.isArray(bag.valid_region_points) ? bag.valid_region_points.length > 0 : true));
+        pairs.push({ bag, threat, remaining: threatTarget, used: new Set<string>(), hasValidRegion: hasValidRegion });
+      }
+    }
+
+    // Round-robin across pairs, requesting one placement at a time to maximize fairness
+    let producedThisCycle = -1;
+    while (results.length < k && pairs.some(p => p.remaining > 0)) {
+      producedThisCycle = 0;
+      for (const p of pairs) {
+        if (results.length >= k) break;
+        if (p.remaining <= 0) continue;
+        if (!p.hasValidRegion) {
+          // Log and mark exhausted
           failures.push({
-            bagName: bag.name,
-            bagId: bag.id,
-            threatName: threat.name,
-            threatId: threat.id,
-            reason: `Bag "${bag.name}" has no valid region defined — cannot place any items`,
-            expected: threatTarget,
+            bagName: p.bag.name,
+            bagId: p.bag.id,
+            threatName: p.threat.name,
+            threatId: p.threat.id,
+            reason: `Bag "${p.bag.name}" has no valid region defined — cannot place any items`,
+            expected: p.remaining,
             actual: 0,
           });
+          p.remaining = 0;
           continue;
         }
 
-        const { results: placements, failure } = generateThreatPlacements(bag, threat, threatTarget, density, nonThreats);
-        results.push(...placements);
-        if (failure) {
-          failures.push(failure);
+        const { results: placements, failure } = generateThreatPlacements(p.bag, p.threat, 1, density, nonThreats, p.used);
+        if (placements.length > 0) {
+          results.push(...placements);
+          p.remaining -= placements.length;
+          producedThisCycle += placements.length;
+        } else {
+          // Mark this pair exhausted; record failure if provided
+          p.remaining = 0;
+          if (failure) failures.push(failure);
         }
       }
+
+      // If no placements produced in a full cycle, break to avoid infinite loop
+      if (producedThisCycle === 0) break;
     }
   } else {
     // No threats - generate clean combos
