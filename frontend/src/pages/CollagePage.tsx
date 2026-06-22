@@ -79,14 +79,8 @@ export default function CollagePage() {
     setSelectedBags(bags);
     setSelectedThreats(threats || []);
     setSelectedOthers(others || []);
-    
-    // If combinations were pre-generated in LibraryPage, use them
-    if (preCombinations && preCombinations.length > 0) {
-      setCombinations(preCombinations);
-      if (preFailures) {
-        setFailures(preFailures);
-      }
-    }
+    setCombinations(preCombinations && preCombinations.length > 0 ? preCombinations : []);
+    setFailures(preFailures && preFailures.length > 0 ? preFailures : []);
 
     // Persist to localStorage
     try {

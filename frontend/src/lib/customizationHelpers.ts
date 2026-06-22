@@ -88,31 +88,40 @@ export const getRandomPositionInContainer = (
   height: number,
   container: SceneObject,
   polygonOutline?: Point[]
-): { x: number; y: number; rotation?: number } => {
+): { x: number; y: number; rotation?: number } | null => {
   const validRegion = getTransformedValidRegion(container);
+  const actualWidth = Math.max(width, 1);
+  const actualHeight = Math.max(height, 1);
+
   if (validRegion.length < 3) {
     const margin = 10;
     const containerMinX = container.transform.x - container.transform.width / 2 + margin;
     const containerMaxX = container.transform.x + container.transform.width / 2 - margin;
     const containerMinY = container.transform.y - container.transform.height / 2 + margin;
     const containerMaxY = container.transform.y + container.transform.height / 2 - margin;
-    const minX = containerMinX + width / 2;
-    const maxX = containerMaxX - width / 2;
-    const minY = containerMinY + height / 2;
-    const maxY = containerMaxY - height / 2;
-    
-    const finalMinX = Math.min(minX, maxX);
-    const finalMaxX = Math.max(minX, maxX);
-    const finalMinY = Math.min(minY, maxY);
-    const finalMaxY = Math.max(minY, maxY);
+    const minX = containerMinX + actualWidth / 2;
+    const maxX = containerMaxX - actualWidth / 2;
+    const minY = containerMinY + actualHeight / 2;
+    const maxY = containerMaxY - actualHeight / 2;
 
-    return {
-      x: finalMinX + Math.random() * (finalMaxX - finalMinX),
-      y: finalMinY + Math.random() * (finalMaxY - finalMinY),
-      rotation: Math.random() * 360
-    };
+    if (minX > maxX || minY > maxY) return null;
+
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const candidateX = minX + Math.random() * (maxX - minX);
+      const candidateY = minY + Math.random() * (maxY - minY);
+      const randomRotation = Math.random() * 360;
+      const testObj = {
+        polygonOutline,
+        transform: { x: candidateX, y: candidateY, width: actualWidth, height: actualHeight, rotation: randomRotation }
+      };
+      if (isObjectInsideContainer(testObj, container)) {
+        return { x: candidateX, y: candidateY, rotation: randomRotation };
+      }
+    }
+
+    return null;
   }
-  
+
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   validRegion.forEach((p: Point) => {
     if (p.x < minX) minX = p.x;
@@ -120,59 +129,21 @@ export const getRandomPositionInContainer = (
     if (p.y < minY) minY = p.y;
     if (p.y > maxY) maxY = p.y;
   });
-  
-  for (let i = 0; i < 1000; i++) {
-    let checkW = width;
-    let checkH = height;
-    if (i > 100) {
-      checkW = width * 0.8;
-      checkH = height * 0.8;
-    }
-    if (i > 300) {
-      checkW = width * 0.5;
-      checkH = height * 0.5;
-    }
-    if (i > 600) {
-      checkW = 0;
-      checkH = 0;
-    }
 
-    const rangeX = maxX - minX - checkW;
-    const rangeY = maxY - minY - checkH;
-    
-    let candidateX, candidateY;
-    if (rangeX > 0) {
-      candidateX = minX + checkW / 2 + Math.random() * rangeX;
-    } else {
-      candidateX = minX + (maxX - minX) / 2;
-    }
-    if (rangeY > 0) {
-      candidateY = minY + checkH / 2 + Math.random() * rangeY;
-    } else {
-      candidateY = minY + (maxY - minY) / 2;
-    }
-    
+  for (let i = 0; i < 1000; i++) {
+    const candidateX = minX + actualWidth / 2 + Math.random() * Math.max(0, maxX - minX - actualWidth);
+    const candidateY = minY + actualHeight / 2 + Math.random() * Math.max(0, maxY - minY - actualHeight);
     const randomRotation = Math.random() * 360;
-    
     const testObj = {
       polygonOutline,
-      transform: {
-        x: candidateX, y: candidateY, width: checkW || 1, height: checkH || 1, rotation: randomRotation
-      }
+      transform: { x: candidateX, y: candidateY, width: actualWidth, height: actualHeight, rotation: randomRotation }
     };
-    
     if (isObjectInsideContainer(testObj, container)) {
       return { x: candidateX, y: candidateY, rotation: randomRotation };
     }
   }
-  
-  if (validRegion.length >= 3) {
-    let sumX = 0, sumY = 0;
-    validRegion.forEach(p => { sumX += p.x; sumY += p.y; });
-    return { x: sumX / validRegion.length, y: sumY / validRegion.length, rotation: 0 };
-  }
-  
-  return { x: container.transform.x, y: container.transform.y, rotation: 0 };
+
+  return null;
 };
 
 export const doObjectsOverlap = (obj1: SceneObject, obj2: SceneObject): boolean => {

@@ -284,6 +284,35 @@ export default function LibraryPage() {
     }
   };
 
+  const deleteSubcategory = async (categoryKey: string, subcategoryKey: string) => {
+    const items = categorizedItems[categoryKey]?.[subcategoryKey] || [];
+    const itemCount = items.length;
+    if (itemCount === 0) {
+      showNotification("info", "This subcategory is empty.");
+      return;
+    }
+    const confirmed = await showConfirm(
+      `Are you sure you want to delete all ${itemCount} item(s) in "${subcategoryKey}" subcategory? This action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await Promise.all(
+        items.map((item) => fetch(`http://localhost:8080/api/items/${item.id}`, { method: "DELETE" }))
+      );
+      await fetchCategorizedItems();
+      setSelectedItems((prev) => {
+        const next = new Set(prev);
+        items.forEach((item) => next.delete(item.id));
+        return next;
+      });
+      showNotification("success", `Deleted ${itemCount} item(s) from "${subcategoryKey}".`);
+    } catch (err) {
+      console.error("Failed to delete subcategory items:", err);
+      showNotification("error", "Failed to delete subcategory items. Please try again.");
+    }
+  };
+
   const handleDeleteItem = async (itemId: string) => {
     const confirmed = await showConfirm("Are you sure you want to delete this item? This action cannot be undone.");
     if (!confirmed) return;
@@ -387,8 +416,8 @@ export default function LibraryPage() {
       }
     });
 
-    let nextCombinations = combinations;
-    let nextFailures = failures;
+    let nextCombinations: CombinatorialResult[] = [];
+    let nextFailures: FailureLog[] = [];
 
     if (selectedBags.length > 0) {
       const generated = await handleGenerate();
@@ -397,6 +426,9 @@ export default function LibraryPage() {
         nextFailures = generated.failures;
       }
     }
+
+    // Clear selections after generating collage
+    setSelectedItems(new Set());
 
     navigate("/collage", {
       state: { selectedBags, selectedThreats, selectedOthers, combinations: nextCombinations, failures: nextFailures },
@@ -424,8 +456,14 @@ export default function LibraryPage() {
       }
     });
 
-    if (selectedBags.length === 0) return { results: combinations, failures };
+    if (selectedBags.length === 0) {
+      setGenerationProgress("Select at least one bag before generating combinations.");
+      setTimeout(() => setGenerationProgress(""), 3000);
+      return { results: [], failures: [] };
+    }
 
+    setCombinations([]);
+    setFailures([]);
     setIsGenerating(true);
     setGenerationProgress(`Generating ${kValue} combinations...`);
 
@@ -452,7 +490,7 @@ export default function LibraryPage() {
       console.error("Generation error:", err);
       setGenerationProgress("Error generating combinations. Check console for details.");
       setTimeout(() => setGenerationProgress(""), 5000);
-      return { results: combinations, failures };
+      return { results: [], failures: [] };
     } finally {
       setIsGenerating(false);
     }
@@ -513,6 +551,7 @@ export default function LibraryPage() {
           onSelectAllCategory={selectAllCategory}
           onSelectAllSubcategory={selectAllSubcategory}
           onDeleteCategory={deleteCategory}
+          onDeleteSubcategory={deleteSubcategory}
         />
         <main className="flex-1 flex flex-col overflow-hidden">
           <LibraryToolbar

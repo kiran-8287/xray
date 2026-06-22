@@ -298,10 +298,11 @@ export default function CustomizationPage() {
       }
       const w = item.width ? Math.round(item.width) : 80;
       const h = item.height ? Math.round(item.height) : 80;
-      let pos;
+      let pos = null as { x: number; y: number; rotation?: number } | null;
       if (bagObject) {
         pos = getRandomPositionInContainer(w, h, bagObject, itemOutline);
-      } else {
+      }
+      if (!pos) {
         const padding = 50;
         pos = { x: padding + Math.random() * (CANVAS_W - 2 * padding), y: padding + Math.random() * (CANVAS_H - 2 * padding), rotation: Math.random() * 360 };
       }
@@ -336,10 +337,11 @@ export default function CustomizationPage() {
       }
       const w = threatItem.width ? Math.round(threatItem.width) : 120;
       const h = threatItem.height ? Math.round(threatItem.height) : 60;
-      let pos;
+      let pos = null as { x: number; y: number; rotation?: number } | null;
       if (bagObject) {
         pos = getRandomPositionInContainer(w, h, bagObject, threatOutline);
-      } else {
+      }
+      if (!pos) {
         const padding = 50;
         pos = { x: padding + Math.random() * (CANVAS_W - 2 * padding), y: padding + Math.random() * (CANVAS_H - 2 * padding), rotation: Math.random() * 360 };
       }
@@ -407,10 +409,11 @@ export default function CustomizationPage() {
     }
 
     const bagObject = objects.find((obj) => obj.library === "bag");
-    let pos;
+    let pos = null as { x: number; y: number; rotation?: number } | null;
     if (bagObject && item.category !== "bags") {
       pos = getRandomPositionInContainer(width, height, bagObject, itemOutline);
-    } else {
+    }
+    if (!pos) {
       const padding = 50;
       pos = {
         x: padding + Math.random() * (CANVAS_W - 2 * padding),
