@@ -117,6 +117,7 @@ export default function CustomizationPage() {
   const [exportState, setExportState] = useState<{ status: "idle" | "saving" | "success" | "error"; message: string }>({ status: "idle", message: "" });
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [workspaceAnnotation, setWorkspaceAnnotation] = useState<string>(`Workspace ${new Date().toISOString()}`);
+  const [outOfBoundsNotification, setOutOfBoundsNotification] = useState<{ show: boolean; count: number }>({ show: false, count: 0 });
   
   const canvasDivRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -602,30 +603,83 @@ export default function CustomizationPage() {
       const bagObject = objects.find(o => o.library === "bag");
       const validRegionPolygon = bagObject ? getTransformedValidRegion(bagObject) : [];
 
+      // Find the bag's top-left corner (first corner of its rectangle)
+      let bagTopLeft: { x: number; y: number } = { x: 0, y: 0 };
+      if (bagObject) {
+        const bagCorners = getRectCorners(
+          { x: bagObject.transform.x, y: bagObject.transform.y },
+          { width: bagObject.transform.width, height: bagObject.transform.height },
+          bagObject.transform.rotation
+        );
+        bagTopLeft = bagCorners[0];
+      }
+
       const objectsWithSegmentation = objects.map((obj) => {
         const corners = getRectCorners(
           { x: obj.transform.x, y: obj.transform.y },
           { width: obj.transform.width, height: obj.transform.height },
           obj.transform.rotation
         );
+        
+        // Transform coordinates relative to bag's top-left corner
+        const relativeCorners = corners.map(c => ({
+          x: c.x - bagTopLeft.x,
+          y: c.y - bagTopLeft.y
+        }));
+        
+        const relativeCenter = {
+          x: obj.transform.x - bagTopLeft.x,
+          y: obj.transform.y - bagTopLeft.y
+        };
+
         return {
           id: obj.id,
           name: obj.name,
           library: obj.library,
           filepath: obj.filepath,
-          transform: { ...obj.transform },
+          // Original center coordinates (absolute)
+          center: { x: obj.transform.x, y: obj.transform.y },
+          // Center coordinates relative to bag's top-left
+          relativeCenter,
+          // Original dimensions
+          size: { width: obj.transform.width, height: obj.transform.height },
+          // Rotation
+          rotation: obj.transform.rotation,
+          // 4 corner coordinates (absolute)
+          corners,
+          // 4 corner coordinates (relative to bag's top-left)
+          relativeCorners,
           originalPixelValue: obj.originalPixelValue,
           currentPixelValue: obj.currentPixelValue,
           oldPixelValue: obj.oldPixelValue,
           polygonOutline: obj.polygonOutline,
           layer: obj.layer,
-          segmentation: corners,
         };
       });
 
+      // Transform valid region relative to bag's top-left
+      const relativeValidRegion = validRegionPolygon.map(p => ({
+        x: p.x - bagTopLeft.x,
+        y: p.y - bagTopLeft.y
+      }));
+
       const layout_json = {
+        name,
+        // Bag top-left corner (origin for relative coordinates)
+        bagOrigin: bagTopLeft,
+        // Bag information
+        bag: bagObject ? {
+          id: bagObject.id,
+          name: bagObject.name,
+          filepath: bagObject.filepath,
+          size: { width: bagObject.transform.width, height: bagObject.transform.height },
+        } : null,
+        // All objects
         objects: objectsWithSegmentation,
+        // Valid region (absolute coordinates)
         validRegionPolygon,
+        // Valid region (relative to bag's top-left)
+        relativeValidRegion,
         createdAt: new Date().toISOString(),
       };
 
@@ -670,6 +724,25 @@ export default function CustomizationPage() {
     computeStats();
   }, [selectedObjectId, objects]);
 
+  // Track out-of-bounds objects
+  useEffect(() => {
+    const bagObjectNow = objects.find(o => o.library === "bag");
+    const outOfBoundsNow = objects.filter(
+      obj => bagObjectNow && obj.library !== "bag" && !isObjectInsideContainer(obj, bagObjectNow)
+    );
+    
+    if (outOfBoundsNow.length > 0) {
+      setOutOfBoundsNotification({ show: true, count: outOfBoundsNow.length });
+      // Auto-hide after 5 seconds
+      const timer = setTimeout(() => {
+        setOutOfBoundsNotification({ show: false, count: 0 });
+      }, 5000);
+      return () => clearTimeout(timer);
+    } else {
+      setOutOfBoundsNotification({ show: false, count: 0 });
+    }
+  }, [objects]);
+
   return (
     <div className="flex flex-col h-[calc(100vh-56px)] bg-surface overflow-hidden animate-fade-in text-sm">
       <WorkspaceToolbar
@@ -695,6 +768,15 @@ export default function CustomizationPage() {
         }`}>
           {exportState.status === "success" ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
           <span className="font-semibold text-xs">{exportState.message}</span>
+        </div>
+      )}
+
+      {outOfBoundsNotification.show && (
+        <div className="absolute top-28 left-4 z-50 px-4 py-2.5 rounded-xl shadow-panel border bg-amber-50 border-amber-200 text-amber-800 flex items-center gap-2 animate-slide-up">
+          <ShieldAlert size={16} />
+          <span className="font-semibold text-xs">
+            {outOfBoundsNotification.count} object{outOfBoundsNotification.count > 1 ? "s" : ""} out of valid region!
+          </span>
         </div>
       )}
 

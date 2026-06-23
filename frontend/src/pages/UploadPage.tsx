@@ -356,7 +356,7 @@ export default function UploadPage() {
               <div>
                 <h3 className="text-sm font-semibold text-ink mb-1">Confirm Upload</h3>
                 <p className="text-sm text-muted leading-relaxed">
-                  This will upload <strong className="text-ink">{staged.length} file{staged.length !== 1 ? 's' : ''}</strong> under folder "<strong className="text-ink">{folderName}</strong>". Only proceed if you trust this source.
+                  This will upload <strong className="text-ink">{staged.length} file{staged.length !== 1 ? 's' : ''}</strong> to Library. Only proceed if you trust this source.
                 </p>
               </div>
             </div>

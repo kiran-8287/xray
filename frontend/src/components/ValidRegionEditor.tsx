@@ -33,6 +33,7 @@ interface ValidRegionEditorProps {
   onSave: (points: Point[]) => void;
   onCancel: () => void;
   onDelete: () => void;
+  requireValidRegion?: boolean; // When true, prevents saving/deleting without a valid region
 }
 
 const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
@@ -41,7 +42,8 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   itemId,
   onSave,
   onCancel,
-  onDelete
+  onDelete,
+  requireValidRegion = false
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -69,6 +71,13 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   const [gridSize, setGridSize] = useState<10 | 20 | 50>(20);
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
   const [toasts, setToasts] = useState<{ id: string; type: 'success'|'warning'|'info'; message: string }[]>([]);
+  const polygonsBeforeDrag = useRef<Polygon[]>([]);
+  const polygonsRef = useRef<Polygon[]>([]);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    polygonsRef.current = polygons;
+  }, [polygons]);
 
   const createId = () => Math.random().toString(36).substr(2, 9);
   
@@ -196,6 +205,12 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
       pointsToSave = tempPolygon;
     }
     
+    // Require at least 3 points for a valid region
+    if (pointsToSave.length < 3) {
+      showToast('warning', 'Please draw a valid region with at least 3 points before saving.');
+      return;
+    }
+    
     console.log('handleSave: pointsToSave before normalize:', pointsToSave);
     
     // Normalize points
@@ -209,6 +224,11 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
     onSave(normalizedPoints);
     showToast('success', 'Valid region saved');
   };
+
+  // Determine if delete/clear should be disabled (when requireValidRegion is true and there's only the initial polygon)
+  const isDeleteDisabled = requireValidRegion && polygons.length === 1 && polygons[0]?.id === 'initial';
+  const isClearDisabled = requireValidRegion && polygons.length === 1 && polygons[0]?.id === 'initial';
+  const isSaveDisabled = requireValidRegion && (polygons.length === 0 || (polygons.length === 1 && polygons[0]?.id === 'initial' && polygons[0]?.points.length < 3));
 
   const isPointInPolygon = (point: Point, polygonPoints: Point[]) => {
     let inside = false;
@@ -351,7 +371,12 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
       setDragStart(null);
       setDragPolygonStart(null);
       setActiveVertexIndex(null);
-      updatePolygonsAndHistory(polygons);
+      // Use ref to get latest polygons state to avoid stale closure
+      const currentPolygons = polygonsRef.current;
+      const nextHistory = history.slice(0, historyIndex + 1);
+      nextHistory.push([...currentPolygons.map(p => ({ ...p, points: p.points.map(pt => ({ ...pt })) }))]);
+      setHistory(nextHistory);
+      setHistoryIndex(nextHistory.length - 1);
     }
   };
 
@@ -772,7 +797,8 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
             )}
             <button
               onClick={clearAll}
-              className="px-3 py-1.5 bg-white text-[#64748B] rounded-xl text-xs font-semibold border border-[#DDE4F5] hover:bg-[#F5F8FF] transition-all cursor-pointer"
+              disabled={isClearDisabled}
+              className="px-3 py-1.5 bg-white text-[#64748B] rounded-xl text-xs font-semibold border border-[#DDE4F5] hover:bg-[#F5F8FF] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
             >
               Clear All
             </button>
@@ -922,7 +948,8 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
                 onDelete();
               }
             }} 
-            className="px-4 py-2 border border-[#FCA5A5] text-[#DC2626] hover:bg-[#FEF2F2] rounded-lg text-sm font-semibold transition-all cursor-pointer bg-white"
+            disabled={isDeleteDisabled}
+            className="px-4 py-2 border border-[#FCA5A5] text-[#DC2626] hover:bg-[#FEF2F2] rounded-lg text-sm font-semibold transition-all cursor-pointer bg-white disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
           >
             Delete Region
           </button>
@@ -936,7 +963,8 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
             </button>
             <button 
               onClick={handleSave} 
-              className="px-5 py-2.5 rounded-lg font-semibold text-white bg-gradient-to-r from-[#2563EB] to-[#1D4ED8] shadow-sm hover:shadow-md hover:opacity-95 transition-all flex items-center gap-1.5 text-sm cursor-pointer"
+              disabled={isSaveDisabled}
+              className="px-5 py-2.5 rounded-lg font-semibold text-white bg-gradient-to-r from-[#2563EB] to-[#1D4ED8] shadow-sm hover:shadow-md hover:opacity-95 transition-all flex items-center gap-1.5 text-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-sm"
             >
               <Check size={15} />
               Save Region

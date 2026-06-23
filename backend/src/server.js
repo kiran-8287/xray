@@ -9,6 +9,8 @@ import { v4 as uuidv4 } from "uuid";
 import { generateDataset } from "./api/datasetGenerator.js";
 import { isObjectInsideContainer } from "./lib/geometry.js";
 import { loadImage } from "canvas";
+import { ReadDump } from "./lib/dumpRead.js";
+import { readTip } from "./lib/tipRead.js";
 import {
     getItems,
     getItemById,
@@ -47,11 +49,13 @@ const __dirname = path.dirname(__filename);
 const exportsRoot = path.resolve(__dirname, "../data/exports");
 const libraryImagesRoot = path.resolve(__dirname, "../data/library_images");
 const collageImagesRoot = path.resolve(__dirname, "../data/collage_images");
+const pixelDataRoot = path.resolve(__dirname, "../data/pixel_data");
 
 // Ensure directories exist
 await fs.mkdir(exportsRoot, { recursive: true });
 await fs.mkdir(libraryImagesRoot, { recursive: true });
 await fs.mkdir(collageImagesRoot, { recursive: true });
+await fs.mkdir(pixelDataRoot, { recursive: true });
 
 // Serve static files from data directory
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
@@ -92,6 +96,79 @@ function parseFilename(filename) {
 // ------------------------------
 app.get("/api/health", (_req, res) => {
     res.json({ ok: true, service: "synthetic-xray-backend" });
+});
+
+// Endpoint to read dump.pgm file
+app.post("/api/read-dump", upload.single("file"), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ ok: false, error: "No file uploaded" });
+        }
+        const filePath = req.file.path;
+        const data = ReadDump(filePath);
+        
+        // Store pixel data
+        const pixelDataFilename = `${path.basename(req.file.originalname, path.extname(req.file.originalname))}.json`;
+        const pixelDataPath = path.join(pixelDataRoot, pixelDataFilename);
+        await fs.writeFile(pixelDataPath, JSON.stringify(data), "utf8");
+        
+        res.json({ ok: true, data, pixelDataPath });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ ok: false, error: String(error) });
+    }
+});
+
+// Endpoint to read .tip file
+app.post("/api/read-tip", upload.single("file"), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ ok: false, error: "No file uploaded" });
+        }
+        const filePath = req.file.path;
+        const data = readTip(filePath);
+        
+        // Store pixel data
+        const pixelDataFilename = `${path.basename(req.file.originalname, path.extname(req.file.originalname))}.json`;
+        const pixelDataPath = path.join(pixelDataRoot, pixelDataFilename);
+        await fs.writeFile(pixelDataPath, JSON.stringify(data), "utf8");
+        
+        res.json({ ok: true, data, pixelDataPath });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ ok: false, error: String(error) });
+    }
+});
+
+// Endpoint to get pixel data by item ID
+app.get("/api/item/:id/pixel-data", async (req, res) => {
+    try {
+        const item = await getItemById(req.params.id);
+        if (!item) {
+            return res.status(404).json({ ok: false, error: "Item not found" });
+        }
+        
+        // Look for pixel data file
+        const possibleFilenames = [
+            `${item.name}.json`,
+            `${item.id}.json`
+        ];
+        
+        for (const filename of possibleFilenames) {
+            const pixelDataPath = path.join(pixelDataRoot, filename);
+            try {
+                const data = await fs.readFile(pixelDataPath, "utf8");
+                return res.json({ ok: true, data: JSON.parse(data) });
+            } catch {
+                // Continue to next possible filename
+            }
+        }
+        
+        res.status(404).json({ ok: false, error: "Pixel data not found" });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ ok: false, error: String(error) });
+    }
 });
 
 app.post("/api/export", async (req, res) => {

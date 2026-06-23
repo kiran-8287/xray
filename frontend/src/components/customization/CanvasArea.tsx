@@ -64,7 +64,7 @@ export default function CanvasArea({
 
   return (
     <main
-      className="flex-1 bg-surface flex items-center justify-center p-6 overflow-hidden relative"
+      className="flex-1 bg-surface flex items-start justify-center p-6 pt-0 overflow-hidden relative"
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}

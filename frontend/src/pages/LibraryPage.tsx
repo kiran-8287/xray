@@ -812,6 +812,7 @@ export default function LibraryPage() {
 
       {editingRegionItem && isValidRegionEditorOpen && (
         <ValidRegionEditor
+          key={editingRegionItem.id}
           imageSrc={`http://localhost:8080/data/library_images/${editingRegionItem.filepath}`}
           initialPoints={editingRegionItem.valid_region_points}
           itemId={editingRegionItem.id}
@@ -821,6 +822,7 @@ export default function LibraryPage() {
             setEditingRegionItem(null);
           }}
           onDelete={handleValidRegionDelete}
+          requireValidRegion={true}
         />
       )}
     </div>

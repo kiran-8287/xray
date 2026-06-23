@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Database, Loader2, CheckCircle2, XCircle, Grid3X3, BookOpen, ChevronLeft, ChevronRight, AlertTriangle, List, X } from "lucide-react";
+import { Plus, Database, Loader2, CheckCircle2, XCircle, Grid3X3, BookOpen, ChevronLeft, ChevronRight, AlertTriangle, List, X, FolderOpen } from "lucide-react";
 import type { Item } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import SyntheticPreview from "../components/collage/SyntheticPreview";
+import { getRectCorners, getTransformedPolygon } from "../lib/geometry";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -67,6 +68,12 @@ export default function CollagePage() {
     datasetId?: string;
     outputDir?: string;
   }>({ status: "idle", message: "" });
+  
+  const [bulkSaveState, setBulkSaveState] = useState<{
+    status: "idle" | "saving" | "success" | "error";
+    message: string;
+    savedCount: number;
+  }>({ status: "idle", message: "", savedCount: 0 });
 
   // Whenever new data arrives via location state, persist it
   useEffect(() => {
@@ -165,6 +172,155 @@ export default function CollagePage() {
     }
   };
 
+  const handleBulkSave = async () => {
+    setBulkSaveState({ status: "saving", message: "Saving all workspaces...", savedCount: 0 });
+    let savedCount = 0;
+    let failedCount = 0;
+    
+    try {
+      for (const comb of combinations) {
+        // Generate auto-annotation from workspace contents
+        const threatNames = comb.threat ? [comb.threat.name] : [];
+        const otherNames = comb.others.map(o => o.name);
+        const allObjects = [...threatNames, ...otherNames];
+        const annotation = `${comb.bag.name}${allObjects.length > 0 ? ` containing ${allObjects.join(", ")}` : ""}`;
+        
+        // Find the bag's top-left corner (first corner of its rectangle)
+        const bagObject = comb.objects.find((o: any) => o.library === "bag");
+        let bagTopLeft: { x: number; y: number } = { x: 0, y: 0 };
+        let validRegionPolygon: any[] = [];
+        
+        if (bagObject) {
+          const bagCorners = getRectCorners(
+            { x: bagObject.transform.x, y: bagObject.transform.y },
+            { width: bagObject.transform.width, height: bagObject.transform.height },
+            bagObject.transform.rotation
+          );
+          bagTopLeft = bagCorners[0];
+          
+          // Get valid region
+          try {
+            // Check if we can get the valid region from the bag
+            if (bagObject.polygonOutline) {
+              validRegionPolygon = getTransformedPolygon(
+                { x: bagObject.transform.x, y: bagObject.transform.y },
+                { width: bagObject.transform.width, height: bagObject.transform.height },
+                bagObject.transform.rotation,
+                bagObject.polygonOutline
+              );
+            }
+          } catch (e) {
+            console.error("Error getting valid region:", e);
+          }
+        }
+        
+        // Prepare objects with all details
+        const objectsWithDetails = comb.objects.map((obj: any) => {
+          const corners = getRectCorners(
+            { x: obj.transform.x, y: obj.transform.y },
+            { width: obj.transform.width, height: obj.transform.height },
+            obj.transform.rotation
+          );
+          
+          // Transform coordinates relative to bag's top-left corner
+          const relativeCorners = corners.map((c: any) => ({
+            x: c.x - bagTopLeft.x,
+            y: c.y - bagTopLeft.y
+          }));
+          
+          const relativeCenter = {
+            x: obj.transform.x - bagTopLeft.x,
+            y: obj.transform.y - bagTopLeft.y
+          };
+
+          return {
+            id: obj.id,
+            name: obj.name,
+            library: obj.library,
+            filepath: obj.filepath,
+            // Original center coordinates (absolute)
+            center: { x: obj.transform.x, y: obj.transform.y },
+            // Center coordinates relative to bag's top-left
+            relativeCenter,
+            // Original dimensions
+            size: { width: obj.transform.width, height: obj.transform.height },
+            // Rotation
+            rotation: obj.transform.rotation,
+            // 4 corner coordinates (absolute)
+            corners,
+            // 4 corner coordinates (relative to bag's top-left)
+            relativeCorners,
+            originalPixelValue: obj.originalPixelValue,
+            currentPixelValue: obj.currentPixelValue,
+            oldPixelValue: obj.oldPixelValue,
+            polygonOutline: obj.polygonOutline,
+            layer: obj.layer,
+          };
+        });
+        
+        // Transform valid region relative to bag's top-left
+        const relativeValidRegion = validRegionPolygon.map((p: any) => ({
+          x: p.x - bagTopLeft.x,
+          y: p.y - bagTopLeft.y
+        }));
+
+        const layout_json = {
+          name: annotation,
+          // Bag top-left corner (origin for relative coordinates)
+          bagOrigin: bagTopLeft,
+          // Bag information
+          bag: bagObject ? {
+            id: bagObject.id,
+            name: bagObject.name,
+            filepath: bagObject.filepath,
+            size: { width: bagObject.transform.width, height: bagObject.transform.height },
+          } : null,
+          // All objects
+          objects: objectsWithDetails,
+          // Valid region (absolute coordinates)
+          validRegionPolygon,
+          // Valid region (relative to bag's top-left)
+          relativeValidRegion,
+          createdAt: new Date().toISOString(),
+        };
+        
+        const response = await fetch("http://localhost:8080/api/saved-layouts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: annotation,
+            filepath: null,
+            layout_json,
+          }),
+        });
+
+        if (response.ok) {
+          savedCount++;
+          setBulkSaveState(prev => ({
+            ...prev,
+            message: `Saving workspaces... (${savedCount}/${combinations.length})`,
+            savedCount
+          }));
+        } else {
+          failedCount++;
+        }
+      }
+      
+      setBulkSaveState({
+        status: "success",
+        message: `Successfully saved ${savedCount} workspace${savedCount !== 1 ? "s" : ""}!${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
+        savedCount
+      });
+    } catch (err) {
+      console.error(err);
+      setBulkSaveState({
+        status: "error",
+        message: "Failed to bulk save workspaces. Please verify backend is running.",
+        savedCount
+      });
+    }
+  };
+
   // Pagination
   const totalPages = Math.max(1, Math.ceil(combinations.length / ITEMS_PER_PAGE));
   const paginatedCombinations = combinations.slice(
@@ -186,6 +342,18 @@ export default function CollagePage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={handleBulkSave}
+            disabled={bulkSaveState.status === "saving" || combinations.length === 0}
+            className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-500 shadow-btn hover:shadow-btn-hover hover:opacity-95 transition-all flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Bulk Save All Workspaces"
+          >
+            {bulkSaveState.status === "saving" ? (
+              <Loader2 className="animate-spin" size={15} />
+            ) : (
+              <FolderOpen size={15} />
+            )}
+          </button>
           <button
             onClick={handleExportDataset}
             disabled={exportState.status === "generating" || combinations.length === 0}
@@ -239,6 +407,40 @@ export default function CollagePage() {
           {exportState.status !== "generating" && (
             <button
               onClick={() => setExportState({ status: "idle", message: "" })}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 transition-colors"
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Bulk Save Status Banner */}
+      {bulkSaveState.status !== "idle" && (
+        <div className={`mb-6 p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all duration-300 ${
+          bulkSaveState.status === "saving"
+            ? "bg-blue-50 border-blue-200 text-blue-800 animate-pulse"
+            : bulkSaveState.status === "success"
+            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+            : "bg-rose-50 border-rose-200 text-rose-800"
+        }`}>
+          <div className="flex items-center gap-3">
+            {bulkSaveState.status === "saving" && (
+              <Loader2 className="animate-spin text-blue-600" size={24} />
+            )}
+            {bulkSaveState.status === "success" && (
+              <CheckCircle2 className="text-emerald-600" size={24} />
+            )}
+            {bulkSaveState.status === "error" && (
+              <XCircle className="text-rose-600" size={24} />
+            )}
+            <div>
+              <p className="font-semibold text-sm">{bulkSaveState.message}</p>
+            </div>
+          </div>
+          {bulkSaveState.status !== "saving" && (
+            <button
+              onClick={() => setBulkSaveState({ status: "idle", message: "", savedCount: 0 })}
               className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 transition-colors"
             >
               Dismiss

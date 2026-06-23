@@ -182,10 +182,10 @@ export function computeObjectStats(
     tempCtx.rotate((obj.transform.rotation * Math.PI) / 180);
     tempCtx.drawImage(
       img,
-      -obj.transform.width / 2,
-      -obj.transform.height / 2,
-      obj.transform.width,
-      obj.transform.height
+      -img.naturalWidth / 2,
+      -img.naturalHeight / 2,
+      img.naturalWidth,
+      img.naturalHeight
     );
     tempCtx.restore();
 
@@ -214,15 +214,24 @@ export function computeObjectStats(
 
     if (synthesizedValues.length === 0) continue;
 
-    // Compute statistics
-    const origSum = originalValues.reduce((a, b) => a + b, 0);
-    const synSum = synthesizedValues.reduce((a, b) => a + b, 0);
+    // Compute statistics safely without stack overflow
+    let origSum = 0;
+    let synSum = 0;
+    let min = Infinity;
+    let max = -Infinity;
+    
+    for (let i = 0; i < synthesizedValues.length; i++) {
+      origSum += originalValues[i];
+      synSum += synthesizedValues[i];
+      if (synthesizedValues[i] < min) min = synthesizedValues[i];
+      if (synthesizedValues[i] > max) max = synthesizedValues[i];
+    }
 
     stats.set(obj.id, {
       originalMean: Math.round(origSum / originalValues.length),
       synthesizedMean: Math.round(synSum / synthesizedValues.length),
-      min: Math.min(...synthesizedValues),
-      max: Math.max(...synthesizedValues),
+      min,
+      max,
     });
   }
 
