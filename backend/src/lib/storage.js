@@ -45,16 +45,21 @@ async function getItemById(id) {
 }
 
 async function createItem(itemData) {
-    await ensureDataDir();
-    const items = await getItems();
-    const newItem = {
-        id: itemData.id || crypto.randomUUID(),
-        created_at: new Date().toISOString(),
-        ...itemData
-    };
-    items.push(newItem);
-    await writeJSONFile(ITEMS_FILE, items);
-    return newItem;
+  await ensureDataDir();
+  const items = await getItems();
+  const newItem = {
+    id: itemData.id, // We expect this to be passed now (filename without extension)
+    created_at: new Date().toISOString(),
+    ...itemData
+  };
+  items.push(newItem);
+  await writeJSONFile(ITEMS_FILE, items);
+  return newItem;
+}
+
+async function itemExists(id) {
+  const items = await getItems();
+  return items.some(item => item.id === id);
 }
 
 async function updateItem(id, itemData) {

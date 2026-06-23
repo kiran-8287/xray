@@ -35,7 +35,7 @@ function parseValidRegionPoints(validRegionPoints: any) {
   if (Array.isArray(raw)) {
     points = raw;
   } else if (raw && typeof raw === "object") {
-    points = raw.simplifiedPoints || raw.shapes?.[0]?.points || [];
+    points = raw.simplifiedPoints || raw.points || raw.shapes?.[0]?.points || [];
   }
 
   return points

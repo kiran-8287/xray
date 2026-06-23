@@ -15,6 +15,7 @@ import {
     createItem,
     updateItem,
     deleteItem,
+    itemExists,
     getBags,
     getBagByItemId,
     createBag,
@@ -235,15 +236,8 @@ app.get("/api/items/categorized", async (_req, res) => {
             if (item.category === "bags") {
                 const bagData = await getBagByItemId(item.id);
                 if (bagData) {
-                    const data = bagData.valid_region_points;
-                    // For backward compatibility, pass the simplified points if available
-                    if (data && typeof data === 'object' && 'simplifiedPoints' in data) {
-                        item.valid_region_points = data.simplifiedPoints;
-                        // Store full data in a separate field for future use
-                        item.validRegionData = data;
-                    } else {
-                        item.valid_region_points = data;
-                    }
+                    item.valid_region_points = bagData.valid_region_points?.simplifiedPoints || bagData.valid_region_points?.points || bagData.valid_region_points;
+                    item.validRegionData = bagData.valid_region_points;
                 }
             }
             
@@ -324,7 +318,25 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
             }
         }
 
+        const errors = [];
+        const processed = [];
+
         for (const file of files) {
+            // Extract ID from filename without extension
+            const itemId = path.basename(file.originalname, path.extname(file.originalname));
+            
+            // Check if item already exists
+            if (await itemExists(itemId)) {
+                errors.push({ filename: file.originalname, message: `Item ${itemId} already exists in library` });
+                // Clean up the uploaded file since we won't use it
+                try {
+                    await fs.unlink(path.join(libraryImagesRoot, file.filename));
+                } catch (unlinkErr) {
+                    console.warn("Could not delete unused file", unlinkErr);
+                }
+                continue;
+            }
+
             // Classify by filename prefix only
             const filename = file.originalname.toLowerCase();
             let category, subcategory, name, pixel_value;
@@ -363,8 +375,9 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
                 console.warn("Warning: could not detect image dimensions for", file.filename, dimErr);
             }
 
-            // Create item
+            // Create item with our new ID
             const item = await createItem({
+                id: itemId,
                 filename: file.originalname,
                 filepath: file.filename,
                 category,
@@ -378,7 +391,22 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
             });
 
             if (category === "bags") {
-                const vr = fileMeta.valid_region_points ? fileMeta.valid_region_points : null;
+                let vr = null;
+                if (fileMeta.valid_region_points) {
+                    // Normalize valid region data to only points/simplifiedPoints
+                    const data = fileMeta.valid_region_points;
+                    if (data && typeof data === 'object') {
+                        vr = {
+                            points: data.points || data.simplifiedPoints || [],
+                            simplifiedPoints: data.simplifiedPoints || data.points || []
+                        };
+                    } else if (Array.isArray(data)) {
+                        vr = {
+                            points: data,
+                            simplifiedPoints: data
+                        };
+                    }
+                }
                 await createBag({
                     item_id: item.id,
                     valid_region_points: vr
@@ -402,9 +430,16 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
                     subcategory_slug: subSlug
                 });
             }
+
+            processed.push(itemId);
         }
 
-        res.json({ ok: true, message: "Files uploaded successfully!", itemsProcessed: files.length });
+        res.json({ 
+            ok: true, 
+            message: errors.length > 0 ? "Some files processed, some had errors" : "Files uploaded successfully!", 
+            itemsProcessed: processed.length,
+            errors 
+        });
     } catch (err) {
         console.error(err);
         res.status(500).json({ ok: false, error: String(err) });
@@ -449,15 +484,14 @@ app.delete("/api/items/:id", async (req, res) => {
     }
 });
 
-// Update bag valid region (supports both simple points and complex shapes)
+// Update bag valid region (only supports points and simplifiedPoints)
 app.put("/api/items/:id/valid-region", async (req, res) => {
     try {
-        const { validRegionPoints, shapes } = req.body;
-        // Store a structured object for maximum flexibility
+        const { points, simplifiedPoints } = req.body;
+        // Store just points and simplifiedPoints
         const dataToStore = {
-            shapes,
-            simplifiedPoints: validRegionPoints,
-            version: 2
+            points,
+            simplifiedPoints
         };
         await updateBag(req.params.id, { valid_region_points: dataToStore });
         res.json({ ok: true });
@@ -489,15 +523,8 @@ app.get("/api/items/:id", async (req, res) => {
         if (item.category === "bags") {
             const bagData = await getBagByItemId(item.id);
             if (bagData) {
-                const data = bagData.valid_region_points;
-                // For backward compatibility, pass the simplified points if available
-                if (data && typeof data === 'object' && 'simplifiedPoints' in data) {
-                    item.validRegionPoints = data.simplifiedPoints;
-                    // Also pass full data
-                    item.validRegionData = data;
-                } else {
-                    item.validRegionPoints = data;
-                }
+                item.validRegionPoints = bagData.valid_region_points?.simplifiedPoints || bagData.valid_region_points?.points || bagData.valid_region_points;
+                item.validRegionData = bagData.valid_region_points;
             }
         }
         

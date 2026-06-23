@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Image, AlertTriangle, CheckCircle2, X, XCircle, Trash2, Loader2, Settings2 } from "lucide-react";
 import type { Item, CategorizedItems } from "../types/library";
@@ -101,6 +101,7 @@ import LibraryToolbar from "../components/library/LibraryToolbar";
 import ItemCard from "../components/library/ItemCard";
 import ItemRow from "../components/library/ItemRow";
 import SelectionTray from "../components/library/SelectionTray";
+import ValidRegionEditor from "../components/ValidRegionEditor";
 
 type NotificationType = "info" | "success" | "warning" | "error";
 type Notification = { id: number; type: NotificationType; message: string };
@@ -126,6 +127,8 @@ export default function LibraryPage() {
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [editDraft, setEditDraft] = useState<{ category: string; subcategory: string; name: string } | null>(null);
   const [isItemSaving, setIsItemSaving] = useState(false);
+  const [isValidRegionEditorOpen, setIsValidRegionEditorOpen] = useState(false);
+  const [editingRegionItem, setEditingRegionItem] = useState<Item | null>(null);
   const notifCounter = React.useRef(0);
 
   // K-combinations state
@@ -396,6 +399,48 @@ export default function LibraryPage() {
     }
   };
 
+  const handleValidRegionSave = async (points: any[]) => {
+    if (!editingRegionItem) return;
+    try {
+      const res = await fetch(`http://localhost:8080/api/items/${editingRegionItem.id}/valid-region`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ points, simplifiedPoints: points }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to save valid region");
+      }
+      await fetchCategorizedItems();
+      showNotification("success", "Valid region saved successfully.");
+      setIsValidRegionEditorOpen(false);
+      setEditingRegionItem(null);
+    } catch (err) {
+      console.error("Failed to save valid region:", err);
+      showNotification("error", "Failed to save valid region. Please try again.");
+    }
+  };
+
+  const handleValidRegionDelete = async () => {
+    if (!editingRegionItem) return;
+    try {
+      const res = await fetch(`http://localhost:8080/api/items/${editingRegionItem.id}/valid-region`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to delete valid region");
+      }
+      await fetchCategorizedItems();
+      showNotification("success", "Valid region deleted successfully.");
+      setIsValidRegionEditorOpen(false);
+      setEditingRegionItem(null);
+    } catch (err) {
+      console.error("Failed to delete valid region:", err);
+      showNotification("error", "Failed to delete valid region. Please try again.");
+    }
+  };
+
   const handleGenerateCollage = async () => {
     const selectedBags: Item[] = [];
     const selectedThreats: Item[] = [];
@@ -584,7 +629,10 @@ export default function LibraryPage() {
                     isSelected={selectedItems.has(item.id)}
                     onSelect={() => toggleItemSelection(item.id)}
                     onOpen={() => openItemDetail(item)}
-                    onEditRegion={() => {}}
+                    onEditRegion={() => {
+                      setEditingRegionItem(item);
+                      setIsValidRegionEditorOpen(true);
+                    }}
                     onDelete={() => handleDeleteItem(item.id)}
                   />
                 ))}
@@ -610,7 +658,10 @@ export default function LibraryPage() {
                         isSelected={selectedItems.has(item.id)}
                         onSelect={() => toggleItemSelection(item.id)}
                         onOpen={() => openItemDetail(item)}
-                        onEditRegion={() => {}}
+                        onEditRegion={() => {
+                          setEditingRegionItem(item);
+                          setIsValidRegionEditorOpen(true);
+                        }}
                         onDelete={() => handleDeleteItem(item.id)}
                       />
                     ))}
@@ -766,6 +817,20 @@ export default function LibraryPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {editingRegionItem && isValidRegionEditorOpen && (
+        <ValidRegionEditor
+          imageSrc={`http://localhost:8080/data/library_images/${editingRegionItem.filepath}`}
+          initialPoints={editingRegionItem.valid_region_points}
+          itemId={editingRegionItem.id}
+          onSave={handleValidRegionSave}
+          onCancel={() => {
+            setIsValidRegionEditorOpen(false);
+            setEditingRegionItem(null);
+          }}
+          onDelete={handleValidRegionDelete}
+        />
       )}
     </div>
   );

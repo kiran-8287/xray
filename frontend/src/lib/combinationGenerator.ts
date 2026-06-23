@@ -37,9 +37,14 @@ function getStencilKind(category: string): string {
 
 function parseOutline(item: Item): { x: number; y: number }[] | undefined {
   if (item.valid_region_points) {
-    return typeof item.valid_region_points === "string"
+    const raw = typeof item.valid_region_points === "string"
       ? JSON.parse(item.valid_region_points)
       : item.valid_region_points;
+    if (Array.isArray(raw)) {
+      return raw;
+    } else if (raw && typeof raw === "object") {
+      return raw.simplifiedPoints || raw.points || raw.shapes?.[0]?.points;
+    }
   }
   if (item.polygon_json) {
     return typeof item.polygon_json === "string"
@@ -51,6 +56,8 @@ function parseOutline(item: Item): { x: number; y: number }[] | undefined {
 
 function createBagSceneObject(bag: Item): SceneObject {
   const outline = parseOutline(bag);
+  const bagWidth = bag.width || bag.height || Math.min(CANVAS_W, CANVAS_H);
+  const bagHeight = bag.height || bag.width || Math.min(CANVAS_W, CANVAS_H);
   return {
     id: `bag-${bag.id}`,
     name: bag.name,
@@ -62,14 +69,14 @@ function createBagSceneObject(bag: Item): SceneObject {
     filepath: bag.filepath,
     polygonOutline: outline,
     transform: {
-      x: CANVAS_W / 2,
-      y: CANVAS_H / 2,
-      width: BAG_DISPLAY_SIZE,
-      height: BAG_DISPLAY_SIZE,
+      x: bagWidth / 2,
+      y: bagHeight / 2,
+      width: bagWidth,
+      height: bagHeight,
       rotation: 0,
     },
-    initialWidth: BAG_DISPLAY_SIZE,
-    initialHeight: BAG_DISPLAY_SIZE,
+    initialWidth: bagWidth,
+    initialHeight: bagHeight,
     layer: 0,
   };
 }

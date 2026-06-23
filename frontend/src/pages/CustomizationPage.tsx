@@ -246,12 +246,15 @@ export default function CustomizationPage() {
           : bagItem.valid_region_points;
         // Extract points from both formats:
         // 1. Direct array of points: [{x,y}, {x,y}, ...]
-        // 2. Shapes format: { shapes: [...], simplifiedPoints: [{x,y}, ...] }
+        // 2. Simplified format: { points: [...], simplifiedPoints: [...] }
+        // 3. Legacy shapes format: { shapes: [...], simplifiedPoints: [{x,y}, ...] }
         if (Array.isArray(raw)) {
           bagOutline = raw;
         } else if (raw && typeof raw === "object" && !Array.isArray(raw)) {
           if (raw.simplifiedPoints && Array.isArray(raw.simplifiedPoints)) {
             bagOutline = raw.simplifiedPoints;
+          } else if (raw.points && Array.isArray(raw.points)) {
+            bagOutline = raw.points;
           } else if (raw.shapes && Array.isArray(raw.shapes)) {
             // Try to extract from first positive polygon shape
             const positiveShape = raw.shapes.find((s: any) => s.isPositive !== false && s.points?.length >= 3);

@@ -36,10 +36,10 @@ function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; val
       // Draw valid region overlay if points exist
       if (validRegionPoints) {
         let points: { x: number; y: number }[] = [];
-        // Support both direct points array and { simplifiedPoints, shapes } format
+        // Support both direct points array and { points, simplifiedPoints } format
         const raw = Array.isArray(validRegionPoints)
           ? validRegionPoints
-          : validRegionPoints.simplifiedPoints || validRegionPoints.shapes?.[0]?.points || [];
+          : validRegionPoints.simplifiedPoints || validRegionPoints.points || [];
         points = raw.map((p: any) => ({
           x: typeof p.x === "number" && p.x <= 1 ? p.x * 96 : p.x,
           y: typeof p.y === "number" && p.y <= 1 ? p.y * 96 : p.y,
@@ -162,10 +162,10 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     setEditDraft({ ...editDraft, subcategory: subcategoryValue });
   };
 
-  const handleValidRegionSave = (points: any, shapes?: any) => {
+  const handleValidRegionSave = (points: any) => {
     setEditDraft({
       ...editDraft,
-      valid_region_points: shapes ? { shapes, simplifiedPoints: points } : points,
+      valid_region_points: points,
     });
     setIsValidRegionEditorOpen(false);
   };
@@ -468,9 +468,15 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
       {editingIndex != null && editDraft && isValidRegionEditorOpen && (
         <ValidRegionEditor
           imageSrc={URL.createObjectURL(editDraft.file)}
-          initialPoints={editDraft.valid_region_points || []}
+          initialPoints={
+            editDraft.valid_region_points
+              ? (Array.isArray(editDraft.valid_region_points)
+                ? editDraft.valid_region_points
+                : editDraft.valid_region_points.simplifiedPoints || editDraft.valid_region_points.points || [])
+              : []
+          }
           itemId={(editDraft.file as File).name}
-          onSave={(points, shapes) => handleValidRegionSave(points, shapes)}
+          onSave={(points) => handleValidRegionSave(points)}
           onCancel={() => setIsValidRegionEditorOpen(false)}
           onDelete={() => {
             setEditDraft({ ...editDraft, valid_region_points: null });
