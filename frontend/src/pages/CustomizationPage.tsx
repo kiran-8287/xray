@@ -114,6 +114,7 @@ export default function CustomizationPage() {
   const [history, setHistory] = useState<SceneObject[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [showValidRegion, setShowValidRegion] = useState(true);
+  const [showGrid, setShowGrid] = useState(false);
   const [exportState, setExportState] = useState<{ status: "idle" | "saving" | "success" | "error"; message: string }>({ status: "idle", message: "" });
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [workspaceAnnotation, setWorkspaceAnnotation] = useState<string>(`Workspace ${new Date().toISOString()}`);
@@ -751,10 +752,13 @@ export default function CustomizationPage() {
         redoDisabled={historyIndex >= history.length - 1}
         selectedObjectId={selectedObjectId}
         showValidRegion={showValidRegion}
+        showGrid={showGrid}
         exportSaving={exportState.status === "saving"}
+        outOfBoundsCount={outOfBoundsObjects.length}
         handleUndo={handleUndo}
         handleRedo={handleRedo}
         setShowValidRegion={setShowValidRegion}
+        setShowGrid={setShowGrid}
         handleDeleteSelected={handleDeleteSelected}
         handleExport={handleExport}
         handleRandomize={handleRandomize}
@@ -768,15 +772,6 @@ export default function CustomizationPage() {
         }`}>
           {exportState.status === "success" ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
           <span className="font-semibold text-xs">{exportState.message}</span>
-        </div>
-      )}
-
-      {outOfBoundsNotification.show && (
-        <div className="absolute top-28 left-4 z-50 px-4 py-2.5 rounded-xl shadow-panel border bg-amber-50 border-amber-200 text-amber-800 flex items-center gap-2 animate-slide-up">
-          <ShieldAlert size={16} />
-          <span className="font-semibold text-xs">
-            {outOfBoundsNotification.count} object{outOfBoundsNotification.count > 1 ? "s" : ""} out of valid region!
-          </span>
         </div>
       )}
 
@@ -838,6 +833,7 @@ export default function CustomizationPage() {
           objects={objects}
           selectedObjectId={selectedObjectId}
           showValidRegion={showValidRegion}
+          showGrid={showGrid}
           handleMouseDown={handleMouseDown}
           handleRotationMouseDown={handleRotationMouseDown}
           handleMouseMove={handleMouseMove}

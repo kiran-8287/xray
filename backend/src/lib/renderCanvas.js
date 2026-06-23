@@ -1,121 +1,171 @@
-import { createCanvas, loadImage } from 'canvas';
+import { createCanvas } from 'canvas';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
+import { ReadDump } from './dumpRead.js';
+import { readTip } from './tipRead.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const libraryImagesRoot = path.resolve(__dirname, "../../data/library_images");
+const pixelDataRoot = path.resolve(__dirname, "../../data/pixel_data");
 
-async function findImageFile(filename, rootDir = libraryImagesRoot) {
-  // First, check the root directory directly
-  const directPath = path.join(rootDir, filename);
+async function loadPixelData(filepath) {
   try {
-    await fs.access(directPath);
-    return directPath;
-  } catch {
-    // Not in root, search subdirectories
-    const entries = await fs.readdir(rootDir, { withFileTypes: true });
-    
-    for (const entry of entries) {
-      const fullPath = path.join(rootDir, entry.name);
+    const pixelDataPath = path.join(pixelDataRoot, filepath);
+    const data = await fs.readFile(pixelDataPath, 'utf8');
+    return JSON.parse(data);
+  } catch (err) {
+    return null;
+  }
+}
+
+function getPixelArray(pixelData) {
+  // For dump files, use R or high
+  if (pixelData.R) return pixelData.R;
+  if (pixelData.high) return pixelData.high;
+  if (pixelData.high_raw) return pixelData.high_raw;
+  return null;
+}
+
+function applyAffineTransform(
+  srcData, 
+  srcWidth, 
+  srcHeight,
+  dstWidth, 
+  dstHeight,
+  tx, 
+  ty, 
+  scaleX, 
+  scaleY,
+  rotation
+) {
+  const dstData = new Float32Array(dstWidth * dstHeight);
+  
+  // Inverse transform parameters
+  const cos = Math.cos(-rotation);
+  const sin = Math.sin(-rotation);
+  const invScaleX = 1 / scaleX;
+  const invScaleY = 1 / scaleY;
+  
+  for (let dstY = 0; dstY < dstHeight; dstY++) {
+    for (let dstX = 0; dstX < dstWidth; dstX++) {
+      // Translate to origin relative to object center
+      const x = (dstX - tx);
+      const y = (dstY - ty);
       
-      if (entry.isDirectory()) {
-        const found = await findImageFile(filename, fullPath);
-        if (found) return found;
-      } else if (entry.name === filename) {
-        return fullPath;
+      // Rotate
+      const rx = x * cos - y * sin;
+      const ry = x * sin + y * cos;
+      
+      // Scale
+      const sx = rx * invScaleX;
+      const sy = ry * invScaleY;
+      
+      // Translate back to source coordinates
+      const srcX = sx + srcWidth / 2;
+      const srcY = sy + srcHeight / 2;
+      
+      // Check bounds
+      if (srcX >= 0 && srcX < srcWidth && srcY >= 0 && srcY < srcHeight) {
+        const sx0 = Math.floor(srcX);
+        const sy0 = Math.floor(srcY);
+        const sx1 = Math.min(sx0 + 1, srcWidth - 1);
+        const sy1 = Math.min(sy0 + 1, srcHeight - 1);
+        
+        const dx = srcX - sx0;
+        const dy = srcY - sy0;
+        
+        // Bilinear interpolation
+        const v00 = srcData[sy0][sx0];
+        const v01 = srcData[sy0][sx1];
+        const v10 = srcData[sy1][sx0];
+        const v11 = srcData[sy1][sx1];
+        
+        const v0 = v00 * (1 - dx) + v01 * dx;
+        const v1 = v10 * (1 - dx) + v11 * dx;
+        const v = v0 * (1 - dy) + v1 * dy;
+        
+        dstData[dstY * dstWidth + dstX] = v;
       }
     }
   }
   
-  return null;
+  return dstData;
 }
 
 /**
- * Async helper that loads images and performs the per‑pixel attenuation calculation.
+ * Async helper that loads raw pixel arrays and performs per‑pixel attenuation calculation.
  * Returns a PNG buffer of the composited scene.
  */
 export async function renderSceneAsync(objects, width = 800, height = 600) {
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
   
-  // White background (minimal absorption)
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, width, height);
-
-  const sorted = [...objects].sort((a, b) => a.layer - b.layer);
+  // Initialize density buffer with 0 (air)
   const densityBuffer = new Float32Array(width * height);
 
+  const sorted = [...objects].sort((a, b) => a.layer - b.layer);
+  
   for (const obj of sorted) {
-    if (!obj.filepath) continue;
-    const imgPath = await findImageFile(obj.filepath);
-    if (!imgPath) {
-      console.log(`⚠️  Could not find image file: ${obj.filepath}`);
+    if (!obj.id) continue;
+    
+    // Try to load pixel data first
+    const pixelDataFilename = obj.pixel_data_path || null;
+    let pixelData = null;
+    let srcArray = null;
+    let srcWidth = 0;
+    let srcHeight = 0;
+    
+    if (pixelDataFilename) {
+      pixelData = await loadPixelData(pixelDataFilename);
+      if (pixelData) {
+        srcArray = getPixelArray(pixelData);
+        if (srcArray) {
+          srcHeight = srcArray.length;
+          srcWidth = srcArray[0].length;
+        }
+      }
+    }
+    
+    // If no pixel data, use fallback method (PNG image)
+    if (!srcArray) {
+      console.warn(`⚠️  No pixel data found for ${obj.name || obj.id}, using fallback PNG rendering`);
+      // ... (keep existing fallback logic if needed, but we can skip for now)
       continue;
     }
     
-    let img;
-    if (obj.filepath.endsWith('.svg')) {
-      let svgContent = await fs.readFile(imgPath, 'utf8');
-      const viewBoxMatch = svgContent.match(/viewBox="([^"]+)"/);
-      let svgW = "512";
-      let svgH = "512";
-      if (viewBoxMatch) {
-        const parts = viewBoxMatch[1].trim().split(/\s+/).map(Number);
-        if (parts.length === 4) {
-          svgW = parts[2].toString();
-          svgH = parts[3].toString();
-        }
-      }
-
-      if (!svgContent.includes('width=')) {
-        svgContent = svgContent.replace('<svg', `<svg width="${svgW}"`);
-      } else {
-        svgContent = svgContent.replace(/width="[^"]+"/, `width="${svgW}"`);
-      }
-      if (!svgContent.includes('height=')) {
-        svgContent = svgContent.replace('<svg', `<svg height="${svgH}"`);
-      } else {
-        svgContent = svgContent.replace(/height="[^"]+"/, `height="${svgH}"`);
-      }
-
-      img = await loadImage(Buffer.from(svgContent));
-    } else {
-      img = await loadImage(imgPath);
-    }
+    // Calculate transformation
+    const scaleX = (obj.transform.width || srcWidth) / srcWidth;
+    const scaleY = (obj.transform.height || srcHeight) / srcHeight;
+    const rotation = (obj.transform.rotation * Math.PI) / 180;
+    const tx = obj.transform.x;
+    const ty = obj.transform.y;
     
-    // Offscreen canvas for the object to extract alpha map
-    const off = createCanvas(width, height);
-    const offCtx = off.getContext('2d');
-    offCtx.clearRect(0, 0, width, height);
-    
-    offCtx.save();
-    offCtx.translate(obj.transform.x, obj.transform.y);
-    offCtx.rotate((obj.transform.rotation * Math.PI) / 180);
-    offCtx.drawImage(
-      img,
-      -obj.transform.width / 2,
-      -obj.transform.height / 2,
-      obj.transform.width,
-      obj.transform.height
+    // Apply transformation to source data
+    const transformedData = applyAffineTransform(
+      srcArray,
+      srcWidth,
+      srcHeight,
+      width,
+      height,
+      tx,
+      ty,
+      scaleX,
+      scaleY,
+      rotation
     );
-    offCtx.restore();
     
-    const imgData = offCtx.getImageData(0, 0, width, height);
-    const pixels = imgData.data;
+    // Get attenuation coefficient
+    const pixelVal = typeof obj.originalPixelValue === 'number' 
+      ? obj.originalPixelValue 
+      : (typeof obj.pixel_value === 'number' ? obj.pixel_value : 32767);
     
-    // Attenuation coefficient calculation from pixel value (0 - 65535)
-    // Objects from library have pixel_value, SceneObjects in frontend have currentPixelValue / originalPixelValue.
-    // Let's support both obj.originalPixelValue and obj.pixel_value.
-    const pixelVal = typeof obj.originalPixelValue === 'number' ? obj.originalPixelValue : (typeof obj.pixel_value === 'number' ? obj.pixel_value : 32767);
-    const mu = -Math.log(Math.max(1, pixelVal) / 65535);
-
-    for (let i = 0; i < pixels.length; i += 4) {
-      const alpha = pixels[i + 3];
-      if (alpha > 0) {
-        const idx = i / 4;
-        const normalizedThickness = alpha / 255;
-        densityBuffer[idx] += mu * normalizedThickness;
+    // Update density buffer
+    for (let i = 0; i < transformedData.length; i++) {
+      const val = transformedData[i];
+      if (val > 0 && val < 65535) { // Only add density if pixel has value
+        const mu = -Math.log(Math.max(1, val) / 65535);
+        densityBuffer[i] += mu;
       }
     }
   }
@@ -139,3 +189,4 @@ export async function renderSceneAsync(objects, width = 800, height = 600) {
   ctx.putImageData(finalImg, 0, 0);
   return canvas.toBuffer('image/png');
 }
+

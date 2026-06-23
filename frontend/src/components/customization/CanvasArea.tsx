@@ -15,6 +15,7 @@ interface CanvasAreaProps {
   objects: SceneObject[];
   selectedObjectId: string | null;
   showValidRegion: boolean;
+  showGrid: boolean;
   handleMouseDown: (e: React.MouseEvent, obj: SceneObject) => void;
   handleRotationMouseDown: (e: React.MouseEvent, obj: SceneObject) => void;
   handleMouseMove: (e: React.MouseEvent) => void;
@@ -27,6 +28,7 @@ export default function CanvasArea({
   objects,
   selectedObjectId,
   showValidRegion,
+  showGrid,
   handleMouseDown,
   handleRotationMouseDown,
   handleMouseMove,
@@ -79,13 +81,30 @@ export default function CanvasArea({
           transformOrigin: "center",
         }}
       >
-        <svg className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-30">
-          {Array.from({ length: (bagImageDimensions ? bagImageDimensions.width : CANVAS_W) / 20 + 1 }).map((_, i) => (
-            <line key={`v-${i}`} x1={i * 20} y1={0} x2={i * 20} y2={bagImageDimensions ? bagImageDimensions.height : CANVAS_H} stroke="#E5E7EB" strokeWidth={1} />
-          ))}
-          {Array.from({ length: (bagImageDimensions ? bagImageDimensions.height : CANVAS_H) / 20 + 1 }).map((_, i) => (
-            <line key={`h-${i}`} x1={0} y1={i * 20} x2={bagImageDimensions ? bagImageDimensions.width : CANVAS_W} y2={i * 20} stroke="#E5E7EB" strokeWidth={1} />
-          ))}
+        {showGrid && (
+          <svg className="absolute top-0 left-0 w-full h-full pointer-events-none">
+            {/* Minor grid lines every 20px */}
+            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.width : CANVAS_W) / 20 + 1 }).map((_, i) => (
+              <line key={`v-${i}`} x1={i * 20} y1={0} x2={i * 20} y2={bagImageDimensions ? bagImageDimensions.height : CANVAS_H} stroke="rgba(37, 99, 235, 0.15)" strokeWidth={0.5} />
+            ))}
+            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.height : CANVAS_H) / 20 + 1 }).map((_, i) => (
+              <line key={`h-${i}`} x1={0} y1={i * 20} x2={bagImageDimensions ? bagImageDimensions.width : CANVAS_W} y2={i * 20} stroke="rgba(37, 99, 235, 0.15)" strokeWidth={0.5} />
+            ))}
+            {/* Major grid lines every 100px */}
+            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.width : CANVAS_W) / 100 + 1 }).map((_, i) => (
+              <line key={`mv-${i}`} x1={i * 100} y1={0} x2={i * 100} y2={bagImageDimensions ? bagImageDimensions.height : CANVAS_H} stroke="rgba(37, 99, 235, 0.5)" strokeWidth={1} />
+            ))}
+            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.height : CANVAS_H) / 100 + 1 }).map((_, i) => (
+              <line key={`mh-${i}`} x1={0} y1={i * 100} x2={bagImageDimensions ? bagImageDimensions.width : CANVAS_W} y2={i * 100} stroke="rgba(37, 99, 235, 0.5)" strokeWidth={1} />
+            ))}
+          </svg>
+        )}
+
+        {/* Origin marker */}
+        <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ zIndex: 2 }}>
+          <circle cx="0" cy="0" r="4" fill="#DC2626" stroke="white" strokeWidth={1.5} />
+          <line x1="0" y1="0" x2="12" y2="0" stroke="#DC2626" strokeWidth={1.5} />
+          <line x1="0" y1="0" x2="0" y2="12" stroke="#DC2626" strokeWidth={1.5} />
         </svg>
 
         <canvas

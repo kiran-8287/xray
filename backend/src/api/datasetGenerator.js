@@ -9,9 +9,10 @@ import path from "node:path";
  * @param {object} payload - The payload from the client.
  * @param {string} exportId - Unique identifier for the run.
  * @param {string} outDir - Directory to save generated assets.
+ * @param {boolean} saveImages - Whether to save the generated PNG images (default true)
  * @returns {Promise<object>} - Object mapping combo IDs to their generated file paths and annotations.
  */
-export async function generateDataset(payload, exportId, outDir) {
+export async function generateDataset(payload, exportId, outDir, saveImages = true) {
   // Ensure the target directories exist
   const imagesDir = path.join(outDir, "images");
   const labelsDir = path.join(outDir, "labels");
@@ -24,8 +25,11 @@ export async function generateDataset(payload, exportId, outDir) {
   if (payload.objects && Array.isArray(payload.objects)) {
     const bagObject = payload.objects.find(obj => obj.library === 'bag');
     let bagOrigin = { x: 0, y: 0 }; // default origin
+    let bagCorners = [];
+    let validRegionRelative = null;
+    
     if (bagObject) {
-      const bagCorners = getRectCorners(
+      bagCorners = getRectCorners(
         { x: bagObject.transform.x, y: bagObject.transform.y },
         { width: bagObject.transform.width, height: bagObject.transform.height },
         bagObject.transform.rotation
@@ -33,21 +37,56 @@ export async function generateDataset(payload, exportId, outDir) {
       // Find leftmost point of the bag as origin
       const origin = bagCorners.reduce((min, point) => point.x < min.x ? point : min, bagCorners[0]);
       bagOrigin = { x: origin.x, y: origin.y };
+      
+      // Calculate valid region points relative to bag origin
+      if (bagObject.valid_region_points) {
+        const validRegionPoints = Array.isArray(bagObject.valid_region_points) 
+          ? bagObject.valid_region_points 
+          : (bagObject.valid_region_points.simplifiedPoints || bagObject.valid_region_points.points || []);
+        
+        validRegionRelative = validRegionPoints.map(p => ({
+          x: p.x - bagOrigin.x,
+          y: p.y - bagOrigin.y
+        }));
+      }
     }
 
-    const pngBuffer = await renderSceneAsync(payload.objects, 800, 600);
-    const filename = `${exportId}.png`;
-    const filepath = path.join(imagesDir, filename);
-    await fs.writeFile(filepath, pngBuffer);
+    if (saveImages) {
+      const pngBuffer = await renderSceneAsync(payload.objects, 800, 600);
+      const filename = `${exportId}.png`;
+      const filepath = path.join(imagesDir, filename);
+      await fs.writeFile(filepath, pngBuffer);
+      
+      generatedFiles.push({
+        image: path.join("images", filename),
+        label: path.join("labels", `${exportId}.json`)
+      });
+    } else {
+      generatedFiles.push({
+        label: path.join("labels", `${exportId}.json`)
+      });
+    }
 
     // Save JSON metadata/annotation for this single image
     const annotationData = {
+      export_id: exportId,
       image_id: exportId,
-      filename,
       width: 800,
       height: 600,
       bag_origin: bagOrigin, // leftmost point of the bag as coordinate origin
+      bag: bagObject ? {
+        id: bagObject.id,
+        name: bagObject.name,
+        category: bagObject.library,
+        pixel_value: bagObject.originalPixelValue,
+        filepath: bagObject.filepath,
+        pixel_data_path: bagObject.pixel_data_path || null,
+        transform: bagObject.transform,
+        corners: bagCorners,
+        corners_relative_to_bag: bagCorners.map(c => ({ x: c.x - bagOrigin.x, y: c.y - bagOrigin.y }))
+      } : null,
       valid_region: bagObject && bagObject.valid_region_points ? bagObject.valid_region_points : null,
+      valid_region_relative_to_bag: validRegionRelative,
       objects: payload.objects.map(obj => {
         let polygon = [];
         const objCorners = getRectCorners(
@@ -90,6 +129,8 @@ export async function generateDataset(payload, exportId, outDir) {
           name: obj.name,
           category: obj.library,
           pixel_value: obj.originalPixelValue,
+          filepath: obj.filepath,
+          pixel_data_path: obj.pixel_data_path || null,
           transform: obj.transform,
           // Store 4 corner coordinates in both absolute and relative to bag origin
           corners: objCorners,
@@ -99,7 +140,9 @@ export async function generateDataset(payload, exportId, outDir) {
             x: minX,
             y: minY,
             width: maxX - minX,
-            height: maxY - minY
+            height: maxY - minY,
+            x_relative: minX - bagOrigin.x,
+            y_relative: minY - bagOrigin.y
           },
           segmentation: polygon,
           segmentation_relative_to_bag: relativePolygon
@@ -108,11 +151,6 @@ export async function generateDataset(payload, exportId, outDir) {
     };
 
     await fs.writeFile(path.join(labelsDir, `${exportId}.json`), JSON.stringify(annotationData, null, 2), "utf8");
-
-    generatedFiles.push({
-      image: path.join("images", filename),
-      label: path.join("labels", `${exportId}.json`)
-    });
 
     return {
       type: "single",
@@ -153,14 +191,16 @@ export async function generateDataset(payload, exportId, outDir) {
     }
 
     const bagObject = {
-      id: `bag-${bag.id}`,
+      id: bag.id,
       name: bag.name,
       library: bag.category,
       originalPixelValue: bag.pixel_value,
       currentPixelValue: bag.pixel_value,
       oldPixelValue: null,
       filepath: bag.filepath,
+      pixel_data_path: bag.pixel_data_path || null,
       polygonOutline: bagOutline,
+      valid_region_points: bag.valid_region_points,
       transform: {
         x: resolutionW / 2,
         y: resolutionH / 2,
@@ -188,13 +228,14 @@ export async function generateDataset(payload, exportId, outDir) {
 
       const pos = getRandomPositionInContainer(w, h, itemOutline, bagObject);
       sceneObjects.push({
-        id: `other-${item.id}-${oIdx}`,
+        id: item.id,
         name: item.name,
         library: item.category,
         originalPixelValue: item.pixel_value,
         currentPixelValue: item.pixel_value,
         oldPixelValue: null,
         filepath: item.filepath,
+        pixel_data_path: item.pixel_data_path || null,
         polygonOutline: itemOutline,
         transform: {
           x: pos.x,
@@ -223,13 +264,14 @@ export async function generateDataset(payload, exportId, outDir) {
 
       const pos = getRandomPositionInContainer(w, h, threatOutline, bagObject);
       threatObject = {
-        id: `threat-${threat.id}`,
+        id: threat.id,
         name: threat.name,
         library: threat.category,
         originalPixelValue: threat.pixel_value,
         currentPixelValue: threat.pixel_value,
         oldPixelValue: null,
         filepath: threat.filepath,
+        pixel_data_path: threat.pixel_data_path || null,
         polygonOutline: threatOutline,
         transform: {
           x: pos.x,
@@ -265,38 +307,73 @@ export async function generateDataset(payload, exportId, outDir) {
       }
     }
 
-    // Render this combination
-    const pngBuffer = await renderSceneAsync(sceneObjects, resolutionW, resolutionH);
-    const filename = `${comboId}.png`;
-    const filepath = path.join(imagesDir, filename);
-    await fs.writeFile(filepath, pngBuffer);
+    if (saveImages) {
+      // Render this combination
+      const pngBuffer = await renderSceneAsync(sceneObjects, resolutionW, resolutionH);
+      const filename = `${comboId}.png`;
+      const filepath = path.join(imagesDir, filename);
+      await fs.writeFile(filepath, pngBuffer);
+      
+      generatedFiles.push({
+        comboId,
+        image: path.join("images", filename),
+        label: path.join("labels", `${comboId}.json`)
+      });
+    } else {
+      generatedFiles.push({
+        comboId,
+        label: path.join("labels", `${comboId}.json`)
+      });
+    }
 
     // Get bag origin
     let bagOrigin = { x: 0, y: 0 };
     const currentBagObject = sceneObjects.find(obj => obj.library === 'bag');
+    let bagCorners = [];
+    let validRegionRelative = null;
+    
     if (currentBagObject) {
-      const bagCorners = getRectCorners(
+      bagCorners = getRectCorners(
         { x: currentBagObject.transform.x, y: currentBagObject.transform.y },
         { width: currentBagObject.transform.width, height: currentBagObject.transform.height },
         currentBagObject.transform.rotation
       );
       const origin = bagCorners.reduce((min, point) => point.x < min.x ? point : min, bagCorners[0]);
       bagOrigin = { x: origin.x, y: origin.y };
+      
+      // Calculate valid region points relative to origin
+      if (currentBagObject.valid_region_points) {
+        const validRegionPoints = Array.isArray(currentBagObject.valid_region_points) 
+          ? currentBagObject.valid_region_points 
+          : (currentBagObject.valid_region_points.simplifiedPoints || currentBagObject.valid_region_points.points || []);
+        
+        validRegionRelative = validRegionPoints.map(p => ({
+          x: p.x - bagOrigin.x,
+          y: p.y - bagOrigin.y
+        }));
+      }
     }
 
     // Create JSON annotation metadata
     const annotationData = {
+      export_id: exportId,
       image_id: comboId,
-      filename,
       width: resolutionW,
       height: resolutionH,
       bag_origin: bagOrigin,
-      valid_region: currentBagObject && currentBagObject.valid_region_points ? currentBagObject.valid_region_points : null,
-      bag: {
+      bag: bag ? {
         id: bag.id,
         name: bag.name,
-        filepath: bag.filepath
-      },
+        category: bag.category,
+        pixel_value: bag.pixel_value,
+        filepath: bag.filepath,
+        pixel_data_path: bag.pixel_data_path || null,
+        transform: currentBagObject.transform,
+        corners: bagCorners,
+        corners_relative_to_bag: bagCorners.map(c => ({ x: c.x - bagOrigin.x, y: c.y - bagOrigin.y }))
+      } : null,
+      valid_region: currentBagObject && currentBagObject.valid_region_points ? currentBagObject.valid_region_points : null,
+      valid_region_relative_to_bag: validRegionRelative,
       has_threat: !!threat,
       threat_count: threat ? 1 : 0,
       threat_status: threat ? "threat_present" : "clean",
@@ -343,6 +420,8 @@ export async function generateDataset(payload, exportId, outDir) {
           name: obj.name,
           category: obj.library,
           pixel_value: obj.originalPixelValue,
+          filepath: obj.filepath,
+          pixel_data_path: obj.pixel_data_path || null,
           transform: obj.transform,
           corners: objCorners,
           corners_relative_to_bag: relativeCorners,
@@ -351,7 +430,9 @@ export async function generateDataset(payload, exportId, outDir) {
             x: minX,
             y: minY,
             width: maxX - minX,
-            height: maxY - minY
+            height: maxY - minY,
+            x_relative: minX - bagOrigin.x,
+            y_relative: minY - bagOrigin.y
           },
           segmentation: polygon,
           segmentation_relative_to_bag: relativePolygon
@@ -360,12 +441,6 @@ export async function generateDataset(payload, exportId, outDir) {
     };
 
     await fs.writeFile(path.join(labelsDir, `${comboId}.json`), JSON.stringify(annotationData, null, 2), "utf8");
-
-    generatedFiles.push({
-      comboId,
-      image: path.join("images", filename),
-      label: path.join("labels", `${comboId}.json`)
-    });
   }
 
   // Also write a master manifest file

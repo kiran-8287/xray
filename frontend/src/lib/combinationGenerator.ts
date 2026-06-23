@@ -59,7 +59,7 @@ function createBagSceneObject(bag: Item): SceneObject {
   const bagWidth = bag.width || bag.height || Math.min(CANVAS_W, CANVAS_H);
   const bagHeight = bag.height || bag.width || Math.min(CANVAS_W, CANVAS_H);
   return {
-    id: `bag-${bag.id}`,
+    id: bag.id,
     name: bag.name,
     library: "bag",
     originalPixelValue: bag.pixel_value,
@@ -92,7 +92,7 @@ function createThreatSceneObject(
   const w = threat.width ? Math.round(threat.width) : 120;
   const h = threat.height ? Math.round(threat.height) : 60;
   return {
-    id: `threat-${threat.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: threat.id,
     name: threat.name,
     library: "threat",
     originalPixelValue: threat.pixel_value,
@@ -119,7 +119,7 @@ function createNonThreatSceneObject(
   const w = item.width ? Math.round(item.width) : 80;
   const h = item.height ? Math.round(item.height) : 80;
   return {
-    id: `nonthreat-${item.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: item.id,
     name: item.name,
     library: getStencilKind(item.category),
     originalPixelValue: item.pixel_value,
@@ -511,10 +511,10 @@ function generateCleanCombinations(
  * Main function: Generate K combinations from selected items.
  *
  * Distribution strategy:
- * - K is distributed evenly across all bags
- * - For each bag, K is distributed evenly across all threats
- * - Each (bag, threat) pair gets unique placements
- * - If no threats, each bag gets unique clean combos
+ * - Uses weighted random selection for bags, where bags that have been used less frequently
+ *   get higher weight, ensuring the dataset is unbiased towards any subset of bags
+ * - For each selected bag, distributes evenly across threats (if any)
+ * - If a bag can't generate combinations, it's marked as exhausted
  *
  * @param bags - Selected bag items
  * @param threats - Selected threat items
@@ -535,90 +535,156 @@ export function generateCombinations(
 
   const results: CombinatorialResult[] = [];
   const failures: FailureLog[] = [];
+  const seenFailures = new Set<string>(); // Avoid duplicate failure logs
 
-  if (threats.length > 0) {
-    // Build initial allocation per bag and per threat (round-robin remainder distribution)
-    const combosPerBag = Math.floor(k / bags.length);
-    const remainderBags = k % bags.length;
+  type PairEntry = {
+    bag: Item;
+    threat: Item | null; // null for clean combos
+    used: Set<string>;
+    hasValidRegion: boolean;
+    usageCount: number;
+    isExhausted: boolean;
+  };
 
-    // Build pair entries with initial targets
-    type PairEntry = {
-      bag: Item;
-      threat: Item;
-      remaining: number;
-      used: Set<string>;
-      hasValidRegion: boolean;
-    };
+  const pairs: PairEntry[] = [];
 
-    const pairs: PairEntry[] = [];
+  // Initialize all possible (bag, threat) pairs
+  for (const bag of bags) {
+    const hasValidRegion = !!(bag.valid_region_points && (Array.isArray(bag.valid_region_points) ? bag.valid_region_points.length > 0 : true));
 
-    for (let bi = 0; bi < bags.length; bi++) {
-      const bag = bags[bi];
-      const bagTarget = combosPerBag + (bi < remainderBags ? 1 : 0);
-      if (bagTarget <= 0) continue;
+    if (threats.length > 0) {
+      for (const threat of threats) {
+        pairs.push({
+          bag,
+          threat,
+          used: new Set<string>(),
+          hasValidRegion,
+          usageCount: 0,
+          isExhausted: false
+        });
+      }
+    } else {
+      // No threats, just clean combos per bag
+      pairs.push({
+        bag,
+        threat: null,
+        used: new Set<string>(),
+        hasValidRegion,
+        usageCount: 0,
+        isExhausted: false
+      });
+    }
+  }
 
-      const combosPerThreat = Math.floor(bagTarget / threats.length);
-      const remainderThreats = bagTarget % threats.length;
+  /**
+   * Weighted random selection:
+   * - Weight is inversely proportional to usage count
+   * - Exhausted pairs have weight 0
+   */
+  function selectWeightedPair(): PairEntry | null {
+    const availablePairs = pairs.filter(p => !p.isExhausted);
+    if (availablePairs.length === 0) return null;
 
-      for (let ti = 0; ti < threats.length; ti++) {
-        const threat = threats[ti];
-        const threatTarget = combosPerThreat + (ti < remainderThreats ? 1 : 0);
-        if (threatTarget <= 0) continue;
+    // Calculate weights based on inverse usage
+    const totalUsage = availablePairs.reduce((sum, p) => sum + (p.usageCount + 1), 0);
+    const maxUsage = Math.max(...availablePairs.map(p => p.usageCount), 1);
 
-        const hasValidRegion = !!(bag.valid_region_points && (Array.isArray(bag.valid_region_points) ? bag.valid_region_points.length > 0 : true));
-        pairs.push({ bag, threat, remaining: threatTarget, used: new Set<string>(), hasValidRegion: hasValidRegion });
+    let totalWeight = 0;
+    const weightedPairs = availablePairs.map(p => {
+      // Inverse weight: more usage → less weight
+      const weight = maxUsage - p.usageCount + 1;
+      totalWeight += weight;
+      return { pair: p, weight, cumulative: totalWeight };
+    });
+
+    // Pick random point in total weight range
+    const random = Math.random() * totalWeight;
+    for (const wp of weightedPairs) {
+      if (random <= wp.cumulative) {
+        return wp.pair;
       }
     }
 
-    // Round-robin across pairs, requesting one placement at a time to maximize fairness
-    let producedThisCycle = -1;
-    while (results.length < k && pairs.some(p => p.remaining > 0)) {
-      producedThisCycle = 0;
-      for (const p of pairs) {
-        if (results.length >= k) break;
-        if (p.remaining <= 0) continue;
-        if (!p.hasValidRegion) {
-          // Log and mark exhausted
-          failures.push({
-            bagName: p.bag.name,
-            bagId: p.bag.id,
-            threatName: p.threat.name,
-            threatId: p.threat.id,
-            reason: `Bag "${p.bag.name}" has no valid region defined — cannot place any items`,
-            expected: p.remaining,
-            actual: 0,
-          });
-          p.remaining = 0;
-          continue;
-        }
+    // Fallback
+    return availablePairs[0];
+  }
 
-        const { results: placements, failure } = generateThreatPlacements(p.bag, p.threat, 1, density, nonThreats, p.used);
-        if (placements.length > 0) {
-          results.push(...placements);
-          p.remaining -= placements.length;
-          producedThisCycle += placements.length;
-        } else {
-          // Mark this pair exhausted; record failure if provided
-          p.remaining = 0;
-          if (failure) failures.push(failure);
-        }
+  /**
+   * Try to generate one placement for a pair
+   */
+  function tryGenerateOne(pair: PairEntry): CombinatorialResult | null {
+    if (!pair.hasValidRegion) {
+      pair.isExhausted = true;
+      const failureKey = `${pair.bag.id}-${pair.threat ? pair.threat.id : 'clean'}`;
+      if (!seenFailures.has(failureKey)) {
+        seenFailures.add(failureKey);
+        failures.push({
+          bagName: pair.bag.name,
+          bagId: pair.bag.id,
+          threatName: pair.threat ? pair.threat.name : "N/A",
+          threatId: pair.threat ? pair.threat.id : "N/A",
+          reason: `Bag "${pair.bag.name}" has no valid region defined — cannot place any items`,
+          expected: 1,
+          actual: 0,
+        });
       }
-
-      // If no placements produced in a full cycle, break to avoid infinite loop
-      if (producedThisCycle === 0) break;
+      return null;
     }
-  } else {
-    // No threats - generate clean combos
-    const combosPerBag = Math.floor(k / bags.length);
-    const remainderBags = k % bags.length;
 
-    for (let bi = 0; bi < bags.length; bi++) {
-      const bag = bags[bi];
-      const bagTarget = combosPerBag + (bi < remainderBags ? 1 : 0);
-      if (bagTarget <= 0) continue;
+    if (pair.threat) {
+      const { results: placements, failure } = generateThreatPlacements(
+        pair.bag,
+        pair.threat,
+        1,
+        density,
+        nonThreats,
+        pair.used
+      );
+      if (placements.length > 0) {
+        pair.usageCount++;
+        return placements[0];
+      } else {
+        pair.isExhausted = true;
+        if (failure) {
+          const failureKey = `${pair.bag.id}-${pair.threat.id}`;
+          if (!seenFailures.has(failureKey)) {
+            seenFailures.add(failureKey);
+            failures.push(failure);
+          }
+        }
+        return null;
+      }
+    } else {
+      // Clean combo
+      const placements = generateCleanCombinations(
+        pair.bag,
+        1,
+        density,
+        nonThreats
+      );
+      if (placements.length > 0) {
+        pair.usageCount++;
+        return placements[0];
+      } else {
+        pair.isExhausted = true;
+        return null;
+      }
+    }
+  }
 
-      const placements = generateCleanCombinations(bag, bagTarget, density, nonThreats);
-      results.push(...placements);
+  let consecutiveFailures = 0;
+  const maxConsecutiveFailures = pairs.length * 5;
+
+  while (results.length < k && consecutiveFailures < maxConsecutiveFailures) {
+    const pair = selectWeightedPair();
+    if (!pair) break;
+
+    const combo = tryGenerateOne(pair);
+    if (combo) {
+      results.push(combo);
+      consecutiveFailures = 0;
+    } else {
+      consecutiveFailures++;
     }
   }
 

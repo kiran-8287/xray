@@ -108,11 +108,53 @@ app.post("/api/read-dump", upload.single("file"), async (req, res) => {
         const data = ReadDump(filePath);
         
         // Store pixel data
-        const pixelDataFilename = `${path.basename(req.file.originalname, path.extname(req.file.originalname))}.json`;
+        const pixelDataId = uuidv4();
+        const pixelDataFilename = `${pixelDataId}.json`;
         const pixelDataPath = path.join(pixelDataRoot, pixelDataFilename);
         await fs.writeFile(pixelDataPath, JSON.stringify(data), "utf8");
         
-        res.json({ ok: true, data, pixelDataPath });
+        // Save original dump file
+        const originalFilePath = path.join(libraryImagesRoot, `${pixelDataId}${path.extname(req.file.originalname)}`);
+        await fs.rename(filePath, originalFilePath);
+        
+        const itemId = path.basename(req.file.originalname, path.extname(req.file.originalname));
+        
+        // Check if item already exists
+        let existingItem = await getItemById(itemId);
+        
+        const width = data.high[0].length;
+        const height = data.high.length;
+        
+        if (existingItem) {
+            // Update existing item
+            await updateItem(itemId, {
+                pixel_data_path: pixelDataFilename,
+                original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`,
+                width,
+                height
+            });
+        } else {
+            // Create new item
+            const item = await createItem({
+                id: itemId,
+                filename: req.file.originalname,
+                filepath: `${pixelDataId}${path.extname(req.file.originalname)}`,
+                category: "bags",
+                subcategory: "General",
+                name: itemId,
+                pixel_value: 42000 + Math.floor(Math.random() * 10000),
+                width,
+                height,
+                pixel_data_path: pixelDataFilename,
+                original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`
+            });
+            await createBag({
+                item_id: item.id,
+                valid_region_points: null
+            });
+        }
+        
+        res.json({ ok: true, data, pixelDataPath, itemId });
     } catch (error) {
         console.error(error);
         res.status(500).json({ ok: false, error: String(error) });
@@ -129,11 +171,58 @@ app.post("/api/read-tip", upload.single("file"), async (req, res) => {
         const data = readTip(filePath);
         
         // Store pixel data
-        const pixelDataFilename = `${path.basename(req.file.originalname, path.extname(req.file.originalname))}.json`;
+        const pixelDataId = uuidv4();
+        const pixelDataFilename = `${pixelDataId}.json`;
         const pixelDataPath = path.join(pixelDataRoot, pixelDataFilename);
         await fs.writeFile(pixelDataPath, JSON.stringify(data), "utf8");
         
-        res.json({ ok: true, data, pixelDataPath });
+        // Save original tip file
+        const originalFilePath = path.join(libraryImagesRoot, `${pixelDataId}${path.extname(req.file.originalname)}`);
+        await fs.rename(filePath, originalFilePath);
+        
+        const itemId = path.basename(req.file.originalname, path.extname(req.file.originalname));
+        
+        // Check if item already exists
+        let existingItem = await getItemById(itemId);
+        
+        const width = data.high_raw[0].length;
+        const height = data.high_raw.length;
+        
+        if (existingItem) {
+            // Update existing item
+            await updateItem(itemId, {
+                pixel_data_path: pixelDataFilename,
+                original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`,
+                width,
+                height
+            });
+        } else {
+            // Create new item
+            const item = await createItem({
+                id: itemId,
+                filename: req.file.originalname,
+                filepath: `${pixelDataId}${path.extname(req.file.originalname)}`,
+                category: "threats",
+                subcategory: "General",
+                name: itemId,
+                pixel_value: 10000 + Math.floor(Math.random() * 10000),
+                width,
+                height,
+                pixel_data_path: pixelDataFilename,
+                original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`
+            });
+            await createThreat({
+                item_id: item.id,
+                threat_type: null,
+                severity: null
+            });
+            await createNonThreatItem({
+                item_id: item.id,
+                subcategory_slug: "general"
+            });
+        }
+        
+        res.json({ ok: true, data, pixelDataPath, itemId });
     } catch (error) {
         console.error(error);
         res.status(500).json({ ok: false, error: String(error) });
@@ -244,14 +333,20 @@ app.post("/api/export", async (req, res) => {
         await fs.writeFile(path.join(outDir, "summary.txt"), summaryText, "utf8");
 
         // Call generateDataset to render the single custom composite PNG and JSON label
-        await generateDataset(payload, exportId, outDir);
+        const saveImages = payload.saveImages !== false;
+        await generateDataset(payload, exportId, outDir, saveImages);
 
         res.json({
             ok: true,
             message: "Synthesis export saved to disk.",
             exportId,
             outputDir: outDir,
-            files: ["metadata.json", "summary.txt", "images/" + exportId + ".png", "labels/" + exportId + ".json"],
+            files: [
+                "metadata.json",
+                "summary.txt",
+                ...(saveImages ? ["images/" + exportId + ".png"] : []),
+                "labels/" + exportId + ".json",
+            ],
         });
     } catch (error) {
         console.error(error);
@@ -268,7 +363,8 @@ app.post("/api/dataset/generate", async (req, res) => {
         const outDir = path.join(collageImagesRoot, datasetId);
         await fs.mkdir(outDir, { recursive: true });
 
-        const result = await generateDataset(payload, datasetId, outDir);
+        const saveImages = payload.saveImages !== false;
+        const result = await generateDataset(payload, datasetId, outDir, saveImages);
 
         res.json({
             ok: true,
@@ -294,36 +390,36 @@ function normalizeCategory(cat) {
 
 // Get all items organized by category and subcategory
 app.get("/api/items/categorized", async (_req, res) => {
-    try {
-        const items = await getItems();
-        const categorized = {};
-        
-        for (const item of items) {
-            const normalizedCategory = normalizeCategory(item.category);
-            if (!categorized[normalizedCategory]) {
-                categorized[normalizedCategory] = {};
-            }
-            const subcat = item.subcategory || "General";
-            if (!categorized[normalizedCategory][subcat]) {
-                categorized[normalizedCategory][subcat] = [];
-            }
-            
-            if (item.category === "bags") {
-                const bagData = await getBagByItemId(item.id);
-                if (bagData) {
-                    item.valid_region_points = bagData.valid_region_points?.simplifiedPoints || bagData.valid_region_points?.points || bagData.valid_region_points;
-                    item.validRegionData = bagData.valid_region_points;
-                }
-            }
-            
-            categorized[normalizedCategory][subcat].push(item);
+  try {
+    const items = await getItems();
+    const categorized = {};
+    
+    for (const item of items) {
+      const normalizedCategory = normalizeCategory(item.category);
+      if (!categorized[normalizedCategory]) {
+        categorized[normalizedCategory] = {};
+      }
+      const subcat = item.subcategory || "General";
+      if (!categorized[normalizedCategory][subcat]) {
+        categorized[normalizedCategory][subcat] = [];
+      }
+      
+      if (item.category === "bags") {
+        const bagData = await getBagByItemId(item.id);
+        if (bagData) {
+          item.valid_region_points = bagData.valid_region_points?.simplifiedPoints || bagData.valid_region_points?.points || bagData.valid_region_points;
+          item.validRegionData = bagData.valid_region_points;
         }
-        
-        res.json({ ok: true, categorized });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ ok: false, error: String(err) });
+      }
+      
+      categorized[normalizedCategory][subcat].push(item);
     }
+    
+    res.json({ ok: true, categorized });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
 });
 
 // Saved layouts endpoints
@@ -588,25 +684,25 @@ app.delete("/api/items/:id/valid-region", async (req, res) => {
 
 // Get item details (including valid region for bags)
 app.get("/api/items/:id", async (req, res) => {
-    try {
-        const item = await getItemById(req.params.id);
-        if (!item) {
-            return res.status(404).json({ ok: false, error: "Item not found" });
-        }
-        
-        if (item.category === "bags") {
-            const bagData = await getBagByItemId(item.id);
-            if (bagData) {
-                item.validRegionPoints = bagData.valid_region_points?.simplifiedPoints || bagData.valid_region_points?.points || bagData.valid_region_points;
-                item.validRegionData = bagData.valid_region_points;
-            }
-        }
-        
-        res.json({ ok: true, item });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ ok: false, error: String(err) });
+  try {
+    const item = await getItemById(req.params.id);
+    if (!item) {
+      return res.status(404).json({ ok: false, error: "Item not found" });
     }
+    
+    if (item.category === "bags") {
+      const bagData = await getBagByItemId(item.id);
+      if (bagData) {
+        item.validRegionPoints = bagData.valid_region_points?.simplifiedPoints || bagData.valid_region_points?.points || bagData.valid_region_points;
+        item.validRegionData = bagData.valid_region_points;
+      }
+    }
+    
+    res.json({ ok: true, item });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
 });
 
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;

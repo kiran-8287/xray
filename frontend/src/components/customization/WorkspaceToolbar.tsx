@@ -1,7 +1,7 @@
 import React from "react";
 import { 
   Undo2, Redo2, Save, Trash2, RotateCw, Settings, 
-  Layers, Layout, Shuffle
+  Layers, Layout, Shuffle, Grid, AlertTriangle
 } from "lucide-react";
 
 interface WorkspaceToolbarProps {
@@ -10,10 +10,13 @@ interface WorkspaceToolbarProps {
   redoDisabled: boolean;
   selectedObjectId: string | null;
   showValidRegion: boolean;
+  showGrid: boolean;
   exportSaving: boolean;
+  outOfBoundsCount: number;
   handleUndo: () => void;
   handleRedo: () => void;
   setShowValidRegion: (val: boolean) => void;
+  setShowGrid: (val: boolean) => void;
   handleDeleteSelected: () => void;
   handleExport: () => void;
   handleRandomize: () => void;
@@ -25,10 +28,13 @@ export default function WorkspaceToolbar({
   redoDisabled,
   selectedObjectId,
   showValidRegion,
+  showGrid,
   exportSaving,
+  outOfBoundsCount,
   handleUndo,
   handleRedo,
   setShowValidRegion,
+  setShowGrid,
   handleDeleteSelected,
   handleExport,
   handleRandomize,
@@ -69,6 +75,19 @@ export default function WorkspaceToolbar({
         <Layers size={16} />
       </button>
 
+      {/* Grid Toggle */}
+      <button
+        onClick={() => setShowGrid(!showGrid)}
+        className={`p-1.5 rounded-lg transition-colors border cursor-pointer ${
+          showGrid 
+            ? "bg-accent/10 border-accent/30 text-accent font-semibold" 
+            : "border-transparent text-muted hover:text-ink hover:bg-surface"
+        }`}
+        title={showGrid ? "Hide Grid" : "Show Grid"}
+      >
+        <Grid size={16} />
+      </button>
+
       {/* Randomize Button */}
       <button
         onClick={handleRandomize}
@@ -77,6 +96,18 @@ export default function WorkspaceToolbar({
       >
         <Shuffle size={16} />
       </button>
+
+      {/* Out of Bounds Warning - Center */}
+      {outOfBoundsCount > 0 && (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-800">
+            <AlertTriangle size={14} />
+            <span className="text-xs font-semibold">
+              {outOfBoundsCount} object{outOfBoundsCount > 1 ? "s" : ""} out of valid region!
+            </span>
+          </div>
+        </div>
+      )}
 
       {selectedObjectId && (
         <>
