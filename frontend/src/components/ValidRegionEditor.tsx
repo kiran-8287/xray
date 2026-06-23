@@ -45,6 +45,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [polygons, setPolygons] = useState<Polygon[]>([]);
   const [selectedPolygonId, setSelectedPolygonId] = useState<string | null>(null);
   const [currentTool, setCurrentTool] = useState<'select' | 'polygon'>('select');
@@ -151,11 +152,13 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   };
 
   const finishPolygon = () => {
+    console.log('finishPolygon called with tempPolygon:', tempPolygon);
     if (tempPolygon.length >= 3) {
       const newPolygon: Polygon = {
         id: createId(),
         points: [...tempPolygon]
       };
+      console.log('finishPolygon adding newPolygon:', newPolygon);
       updatePolygonsAndHistory([...polygons, newPolygon]);
       setTempPolygon([]);
       setIsDrawing(false);
@@ -182,17 +185,26 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return;
     
+    console.log('handleSave: polygons:', polygons, 'tempPolygon:', tempPolygon, 'isDrawing:', isDrawing);
+    
     // If there are polygons, combine them (or just take the first one for now)
     let pointsToSave: Point[] = [];
     if (polygons.length > 0) {
       pointsToSave = polygons[0].points;
+    } else if (tempPolygon.length >= 3) {
+      // If user was still drawing, save the temp polygon
+      pointsToSave = tempPolygon;
     }
+    
+    console.log('handleSave: pointsToSave before normalize:', pointsToSave);
     
     // Normalize points
     const normalizedPoints = pointsToSave.map(p => ({
       x: p.x / canvas.width,
       y: p.y / canvas.height
     }));
+    
+    console.log('handleSave: normalizedPoints:', normalizedPoints);
     
     onSave(normalizedPoints);
     showToast('success', 'Valid region saved');
@@ -463,10 +475,9 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
     // Draw grid if snap enabled
     if (gridSnap) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(37, 99, 235, 0.04)';
-      ctx.lineWidth = 1;
-      
-      // Minor lines
+      // Minor grid lines
+      ctx.strokeStyle = 'rgba(37, 99, 235, 0.15)';
+      ctx.lineWidth = 0.5;
       for (let x = 0; x <= canvas.width; x += gridSize) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
@@ -480,8 +491,9 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
         ctx.stroke();
       }
       
-      // Major lines
-      ctx.strokeStyle = 'rgba(37, 99, 235, 0.10)';
+      // Major grid lines (every 5th line)
+      ctx.strokeStyle = 'rgba(37, 99, 235, 0.5)';
+      ctx.lineWidth = 1;
       for (let x = 0; x <= canvas.width; x += gridSize * 5) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
@@ -501,9 +513,9 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
     polygons.forEach(polygon => {
       if (polygon.points.length > 0) {
         ctx.save();
-        ctx.fillStyle = 'rgba(37, 99, 235, 0.35)';
-        ctx.strokeStyle = 'rgba(37, 99, 235, 0.8)';
-        ctx.lineWidth = 2.5;
+        ctx.fillStyle = 'rgba(22, 163, 74, 0.35)';
+        ctx.strokeStyle = 'rgba(22, 163, 74, 0.8)';
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(polygon.points[0].x, polygon.points[0].y);
         polygon.points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
@@ -525,13 +537,13 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
           
           // Draw vertices
           ctx.setLineDash([]);
-          const vertexSize = 8;
+          const vertexSize = 12;
           polygon.points.forEach((point, index) => {
-            ctx.fillStyle = 'white';
-            ctx.strokeStyle = '#2563EB';
-            ctx.lineWidth = 1.5;
-            ctx.fillRect(point.x - vertexSize/2, point.y - vertexSize/2, vertexSize, vertexSize);
-            ctx.strokeRect(point.x - vertexSize/2, point.y - vertexSize/2, vertexSize, vertexSize);
+        ctx.fillStyle = 'white';
+        ctx.strokeStyle = '#16A34A';
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(point.x - vertexSize/2, point.y - vertexSize/2, vertexSize, vertexSize);
+        ctx.strokeRect(point.x - vertexSize/2, point.y - vertexSize/2, vertexSize, vertexSize);
           });
         }
         
@@ -545,8 +557,8 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
       ctx.globalAlpha = 1;
       
       // Draw lines
-      ctx.strokeStyle = '#2563EB';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#16A34A';
+      ctx.lineWidth = 4;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
       ctx.moveTo(tempPolygon[0].x, tempPolygon[0].y);
@@ -554,7 +566,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
       ctx.lineTo(liveMousePos.x, liveMousePos.y);
       if (tempPolygon.length >= 2) {
         ctx.setLineDash([4, 6]);
-        ctx.strokeStyle = 'rgba(37, 99, 235, 0.35)';
+        ctx.strokeStyle = 'rgba(22, 163, 74, 0.35)';
         ctx.lineTo(tempPolygon[0].x, tempPolygon[0].y);
       }
       ctx.stroke();
@@ -564,7 +576,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
       tempPolygon.forEach(p => {
         ctx.beginPath();
         ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
-        ctx.fillStyle = '#2563EB';
+        ctx.fillStyle = '#16A34A';
         ctx.fill();
         ctx.strokeStyle = 'white';
         ctx.lineWidth = 1.5;
@@ -576,13 +588,13 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
         const firstPt = tempPolygon[0];
         ctx.beginPath();
         ctx.arc(firstPt.x, firstPt.y, 10, 0, 2 * Math.PI);
-        ctx.strokeStyle = 'rgba(37, 99, 235, 0.3)';
+        ctx.strokeStyle = 'rgba(22, 163, 74, 0.3)';
         ctx.lineWidth = 3;
         ctx.stroke();
         
         ctx.beginPath();
         ctx.arc(firstPt.x, firstPt.y, 8, 0, 2 * Math.PI);
-        ctx.strokeStyle = '#2563EB';
+        ctx.strokeStyle = '#16A34A';
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }
@@ -596,7 +608,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   }, [drawCanvas]);
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-[100] p-4 pt-19 text-sm select-none" style={{ fontFamily: 'Inter, system-ui, sans-serif', backgroundColor: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(12px)' }}>
+    <div className="fixed inset-0 flex items-start justify-center z-[100] p-4 pt-20 text-sm select-none" style={{ fontFamily: 'Inter, system-ui, sans-serif', backgroundColor: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(12px)' }}>
       <style>{`
         @keyframes slide-down {
           from { opacity:0; transform: translateY(-8px); }
@@ -805,12 +817,25 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
                       canvas.width = img.width;
                       canvas.height = img.height;
                       
-                      const availableWidth = window.innerWidth * 0.7;
-                      const availableHeight = window.innerHeight * 0.7;
-                      const scaleX = availableWidth / img.width;
-                      const scaleY = availableHeight / img.height;
-                      const initialZoom = Math.min(Math.min(scaleX, scaleY), 2.0);
-                      setZoom(initialZoom);
+                      // Use actual container dimensions for proper fit
+                      const container = containerRef.current;
+                      if (container) {
+                        const rect = container.getBoundingClientRect();
+                        const availableWidth = rect.width - 48; // account for p-6 padding
+                        const availableHeight = rect.height - 48;
+                        const scaleX = availableWidth / img.width;
+                        const scaleY = availableHeight / img.height;
+                        const initialZoom = Math.min(Math.min(scaleX, scaleY), 1.5);
+                        setZoom(initialZoom);
+                      } else {
+                        // Fallback to conservative estimate
+                        const availableWidth = Math.min(1000, window.innerWidth - 100);
+                        const availableHeight = Math.min(600, window.innerHeight - 300);
+                        const scaleX = availableWidth / img.width;
+                        const scaleY = availableHeight / img.height;
+                        const initialZoom = Math.min(Math.min(scaleX, scaleY), 1.5);
+                        setZoom(initialZoom);
+                      }
                       setPanOffset({ x: 0, y: 0 });
                       
                       drawCanvas();

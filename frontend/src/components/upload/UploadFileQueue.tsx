@@ -18,6 +18,7 @@ interface UploadFileQueueProps {
 // Simple canvas component that draws the image + valid region overlay
 function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; validRegionPoints: any; alt: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  console.log('ThumbnailWithRegion got validRegionPoints:', validRegionPoints);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -40,17 +41,19 @@ function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; val
         const raw = Array.isArray(validRegionPoints)
           ? validRegionPoints
           : validRegionPoints.simplifiedPoints || validRegionPoints.points || [];
+        console.log('ThumbnailWithRegion raw points:', raw);
         points = raw.map((p: any) => ({
           x: typeof p.x === "number" && p.x <= 1 ? p.x * 96 : p.x,
           y: typeof p.y === "number" && p.y <= 1 ? p.y * 96 : p.y,
         }));
+        console.log('ThumbnailWithRegion scaled points:', points);
 
         if (points.length >= 2) {
           ctx.save();
-          ctx.strokeStyle = "rgba(37, 99, 235, 0.9)";
+          ctx.strokeStyle = "rgba(22, 163, 74, 0.9)";
           ctx.lineWidth = 2;
           ctx.setLineDash([3, 2]);
-          ctx.fillStyle = "rgba(37, 99, 235, 0.25)";
+          ctx.fillStyle = "rgba(22, 163, 74, 0.25)";
           ctx.beginPath();
           ctx.moveTo(points[0].x, points[0].y);
           for (let i = 1; i < points.length; i++) {
@@ -164,10 +167,26 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   };
 
   const handleValidRegionSave = (points: any) => {
+    console.log('ValidRegionEditor returned points:', points);
+    // Store in the format expected by backend: { points, simplifiedPoints }
+    const regionData = {
+      points: points,
+      simplifiedPoints: points
+    };
     setEditDraft({
       ...editDraft,
-      valid_region_points: points,
+      valid_region_points: regionData,
     });
+    // Immediately save to staged array
+    if (editingIndex != null) {
+      const copy = [...staged];
+      copy[editingIndex] = {
+        ...copy[editingIndex],
+        valid_region_points: regionData,
+      };
+      setStaged(copy);
+      console.log('Updated staged array:', copy);
+    }
     setIsValidRegionEditorOpen(false);
   };
 
@@ -475,6 +494,15 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
           onCancel={() => setIsValidRegionEditorOpen(false)}
           onDelete={() => {
             setEditDraft({ ...editDraft, valid_region_points: null });
+            // Immediately save to staged array
+            if (editingIndex != null) {
+              const copy = [...staged];
+              copy[editingIndex] = {
+                ...copy[editingIndex],
+                valid_region_points: null,
+              };
+              setStaged(copy);
+            }
             setIsValidRegionEditorOpen(false);
           }}
         />
