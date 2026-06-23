@@ -149,10 +149,9 @@ export default function UploadPage() {
   const [uploadStatus, setUploadStatus] = useState<"idle" | "success" | "error">("idle");
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [folderName, setFolderName] = useState("My Upload");
-  const [massCategory, setMassCategory] = useState("");
-  const [massSubcategory, setMassSubcategory] = useState("");
   const [selectedForMass, setSelectedForMass] = useState<Set<number>>(new Set());
   const [confirmUpload, setConfirmUpload] = useState(false);
+  const [duplicateFilenames, setDuplicateFilenames] = useState<string[]>([]);
 
   const handleFilesSelected = (newFiles: File[]) => {
     setFiles((prev) => [...prev, ...newFiles]);
@@ -170,8 +169,6 @@ export default function UploadPage() {
       newIndices.add(i);
     }
     setSelectedForMass(newIndices);
-    setMassCategory("");
-    setMassSubcategory("");
   };
 
   const handleUpload = async () => {
@@ -209,6 +206,7 @@ export default function UploadPage() {
     setUploading(true);
     setUploadStatus("idle");
     setValidationMessage(null);
+    setDuplicateFilenames([]);
     try {
       const formData = new FormData();
       formData.append("folderName", folderName);
@@ -231,10 +229,15 @@ export default function UploadPage() {
 
       const data = await res.json();
       if (data.ok) {
-        setUploadStatus("success");
-        setTimeout(() => {
-          clearAll();
-        }, 1000);
+        if (data.duplicates && data.duplicates.length > 0) {
+          setDuplicateFilenames(data.duplicates);
+          setUploadStatus("error");
+        } else {
+          setUploadStatus("success");
+          setTimeout(() => {
+            clearAll();
+          }, 1000);
+        }
       } else {
         setUploadStatus("error");
       }
@@ -247,27 +250,6 @@ export default function UploadPage() {
         setUploadStatus("idle");
       }, 3500);
     }
-  };
-
-  const massSubcategoryOptions = useMemo(() => {
-    if (!massCategory) return [];
-    return getLibrarySubcategories(massCategory);
-  }, [massCategory]);
-
-  const handleMassApply = () => {
-    if (!massCategory) return;
-    setStaged((prev) =>
-      prev.map((s, idx) => {
-        if (!selectedForMass.has(idx)) return s;
-        return {
-          ...s,
-          category: massCategory,
-          subcategory: massSubcategory,
-        };
-      })
-    );
-    setMassCategory("");
-    setMassSubcategory("");
   };
 
   const toggleSelectAll = () => {
@@ -296,87 +278,7 @@ export default function UploadPage() {
       <div className="space-y-6">
         <UploadDropZone onFilesSelected={handleFilesSelected} />
 
-        {staged.length > 0 && (
-          <div className="bg-panel rounded-2xl border border-border p-5 shadow-card">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-sm font-semibold text-ink">Mass Assign Category</span>
-            </div>
-
-            <div className="mb-3 max-h-40 overflow-y-auto border border-border rounded-lg bg-white">
-              <div className="flex items-center gap-2 p-2 border-b border-border bg-gray-50">
-                <input
-                  type="checkbox"
-                  checked={selectedForMass.size === staged.length}
-                  onChange={toggleSelectAll}
-                  className="rounded border-gray-300"
-                />
-                <span className="text-xs font-medium text-muted">Select All</span>
-              </div>
-              {staged.map((s, idx) => (
-                <label key={idx} className="flex items-center gap-2 p-2 hover:bg-gray-50 cursor-pointer border-b border-border last:border-b-0">
-                  <input
-                    type="checkbox"
-                    checked={selectedForMass.has(idx)}
-                    onChange={() => toggleSelect(idx)}
-                    className="rounded border-gray-300"
-                  />
-                  <span className="text-xs text-ink truncate flex-1">#{idx + 1} {s.file.name}</span>
-                  {s.category && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/10 text-accent font-medium">
-                      {s.category}
-                    </span>
-                  )}
-                </label>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-muted font-medium">Category</label>
-                <select
-                  className="w-36 p-2 border border-border rounded-lg text-xs bg-white"
-                  value={massCategory}
-                  onChange={(e) => {
-                    setMassCategory(e.target.value);
-                    setMassSubcategory("");
-                  }}
-                >
-                  <option value="">Select category</option>
-                  {LIBRARIES.map((cat) => (
-                    <option key={cat.slug} value={cat.slug}>{cat.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-muted font-medium">Subcategory</label>
-                <select
-                  className="w-36 p-2 border border-border rounded-lg text-xs bg-white"
-                  value={massSubcategory}
-                  onChange={(e) => setMassSubcategory(e.target.value)}
-                  disabled={!massCategory}
-                >
-                  <option value="">None</option>
-                  {massSubcategoryOptions.length > 0 ? (
-                    massSubcategoryOptions.map((sub: any) => (
-                      <option key={sub.slug} value={sub.name}>{sub.name}</option>
-                    ))
-                  ) : (
-                    massCategory ? <option value="General">General</option> : null
-                  )}
-                </select>
-              </div>
-              <button
-                onClick={handleMassApply}
-                disabled={!massCategory || selectedForMass.size === 0}
-                className="px-4 py-2 rounded-xl bg-accent text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-              >
-                Apply to Selected ({selectedForMass.size})
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="bg-panel rounded-2xl border border-border p-6 shadow-card">
+        <div className="bg-panel rounded-2xl border border-border p-8 shadow-card">
           <button
             onClick={handleUpload}
             disabled={uploading || staged.length === 0}
@@ -393,10 +295,13 @@ export default function UploadPage() {
           </button>
 
           {staged.length === 0 && (
-            <div className="mt-4 text-center">
-              <p className="text-sm font-medium text-muted">No files selected</p>
-              <p className="text-xs text-muted/70 mt-1">
-                Drag a folder or files into the dropzone to queue them for upload
+            <div className="mt-6 py-8 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-surface border-2 border-dashed border-border flex items-center justify-center">
+                <UploadIcon size={28} className="text-muted/40" />
+              </div>
+              <p className="text-lg font-semibold text-muted">No files selected</p>
+              <p className="text-sm text-muted/60 mt-2 max-w-sm mx-auto leading-relaxed">
+                Drag and drop a folder or individual image files into the dropzone above to queue them for upload
               </p>
             </div>
           )}
@@ -408,6 +313,22 @@ export default function UploadPage() {
               <AlertTriangle size={14} />
             </div>
             <span className="text-sm font-medium">{validationMessage}</span>
+          </div>
+        )}
+
+        {duplicateFilenames.length > 0 && (
+          <div className="fixed bottom-24 right-6 z-50 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex items-start gap-3 shadow-card animate-slide-up max-w-md">
+            <div className="w-5 h-5 bg-amber-500 rounded-full text-white flex items-center justify-center flex-shrink-0 mt-0.5">
+              <AlertTriangle size={14} />
+            </div>
+            <div className="text-sm font-medium">
+              <p className="mb-1">Already exists in library:</p>
+              <ul className="list-disc list-inside text-xs">
+                {duplicateFilenames.map((f, i) => (
+                  <li key={i}>{f}</li>
+                ))}
+              </ul>
+            </div>
           </div>
         )}
 
@@ -468,7 +389,7 @@ export default function UploadPage() {
         </div>
       )}
 
-      {uploadStatus === "error" && (
+      {uploadStatus === "error" && duplicateFilenames.length === 0 && (
         <div className="fixed bottom-6 right-6 z-50 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl p-4 flex items-center gap-3 shadow-card animate-slide-up">
           <div className="w-5 h-5 bg-rose-500 rounded-full text-white flex items-center justify-center flex-shrink-0">
             <AlertCircle size={14} />

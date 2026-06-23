@@ -1,12 +1,12 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import ValidRegionEditor from "../ValidRegionEditor";
-import { Trash2, Edit3 } from "lucide-react";
+import { Trash2, Edit3, CheckSquare } from "lucide-react";
 import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName } from "../../config/categories";
 
 interface UploadFileQueueProps {
   files: File[];
   staged: any[];
-  setStaged: (s: any[]) => void;
+  setStaged: React.Dispatch<React.SetStateAction<any[]>>;
   setFiles: (files: File[]) => void;
   uploading: boolean;
   handleUpload: () => void;
@@ -84,6 +84,26 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<any>(null);
   const [isValidRegionEditorOpen, setIsValidRegionEditorOpen] = useState(false);
+
+  // Mass assign state (for the top row dropdowns)
+  const [massCategory, setMassCategory] = useState("");
+  const [massSubcategory, setMassSubcategory] = useState("");
+
+  const massSubcategoryOptions = useMemo(() => {
+    if (!massCategory) return [];
+    return getLibrarySubcategories(massCategory);
+  }, [massCategory]);
+
+  const handleMassApplyToAll = () => {
+    if (!massCategory) return;
+    setStaged((prev: any[]) =>
+      prev.map((s: any) => ({
+        ...s,
+        category: massCategory,
+        subcategory: massSubcategory,
+      }))
+    );
+  };
 
   function openEdit(idx: number) {
     setEditingIndex(idx);
@@ -198,6 +218,53 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
       <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-nav flex-shrink-0">
         <span className="text-sm font-semibold text-ink">Staged Items</span>
         <span className="bg-surface text-muted text-xs font-mono px-2.5 py-0.5 rounded-full border border-border">{staged.length}</span>
+      </div>
+
+      {/* Mass Assign Row - Category/Subcategory apply to all */}
+      <div className="px-5 py-3 border-b border-border bg-surface/30 flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-muted whitespace-nowrap">Mass Assign :</span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <select
+            className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
+            value={massCategory}
+            onChange={(e) => {
+              setMassCategory(e.target.value);
+              setMassSubcategory("");
+            }}
+          >
+            <option value="">Category</option>
+            {LIBRARIES.map((cat) => (
+              <option key={cat.slug} value={cat.slug}>{cat.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <select
+            className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
+            value={massSubcategory}
+            onChange={(e) => setMassSubcategory(e.target.value)}
+            disabled={!massCategory}
+          >
+            <option value="">Subcategory</option>
+            {massSubcategoryOptions.length > 0 ? (
+              massSubcategoryOptions.map((sub: any) => (
+                <option key={sub.slug} value={sub.name}>{sub.name}</option>
+              ))
+            ) : (
+              massCategory ? <option value="General">General</option> : null
+            )}
+          </select>
+        </div>
+        <button
+          onClick={handleMassApplyToAll}
+          disabled={!massCategory}
+          className="px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity flex items-center gap-1.5"
+        >
+          <CheckSquare size={14} />
+          Apply to All
+        </button>
       </div>
 
       <div className="overflow-x-auto">

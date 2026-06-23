@@ -417,8 +417,8 @@ export default function CustomizationPage() {
   };
 
   const handleAddObject = (item: Item) => {
-    let width = item.width ? Math.round(item.width) : 100;
-    let height = item.height ? Math.round(item.height) : 100;
+    let width = item.width || 100;
+    let height = item.height || 100;
 
     let itemOutline = null;
     if (item.polygon_json) {

@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from "react";
 import { RotateCw, GripVertical } from "lucide-react";
 import type { SceneObject } from "../../types/customization";
 import { getTransformedValidRegion } from "../../lib/customizationHelpers";
-import { drawXRayComposite } from "../../lib/xrayRenderer";
+import { drawXRayComposite, imgCache } from "../../lib/xrayRenderer";
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
@@ -48,8 +48,13 @@ export default function CanvasArea({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    // Set canvas size to bag dimensions if available
+    if (bagImageDimensions) {
+      canvas.width = bagImageDimensions.width;
+      canvas.height = bagImageDimensions.height;
+    }
     drawXRayComposite(canvas, objects, onImagesLoadedRef.current);
-  }, [objects]);
+  }, [objects, bagImageDimensions]);
 
   onImagesLoadedRef.current = () => {
     const canvas = canvasRef.current;
@@ -68,25 +73,25 @@ export default function CanvasArea({
         ref={canvasDivRef}
         className="bg-white border border-border rounded-2xl shadow-panel relative select-none overflow-hidden transition-transform duration-75"
         style={{
-          width: CANVAS_W,
-          height: CANVAS_H,
+          width: bagImageDimensions ? bagImageDimensions.width : CANVAS_W,
+          height: bagImageDimensions ? bagImageDimensions.height : CANVAS_H,
           transform: `scale(${zoom})`,
           transformOrigin: "center",
         }}
       >
         <svg className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-30">
-          {Array.from({ length: CANVAS_W / 20 + 1 }).map((_, i) => (
-            <line key={`v-${i}`} x1={i * 20} y1={0} x2={i * 20} y2={CANVAS_H} stroke="#E5E7EB" strokeWidth={1} />
+          {Array.from({ length: (bagImageDimensions ? bagImageDimensions.width : CANVAS_W) / 20 + 1 }).map((_, i) => (
+            <line key={`v-${i}`} x1={i * 20} y1={0} x2={i * 20} y2={bagImageDimensions ? bagImageDimensions.height : CANVAS_H} stroke="#E5E7EB" strokeWidth={1} />
           ))}
-          {Array.from({ length: CANVAS_H / 20 + 1 }).map((_, i) => (
-            <line key={`h-${i}`} x1={0} y1={i * 20} x2={CANVAS_W} y2={i * 20} stroke="#E5E7EB" strokeWidth={1} />
+          {Array.from({ length: (bagImageDimensions ? bagImageDimensions.height : CANVAS_H) / 20 + 1 }).map((_, i) => (
+            <line key={`h-${i}`} x1={0} y1={i * 20} x2={bagImageDimensions ? bagImageDimensions.width : CANVAS_W} y2={i * 20} stroke="#E5E7EB" strokeWidth={1} />
           ))}
         </svg>
 
         <canvas
           ref={canvasRef}
-          width={CANVAS_W}
-          height={CANVAS_H}
+          width={bagImageDimensions ? bagImageDimensions.width : CANVAS_W}
+          height={bagImageDimensions ? bagImageDimensions.height : CANVAS_H}
           className="absolute top-0 left-0 w-full h-full pointer-events-none"
           style={{ zIndex: 1 }}
         />
@@ -116,7 +121,14 @@ export default function CanvasArea({
           .filter((obj) => obj.library !== "bag")
           .map((obj) => {
             const isSelected = selectedObjectId === obj.id;
-            const transform = obj.transform;
+            // Get the image to check natural dimensions
+            let objWidth = obj.transform.width;
+            let objHeight = obj.transform.height;
+            const img = imgCache.get(`${IMAGE_BASE_URL}${obj.filepath}`);
+            if (img && img.naturalWidth > 0) {
+              objWidth = img.naturalWidth;
+              objHeight = img.naturalHeight;
+            }
 
             return (
               <React.Fragment key={obj.id}>
@@ -125,11 +137,11 @@ export default function CanvasArea({
                     isSelected ? "z-30" : "z-20"
                   }`}
                   style={{
-                    left: transform.x - transform.width / 2,
-                    top: transform.y - transform.height / 2,
-                    width: transform.width,
-                    height: transform.height,
-                    transform: `rotate(${transform.rotation}deg)`,
+                    left: obj.transform.x - objWidth / 2,
+                    top: obj.transform.y - objHeight / 2,
+                    width: objWidth,
+                    height: objHeight,
+                    transform: `rotate(${obj.transform.rotation}deg)`,
                     cursor: "move",
                   }}
                   onMouseDown={(e) => handleMouseDown(e, obj)}
@@ -140,9 +152,9 @@ export default function CanvasArea({
                 </div>
 
                 {isSelected && (() => {
-                  const angleRad = (transform.rotation * Math.PI) / 180;
-                  const topCenterX = transform.x + (transform.height / 2) * Math.sin(angleRad);
-                  const topCenterY = transform.y - (transform.height / 2) * Math.cos(angleRad);
+                  const angleRad = (obj.transform.rotation * Math.PI) / 180;
+                  const topCenterX = obj.transform.x + (objHeight / 2) * Math.sin(angleRad);
+                  const topCenterY = obj.transform.y - (objHeight / 2) * Math.cos(angleRad);
 
                   return (
                     <div
@@ -169,7 +181,7 @@ export default function CanvasArea({
                   <div
                     className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-panel/90 border border-border rounded-md px-2 py-0.5 text-[10px] font-semibold text-ink whitespace-nowrap pointer-events-none shadow-card z-40"
                     style={{
-                      left: transform.x,
+                      left: obj.transform.x,
                     }}
                   >
                     {obj.name}

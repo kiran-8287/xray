@@ -22,6 +22,8 @@ export default function ItemRow({
 }: ItemRowProps) {
   const config = getCategoryConfig(item.category);
 
+  const displayName = item.name.replace(/\.[^.]+$/i, "");
+
   return (
     <tr
       onClick={onOpen}
@@ -52,7 +54,7 @@ export default function ItemRow({
           />
         </div>
       </td>
-      <td className="px-5 py-3 text-sm font-semibold text-ink">{item.name}</td>
+      <td className="px-5 py-3 text-sm font-semibold text-ink">{displayName}</td>
       <td className="px-5 py-3 text-xs font-mono text-muted">{item.filename}</td>
       <td className="px-5 py-3">
         <span className={`inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-md border ${config.bg} ${config.text} ${config.border}`}>

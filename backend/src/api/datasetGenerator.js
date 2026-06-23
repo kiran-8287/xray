@@ -22,6 +22,19 @@ export async function generateDataset(payload, exportId, outDir) {
 
   // 1. Check if this is a single custom workspace layout export
   if (payload.objects && Array.isArray(payload.objects)) {
+    const bagObject = payload.objects.find(obj => obj.library === 'bag');
+    let bagOrigin = { x: 0, y: 0 }; // default origin
+    if (bagObject) {
+      const bagCorners = getRectCorners(
+        { x: bagObject.transform.x, y: bagObject.transform.y },
+        { width: bagObject.transform.width, height: bagObject.transform.height },
+        bagObject.transform.rotation
+      );
+      // Find leftmost point of the bag as origin
+      const origin = bagCorners.reduce((min, point) => point.x < min.x ? point : min, bagCorners[0]);
+      bagOrigin = { x: origin.x, y: origin.y };
+    }
+
     const pngBuffer = await renderSceneAsync(payload.objects, 800, 600);
     const filename = `${exportId}.png`;
     const filepath = path.join(imagesDir, filename);
@@ -33,8 +46,16 @@ export async function generateDataset(payload, exportId, outDir) {
       filename,
       width: 800,
       height: 600,
+      bag_origin: bagOrigin, // leftmost point of the bag as coordinate origin
+      valid_region: bagObject && bagObject.valid_region_points ? bagObject.valid_region_points : null,
       objects: payload.objects.map(obj => {
         let polygon = [];
+        const objCorners = getRectCorners(
+          { x: obj.transform.x, y: obj.transform.y },
+          { width: obj.transform.width, height: obj.transform.height },
+          obj.transform.rotation
+        );
+
         if (obj.polygonOutline && obj.polygonOutline.length >= 3) {
           polygon = getTransformedPolygon(
             { x: obj.transform.x, y: obj.transform.y },
@@ -43,11 +64,7 @@ export async function generateDataset(payload, exportId, outDir) {
             obj.polygonOutline
           );
         } else {
-          polygon = getRectCorners(
-            { x: obj.transform.x, y: obj.transform.y },
-            { width: obj.transform.width, height: obj.transform.height },
-            obj.transform.rotation
-          );
+          polygon = objCorners;
         }
 
         // Calculate bounding box
@@ -58,12 +75,25 @@ export async function generateDataset(payload, exportId, outDir) {
         const minY = Math.min(...ys);
         const maxY = Math.max(...ys);
 
+        // Calculate coordinates relative to bagOrigin
+        const relativeCorners = objCorners.map(corner => ({
+          x: corner.x - bagOrigin.x,
+          y: corner.y - bagOrigin.y
+        }));
+        const relativePolygon = polygon.map(p => ({
+          x: p.x - bagOrigin.x,
+          y: p.y - bagOrigin.y
+        }));
+
         return {
           id: obj.id,
           name: obj.name,
           category: obj.library,
           pixel_value: obj.originalPixelValue,
           transform: obj.transform,
+          // Store 4 corner coordinates in both absolute and relative to bag origin
+          corners: objCorners,
+          corners_relative_to_bag: relativeCorners,
           layer: obj.layer,
           bbox: {
             x: minX,
@@ -71,7 +101,8 @@ export async function generateDataset(payload, exportId, outDir) {
             width: maxX - minX,
             height: maxY - minY
           },
-          segmentation: polygon
+          segmentation: polygon,
+          segmentation_relative_to_bag: relativePolygon
         };
       })
     };
@@ -240,12 +271,27 @@ export async function generateDataset(payload, exportId, outDir) {
     const filepath = path.join(imagesDir, filename);
     await fs.writeFile(filepath, pngBuffer);
 
+    // Get bag origin
+    let bagOrigin = { x: 0, y: 0 };
+    const currentBagObject = sceneObjects.find(obj => obj.library === 'bag');
+    if (currentBagObject) {
+      const bagCorners = getRectCorners(
+        { x: currentBagObject.transform.x, y: currentBagObject.transform.y },
+        { width: currentBagObject.transform.width, height: currentBagObject.transform.height },
+        currentBagObject.transform.rotation
+      );
+      const origin = bagCorners.reduce((min, point) => point.x < min.x ? point : min, bagCorners[0]);
+      bagOrigin = { x: origin.x, y: origin.y };
+    }
+
     // Create JSON annotation metadata
     const annotationData = {
       image_id: comboId,
       filename,
       width: resolutionW,
       height: resolutionH,
+      bag_origin: bagOrigin,
+      valid_region: currentBagObject && currentBagObject.valid_region_points ? currentBagObject.valid_region_points : null,
       bag: {
         id: bag.id,
         name: bag.name,
@@ -254,9 +300,15 @@ export async function generateDataset(payload, exportId, outDir) {
       has_threat: !!threat,
       threat_count: threat ? 1 : 0,
       threat_status: threat ? "threat_present" : "clean",
-      placement_validity: (threat && bagObject && threatObject) ? (isObjectInsideContainer(threatObject, bagObject) ? "valid" : "out_of_bounds") : "valid",
+      placement_validity: (threat && currentBagObject && threatObject) ? (isObjectInsideContainer(threatObject, currentBagObject) ? "valid" : "out_of_bounds") : "valid",
       objects: sceneObjects.map(obj => {
         let polygon = [];
+        const objCorners = getRectCorners(
+          { x: obj.transform.x, y: obj.transform.y },
+          { width: obj.transform.width, height: obj.transform.height },
+          obj.transform.rotation
+        );
+
         if (obj.polygonOutline && obj.polygonOutline.length >= 3) {
           polygon = getTransformedPolygon(
             { x: obj.transform.x, y: obj.transform.y },
@@ -265,11 +317,7 @@ export async function generateDataset(payload, exportId, outDir) {
             obj.polygonOutline
           );
         } else {
-          polygon = getRectCorners(
-            { x: obj.transform.x, y: obj.transform.y },
-            { width: obj.transform.width, height: obj.transform.height },
-            obj.transform.rotation
-          );
+          polygon = objCorners;
         }
 
         // Calculate bounding box
@@ -280,12 +328,24 @@ export async function generateDataset(payload, exportId, outDir) {
         const minY = Math.min(...ys);
         const maxY = Math.max(...ys);
 
+        // Calculate coordinates relative to bagOrigin
+        const relativeCorners = objCorners.map(corner => ({
+          x: corner.x - bagOrigin.x,
+          y: corner.y - bagOrigin.y
+        }));
+        const relativePolygon = polygon.map(p => ({
+          x: p.x - bagOrigin.x,
+          y: p.y - bagOrigin.y
+        }));
+
         return {
           id: obj.id,
           name: obj.name,
           category: obj.library,
           pixel_value: obj.originalPixelValue,
           transform: obj.transform,
+          corners: objCorners,
+          corners_relative_to_bag: relativeCorners,
           layer: obj.layer,
           bbox: {
             x: minX,
@@ -293,7 +353,8 @@ export async function generateDataset(payload, exportId, outDir) {
             width: maxX - minX,
             height: maxY - minY
           },
-          segmentation: polygon
+          segmentation: polygon,
+          segmentation_relative_to_bag: relativePolygon
         };
       })
     };

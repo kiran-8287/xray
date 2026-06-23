@@ -1,7 +1,7 @@
 import type { SceneObject } from "../types/customization";
 import { combinePixels, to16Bit, to8Bit } from "./xrayPhysics";
 
-const imgCache = new Map<string, HTMLImageElement>();
+export const imgCache = new Map<string, HTMLImageElement>();
 
 export function getLoadedImage(filepath: string, onLoad: () => void): HTMLImageElement | null {
   const url = `http://localhost:8080/data/library_images/${filepath}`;
@@ -75,16 +75,20 @@ export function drawXRayComposite(
     // Clear offscreen canvas
     layerCtx.clearRect(0, 0, width, height);
 
+    // Use original image dimensions
+    const imgWidth = img.naturalWidth;
+    const imgHeight = img.naturalHeight;
+
     // Draw element relative to its transform
     layerCtx.save();
     layerCtx.translate(obj.transform.x, obj.transform.y);
     layerCtx.rotate((obj.transform.rotation * Math.PI) / 180);
     layerCtx.drawImage(
       img,
-      -obj.transform.width / 2,
-      -obj.transform.height / 2,
-      obj.transform.width,
-      obj.transform.height
+      -imgWidth / 2,
+      -imgHeight / 2,
+      imgWidth,
+      imgHeight
     );
     layerCtx.restore();
 

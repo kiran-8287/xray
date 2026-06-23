@@ -5,7 +5,7 @@ import type { Item } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import SyntheticPreview from "../components/collage/SyntheticPreview";
 
-const ITEMS_PER_PAGE = 20;
+const ITEMS_PER_PAGE = 50;
 
 export default function CollagePage() {
   const navigate = useNavigate();
@@ -249,19 +249,19 @@ export default function CollagePage() {
 
       {/* Grid */}
       {combinations.length === 0 && failures.length === 0 ? (
-        <div className="text-center py-24 bg-panel rounded-2xl border border-border shadow-card">
-          <div className="w-16 h-16 bg-surface rounded-full flex items-center justify-center mx-auto mb-4 border border-border">
-            <Grid3X3 size={28} className="text-muted/40" />
+        <div className="text-center py-32 px-12 bg-panel rounded-2xl border border-border shadow-card">
+          <div className="w-20 h-20 bg-surface rounded-full flex items-center justify-center mx-auto mb-5 border-2 border-border">
+            <Grid3X3 size={34} className="text-muted/30" />
           </div>
-          <h3 className="text-base font-semibold text-ink mb-1">No scanned bags selected</h3>
-          <p className="text-sm text-muted mb-6">
-            Please go to the Library page and select bags/objects to generate combinations.
+          <h3 className="text-xl font-bold text-ink mb-2">No scanned bags selected</h3>
+          <p className="text-base text-muted mb-8 max-w-md mx-auto leading-relaxed">
+            Please go to the Library page and select bags and objects to generate layered x-ray combinations.
           </p>
           <button
             onClick={() => navigate("/library")}
-            className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover transition-all text-sm inline-flex items-center gap-1.5 cursor-pointer"
+            className="px-6 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover transition-all text-base inline-flex items-center gap-2 cursor-pointer"
           >
-            <BookOpen size={15} />
+            <BookOpen size={18} />
             Go to Library
           </button>
         </div>
@@ -326,7 +326,7 @@ export default function CollagePage() {
           {/* Combination Grid */}
           {combinations.length > 0 && (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
                 {paginatedCombinations.map((comb) => (
                   <button
                     key={comb.id}

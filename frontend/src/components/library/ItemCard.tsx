@@ -23,6 +23,78 @@ function getCategoryConfig(category: string): { bg: string; text: string; border
   return CATEGORY_MAP[normalized] || CATEGORY_MAP["non-threats"];
 }
 
+function formatDisplayName(name: string) {
+  return name.replace(/\.[^.]+$/i, "");
+}
+
+function parseValidRegionPoints(validRegionPoints: any) {
+  if (!validRegionPoints) return [];
+  const raw = typeof validRegionPoints === "string" ? JSON.parse(validRegionPoints) : validRegionPoints;
+
+  let points: any[] = [];
+  if (Array.isArray(raw)) {
+    points = raw;
+  } else if (raw && typeof raw === "object") {
+    points = raw.simplifiedPoints || raw.shapes?.[0]?.points || [];
+  }
+
+  return points
+    .map((p: any) => ({ x: Number(p.x), y: Number(p.y) }))
+    .filter((p: any) => !Number.isNaN(p.x) && !Number.isNaN(p.y));
+}
+
+function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; validRegionPoints: any; alt: string }) {
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const img = new Image();
+    img.onload = () => {
+      const size = 156;
+      canvas.width = size;
+      canvas.height = size;
+      ctx.clearRect(0, 0, size, size);
+      ctx.drawImage(img, 0, 0, size, size);
+
+      const points = parseValidRegionPoints(validRegionPoints).map((p) => ({
+        x: p.x <= 1 ? p.x * size : p.x,
+        y: p.y <= 1 ? p.y * size : p.y,
+      }));
+
+      if (points.length >= 2) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(16, 185, 129, 0.95)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.fillStyle = "rgba(16, 185, 129, 0.18)";
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
+        if (points.length > 2) ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+
+    img.src = src;
+  }, [src, validRegionPoints]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="max-w-full max-h-full object-contain"
+      title={alt}
+    />
+  );
+}
+
 interface ItemCardProps {
   item: Item;
   isSelected: boolean;
@@ -70,23 +142,31 @@ export default function ItemCard({
       </div>
 
       {/* Image Area */}
-      <div className="aspect-square bg-surface flex items-center justify-center p-4 overflow-hidden group-hover:bg-accent/4 transition-colors">
-        <img
-          src={`http://localhost:8080/data/library_images/${item.filepath}`}
-          alt={item.filename}
-          className="max-w-full max-h-full object-contain"
-          onError={(e) => {
-            const target = e.target as HTMLImageElement;
-            target.style.display = "none";
-          }}
-        />
+      <div className="relative aspect-square bg-surface flex items-center justify-center p-4 overflow-hidden group-hover:bg-accent/4 transition-colors">
+        {item.category === "bags" && item.valid_region_points && item.valid_region_points.length > 0 ? (
+          <ThumbnailWithRegion
+            src={`http://localhost:8080/data/library_images/${item.filepath}`}
+            validRegionPoints={item.valid_region_points}
+            alt={item.filename}
+          />
+        ) : (
+          <img
+            src={`http://localhost:8080/data/library_images/${item.filepath}`}
+            alt={item.filename}
+            className="max-w-full max-h-full object-contain"
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              target.style.display = "none";
+            }}
+          />
+        )}
       </div>
 
       {/* Meta Section */}
       <div className="p-3 border-t border-surface">
         <div className="flex items-center justify-between mb-1">
           <h5 className="font-semibold text-ink text-xs truncate flex-1 mr-2" title={item.name}>
-            {item.name}
+            {formatDisplayName(item.name)}
           </h5>
           {item.category === "bags" && item.valid_region_points && item.valid_region_points.length > 0 && (
             <div title="Valid region saved" className="flex-shrink-0">

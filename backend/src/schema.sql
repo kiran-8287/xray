@@ -1,7 +1,7 @@
   CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
   CREATE TABLE IF NOT EXISTS items (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id VARCHAR(255) PRIMARY KEY,
     filename VARCHAR(255) NOT NULL,
     filepath VARCHAR(255) NOT NULL,
     category VARCHAR(50) NOT NULL,
@@ -16,12 +16,12 @@
   );
 
   CREATE TABLE IF NOT EXISTS bags (
-    item_id UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    item_id VARCHAR(255) PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
     valid_region_points JSONB
   );
 
   CREATE TABLE IF NOT EXISTS threats (
-    item_id UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    item_id VARCHAR(255) PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
     threat_type VARCHAR(100),
     severity VARCHAR(50)
   );
@@ -30,14 +30,14 @@
 
   -- Generic threat/non-threat mapping tables for clearer classification
   CREATE TABLE IF NOT EXISTS threat_items (
-    item_id UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    item_id VARCHAR(255) PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
     subcategory_slug VARCHAR(100),
     threat_type VARCHAR(100),
     severity VARCHAR(50)
   );
 
   CREATE TABLE IF NOT EXISTS non_threat_items (
-    item_id UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    item_id VARCHAR(255) PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
     subcategory_slug VARCHAR(100)
   );
 
