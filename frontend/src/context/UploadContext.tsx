@@ -4,7 +4,6 @@ export interface StagedItem {
   file: File;
   category: string;
   subcategory: string;
-  name: string;
   valid_region_points?: any | null;
 }
 

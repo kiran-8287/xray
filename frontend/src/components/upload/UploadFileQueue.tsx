@@ -106,9 +106,10 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   };
 
   function openEdit(idx: number) {
-    setEditingIndex(idx);
-    setEditDraft({ ...staged[idx] });
-  }
+  setEditingIndex(idx);
+  const { name, ...rest } = staged[idx];
+  setEditDraft(rest);
+}
 
   function closeEdit(save = false) {
     if (save && editingIndex != null) {
@@ -283,7 +284,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
               <th className="text-left py-3 px-4 w-28">Image</th>
               <th className="text-left py-3 px-4">Category</th>
               <th className="text-left py-3 px-4">Subcategory</th>
-              <th className="text-left py-3 px-4">Name</th>
+              
               <th className="text-left py-3 px-4">Valid Region</th>
               <th className="text-right py-3 px-4">Actions</th>
             </tr>
@@ -345,12 +346,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       )}
                     </select>
                   </td>
-                  <td className="py-3 px-4 align-top">
-                    <span className="text-sm text-ink truncate block max-w-[200px]" title={file.name}>
-                      {s.name || file.name}
-                    </span>
-                    <span className="text-xs text-muted">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
-                  </td>
+
                   <td className="py-3 px-4 align-top">
                     {isBags ? (
                       <button
@@ -439,8 +435,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                     editDraft.category ? <option value="General">General</option> : null
                   )}
                 </select>
-                <label className="text-xs text-muted mt-2 block">Item Name</label>
-                <input className="w-full p-2 border border-border rounded mt-1" value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
+
                 {selectedCategory?.slug === "bags" ? (
                   <div className="mt-3">
                     <div className="flex items-center justify-between gap-2">

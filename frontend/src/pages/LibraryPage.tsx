@@ -125,7 +125,7 @@ export default function LibraryPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog>(null);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
-  const [editDraft, setEditDraft] = useState<{ category: string; subcategory: string; name: string } | null>(null);
+  const [editDraft, setEditDraft] = useState<{ category: string; subcategory: string } | null>(null);
   const [isItemSaving, setIsItemSaving] = useState(false);
   const [isValidRegionEditorOpen, setIsValidRegionEditorOpen] = useState(false);
   const [editingRegionItem, setEditingRegionItem] = useState<Item | null>(null);
@@ -340,7 +340,6 @@ export default function LibraryPage() {
     setEditDraft({
       category: LIBRARIES.some((lib) => lib.slug === item.category) ? item.category : normalizeCategoryName(item.category),
       subcategory: item.subcategory || "General",
-      name: item.name || item.filename,
     });
   };
 
@@ -733,15 +732,7 @@ export default function LibraryPage() {
                   </label>
                 </div>
 
-                <label className="space-y-2 text-sm">
-                  <span className="text-muted text-xs">Item name / annotation</span>
-                  <textarea
-                    value={editDraft.name}
-                    onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
-                    className="min-h-[120px] w-full rounded-3xl border border-border bg-white p-3 text-sm text-ink resize-none"
-                    placeholder="e.g. Bag containing laptop, phone, knife, and apple"
-                  />
-                </label>
+
               </div>
             </div>
             <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between bg-surface border-t border-border">

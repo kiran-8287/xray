@@ -160,7 +160,6 @@ export default function UploadPage() {
       file: f,
       category: "",
       subcategory: "",
-      name: f.name,
       valid_region_points: null,
     }));
     setStaged((prev) => [...prev, ...newStaged]);
@@ -217,7 +216,6 @@ export default function UploadPage() {
         originalname: s.file.name,
         category: s.category,
         subcategory: s.subcategory,
-        name: s.name,
         valid_region_points: s.valid_region_points || null,
       }));
       formData.append("metadata", JSON.stringify(metadata));

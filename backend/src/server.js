@@ -73,20 +73,18 @@ function safeNowStamp() {
     return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-// Helper to extract name and subcategory from filename (fallback)
+// Helper to extract subcategory from filename (fallback)
 function parseFilename(filename) {
     const nameWithoutExt = path.basename(filename, path.extname(filename));
     const parts = nameWithoutExt.split(/[_-]/);
     
     let subcategory = "General";
-    let name = nameWithoutExt;
     
     if (parts.length > 1) {
         subcategory = parts[1].charAt(0).toUpperCase() + parts[1].slice(1);
-        name = parts.slice(2).join(' ') || subcategory;
     }
     
-    return { subcategory, name: name.charAt(0).toUpperCase() + name.slice(1) };
+    return { subcategory };
 }
 
 // ------------------------------
@@ -338,30 +336,29 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
             }
 
             // Classify by filename prefix only
-            const filename = file.originalname.toLowerCase();
-            let category, subcategory, name, pixel_value;
+    const filename = file.originalname.toLowerCase();
+    let category, subcategory, pixel_value;
 
-            if (filename.startsWith("bag")) {
-                category = "bags";
-                pixel_value = 42000 + Math.floor(Math.random() * 10000);
-            } else if (filename.startsWith("threat")) {
-                category = "threats";
-                pixel_value = 10000 + Math.floor(Math.random() * 10000);
-            } else {
-                category = "non-threats";
-                pixel_value = 32767;
-            }
-            const parsed = parseFilename(file.originalname);
-            subcategory = parsed.subcategory;
-            name = parsed.name;
+    if (filename.startsWith("bag")) {
+      category = "bags";
+      pixel_value = 42000 + Math.floor(Math.random() * 10000);
+    } else if (filename.startsWith("threat")) {
+      category = "threats";
+      pixel_value = 10000 + Math.floor(Math.random() * 10000);
+    } else {
+      category = "non-threats";
+      pixel_value = 32767;
+    }
+    const parsed = parseFilename(file.originalname);
+    subcategory = parsed.subcategory;
+    const name = path.basename(file.originalname, path.extname(file.originalname));
 
-            // If metadata provided for this file, allow overrides and extra data
-            const fileMeta = metadataByName[file.originalname] || {};
-            if (fileMeta.category) {
-                category = fileMeta.category;
-            }
-            if (fileMeta.subcategory) subcategory = fileMeta.subcategory;
-            if (fileMeta.name) name = fileMeta.name;
+    // If metadata provided for this file, allow overrides and extra data
+    const fileMeta = metadataByName[file.originalname] || {};
+    if (fileMeta.category) {
+      category = fileMeta.category;
+    }
+    if (fileMeta.subcategory) subcategory = fileMeta.subcategory;
             
             // Detect actual image dimensions from the saved file
             let width = 512;
@@ -448,21 +445,21 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
 
 // Update item metadata
 app.put("/api/items/:id", async (req, res) => {
-    try {
-        const { category, subcategory, name } = req.body;
-        if (!category || !subcategory || !name) {
-            return res.status(400).json({ ok: false, error: "Missing required fields" });
-        }
-
-        const item = await updateItem(req.params.id, { category, subcategory, name });
-        if (!item) {
-            return res.status(404).json({ ok: false, error: "Item not found" });
-        }
-        res.json({ ok: true });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ ok: false, error: String(err) });
+  try {
+    const { category, subcategory } = req.body;
+    if (!category || !subcategory) {
+      return res.status(400).json({ ok: false, error: "Missing required fields" });
     }
+
+    const item = await updateItem(req.params.id, { category, subcategory });
+    if (!item) {
+      return res.status(404).json({ ok: false, error: "Item not found" });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
 });
 
 // Delete an individual item
