@@ -230,6 +230,8 @@ export default function UploadPage() {
         if (data.duplicates && data.duplicates.length > 0) {
           setDuplicateFilenames(data.duplicates);
           setUploadStatus("error");
+        } else if (data.errors && data.errors.length > 0) {
+          setUploadStatus("error");
         } else {
           setUploadStatus("success");
           setTimeout(() => {

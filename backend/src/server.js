@@ -107,6 +107,18 @@ app.post("/api/read-dump", upload.single("file"), async (req, res) => {
         const filePath = req.file.path;
         const data = ReadDump(filePath);
         
+        const itemId = path.basename(req.file.originalname, path.extname(req.file.originalname));
+        
+        // Check if item already exists
+        let existingItem = await getItemById(itemId);
+        if (existingItem) {
+            await fs.unlink(filePath); // clean up uploaded temp file
+            return res.status(409).json({ 
+                ok: false, 
+                error: `Item with ID ${itemId} already exists in the library!` 
+            });
+        }
+        
         // Store pixel data
         const pixelDataId = uuidv4();
         const pixelDataFilename = `${pixelDataId}.json`;
@@ -117,42 +129,27 @@ app.post("/api/read-dump", upload.single("file"), async (req, res) => {
         const originalFilePath = path.join(libraryImagesRoot, `${pixelDataId}${path.extname(req.file.originalname)}`);
         await fs.rename(filePath, originalFilePath);
         
-        const itemId = path.basename(req.file.originalname, path.extname(req.file.originalname));
-        
-        // Check if item already exists
-        let existingItem = await getItemById(itemId);
-        
         const width = data.high[0].length;
         const height = data.high.length;
         
-        if (existingItem) {
-            // Update existing item
-            await updateItem(itemId, {
-                pixel_data_path: pixelDataFilename,
-                original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`,
-                width,
-                height
-            });
-        } else {
-            // Create new item
-            const item = await createItem({
-                id: itemId,
-                filename: req.file.originalname,
-                filepath: `${pixelDataId}${path.extname(req.file.originalname)}`,
-                category: "bags",
-                subcategory: "General",
-                name: itemId,
-                pixel_value: 42000 + Math.floor(Math.random() * 10000),
-                width,
-                height,
-                pixel_data_path: pixelDataFilename,
-                original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`
-            });
-            await createBag({
-                item_id: item.id,
-                valid_region_points: null
-            });
-        }
+        // Create new item
+        const item = await createItem({
+            id: itemId,
+            filename: req.file.originalname,
+            filepath: `${pixelDataId}${path.extname(req.file.originalname)}`,
+            category: "bags",
+            subcategory: "General",
+            name: itemId,
+            pixel_value: 42000 + Math.floor(Math.random() * 10000),
+            width,
+            height,
+            pixel_data_path: pixelDataFilename,
+            original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`
+        });
+        await createBag({
+            item_id: item.id,
+            valid_region_points: null
+        });
         
         res.json({ ok: true, data, pixelDataPath, itemId });
     } catch (error) {
@@ -170,6 +167,18 @@ app.post("/api/read-tip", upload.single("file"), async (req, res) => {
         const filePath = req.file.path;
         const data = readTip(filePath);
         
+        const itemId = path.basename(req.file.originalname, path.extname(req.file.originalname));
+        
+        // Check if item already exists
+        let existingItem = await getItemById(itemId);
+        if (existingItem) {
+            await fs.unlink(filePath); // clean up uploaded temp file
+            return res.status(409).json({ 
+                ok: false, 
+                error: `Item with ID ${itemId} already exists in the library!` 
+            });
+        }
+        
         // Store pixel data
         const pixelDataId = uuidv4();
         const pixelDataFilename = `${pixelDataId}.json`;
@@ -180,47 +189,32 @@ app.post("/api/read-tip", upload.single("file"), async (req, res) => {
         const originalFilePath = path.join(libraryImagesRoot, `${pixelDataId}${path.extname(req.file.originalname)}`);
         await fs.rename(filePath, originalFilePath);
         
-        const itemId = path.basename(req.file.originalname, path.extname(req.file.originalname));
-        
-        // Check if item already exists
-        let existingItem = await getItemById(itemId);
-        
         const width = data.high_raw[0].length;
         const height = data.high_raw.length;
         
-        if (existingItem) {
-            // Update existing item
-            await updateItem(itemId, {
-                pixel_data_path: pixelDataFilename,
-                original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`,
-                width,
-                height
-            });
-        } else {
-            // Create new item
-            const item = await createItem({
-                id: itemId,
-                filename: req.file.originalname,
-                filepath: `${pixelDataId}${path.extname(req.file.originalname)}`,
-                category: "threats",
-                subcategory: "General",
-                name: itemId,
-                pixel_value: 10000 + Math.floor(Math.random() * 10000),
-                width,
-                height,
-                pixel_data_path: pixelDataFilename,
-                original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`
-            });
-            await createThreat({
-                item_id: item.id,
-                threat_type: null,
-                severity: null
-            });
-            await createNonThreatItem({
-                item_id: item.id,
-                subcategory_slug: "general"
-            });
-        }
+        // Create new item
+        const item = await createItem({
+            id: itemId,
+            filename: req.file.originalname,
+            filepath: `${pixelDataId}${path.extname(req.file.originalname)}`,
+            category: "threats",
+            subcategory: "General",
+            name: itemId,
+            pixel_value: 10000 + Math.floor(Math.random() * 10000),
+            width,
+            height,
+            pixel_data_path: pixelDataFilename,
+            original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`
+        });
+        await createThreat({
+            item_id: item.id,
+            threat_type: null,
+            severity: null
+        });
+        await createNonThreatItem({
+            item_id: item.id,
+            subcategory_slug: "general"
+        });
         
         res.json({ ok: true, data, pixelDataPath, itemId });
     } catch (error) {
@@ -608,7 +602,8 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
             ok: true, 
             message: errors.length > 0 ? "Some files processed, some had errors" : "Files uploaded successfully!", 
             itemsProcessed: processed.length,
-            errors 
+            errors,
+            duplicates: errors.map(err => err.filename)
         });
     } catch (err) {
         console.error(err);

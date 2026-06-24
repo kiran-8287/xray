@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Database, Loader2, CheckCircle2, XCircle, Grid3X3, BookOpen, ChevronLeft, ChevronRight, AlertTriangle, List, X, FolderOpen } from "lucide-react";
+import { Plus, Loader2, CheckCircle2, XCircle, Grid3X3, BookOpen, ChevronLeft, ChevronRight, AlertTriangle, List, X, FolderOpen } from "lucide-react";
 import type { Item } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import SyntheticPreview from "../components/collage/SyntheticPreview";
@@ -62,13 +62,6 @@ export default function CollagePage() {
   const [currentPage, setCurrentPage] = useState(0);
   const [showLogs, setShowLogs] = useState(false);
 
-  const [exportState, setExportState] = useState<{
-    status: "idle" | "generating" | "success" | "error";
-    message: string;
-    datasetId?: string;
-    outputDir?: string;
-  }>({ status: "idle", message: "" });
-  
   const [bulkSaveState, setBulkSaveState] = useState<{
     status: "idle" | "saving" | "success" | "error";
     message: string;
@@ -132,44 +125,6 @@ export default function CollagePage() {
     queryParams.set("precomputed", comb.id);
 
     navigate(`/customize?${queryParams.toString()}`);
-  };
-
-  const handleExportDataset = async () => {
-    setExportState({ status: "generating", message: "Generating high-resolution PNG scans & YOLO annotations..." });
-    try {
-      const response = await fetch("http://localhost:8080/api/dataset/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          combinations: combinations.map(c => ({
-            id: c.id,
-            bag: c.bag,
-            threat: c.threat,
-            others: c.others
-          })),
-          resolutionWidth: 800,
-          resolutionHeight: 600
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to generate dataset");
-      }
-
-      const data = await response.json();
-      setExportState({
-        status: "success",
-        message: `Successfully generated ${data.files.length} scans!`,
-        datasetId: data.datasetId,
-        outputDir: data.outputDir
-      });
-    } catch (err) {
-      console.error(err);
-      setExportState({
-        status: "error",
-        message: "Failed to generate dataset. Please verify backend is running."
-      });
-    }
   };
 
   const handleBulkSave = async () => {
@@ -337,9 +292,6 @@ export default function CollagePage() {
       <div className="flex items-end justify-between mb-8 border-l-4 border-accent pl-4">
         <div>
           <h2 className="text-3xl font-bold text-ink tracking-tight">Collage Generator</h2>
-          <p className="text-sm text-muted mt-1">
-            {selectedBags.length} bag{selectedBags.length !== 1 ? "s" : ""}, {selectedThreats.length} threat{selectedThreats.length !== 1 ? "s" : ""}, {selectedOthers.length} non-threat{selectedOthers.length !== 1 ? "s" : ""} selected
-          </p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -355,18 +307,6 @@ export default function CollagePage() {
             )}
           </button>
           <button
-            onClick={handleExportDataset}
-            disabled={exportState.status === "generating" || combinations.length === 0}
-            className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-500 shadow-btn hover:shadow-btn-hover hover:opacity-95 transition-all flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Export Dataset"
-          >
-            {exportState.status === "generating" ? (
-              <Loader2 className="animate-spin" size={15} />
-            ) : (
-              <Database size={15} />
-            )}
-          </button>
-          <button
             onClick={() => navigate("/library")}
             className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover hover:opacity-95 transition-all flex items-center gap-1.5 text-sm"
             title="New Collage"
@@ -375,45 +315,6 @@ export default function CollagePage() {
           </button>
         </div>
       </div>
-
-      {/* Export Status Banner */}
-      {exportState.status !== "idle" && (
-        <div className={`mb-6 p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all duration-300 ${
-          exportState.status === "generating"
-            ? "bg-accent/5 border-accent/20 text-accent animate-pulse"
-            : exportState.status === "success"
-            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-            : "bg-rose-50 border-rose-200 text-rose-800"
-        }`}>
-          <div className="flex items-center gap-3">
-            {exportState.status === "generating" && (
-              <Loader2 className="animate-spin text-accent" size={24} />
-            )}
-            {exportState.status === "success" && (
-              <CheckCircle2 className="text-emerald-600" size={24} />
-            )}
-            {exportState.status === "error" && (
-              <XCircle className="text-rose-600" size={24} />
-            )}
-            <div>
-              <p className="font-semibold text-sm">{exportState.message}</p>
-              {exportState.status === "success" && exportState.outputDir && (
-                <p className="text-xs text-emerald-600 font-mono mt-1 select-all">
-                  Saved at: {exportState.outputDir}
-                </p>
-              )}
-            </div>
-          </div>
-          {exportState.status !== "generating" && (
-            <button
-              onClick={() => setExportState({ status: "idle", message: "" })}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 transition-colors"
-            >
-              Dismiss
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Bulk Save Status Banner */}
       {bulkSaveState.status !== "idle" && (
@@ -471,16 +372,23 @@ export default function CollagePage() {
         <>
           {/* Summary bar with logs toggle */}
           <div className="flex items-center justify-between mb-4">
-            <p className="text-xs text-muted">
-              {combinations.length > 0
-                ? `Showing ${currentPage * ITEMS_PER_PAGE + 1}–${Math.min((currentPage + 1) * ITEMS_PER_PAGE, combinations.length)} of ${combinations.length} combinations`
-                : "0 combinations generated"}
-              {failures.length > 0 && (
-                <span className="ml-2 text-rose-600 font-medium">
-                  · {failures.length} failure{failures.length !== 1 ? "s" : ""}
-                </span>
+            <div className="text-xs text-muted">
+              {combinations.length > 0 && (
+                <p>
+                  {selectedBags.length} bag{selectedBags.length !== 1 ? "s" : ""}, {selectedThreats.length} threat{selectedThreats.length !== 1 ? "s" : ""}, {selectedOthers.length} non-threat{selectedOthers.length !== 1 ? "s" : ""} selected
+                </p>
               )}
-            </p>
+              <p>
+                {combinations.length > 0
+                  ? `Showing ${currentPage * ITEMS_PER_PAGE + 1}–${Math.min((currentPage + 1) * ITEMS_PER_PAGE, combinations.length)} of ${combinations.length} combinations`
+                  : "0 combinations generated"}
+                {failures.length > 0 && (
+                  <span className="ml-2 text-rose-600 font-medium">
+                    · {failures.length} failure{failures.length !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </p>
+            </div>
             {failures.length > 0 && (
               <button
                 onClick={() => setShowLogs(!showLogs)}
