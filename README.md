@@ -1,9 +1,5 @@
 # Synthetic X-Ray Bag Scan Generation System
 
-## 📚 Documentation
-- [Docker Setup Guide](./DOCKER_GUIDE.md) - Complete step-by-step guide for using Docker
-- [Windows Compatibility Fixes](./WINDOWS_FIX.md) - Windows-specific fixes and troubleshooting
-
 ## Quick Start
 
 ### Prerequisites
@@ -15,7 +11,7 @@ No admin/sudo privileges or build tools (Python, C++ compiler) required. All dep
 ---
 
 ### Option 1: With Docker (Recommended)
-See the [Docker Setup Guide](./DOCKER_GUIDE.md) for detailed instructions, or use the quick start:
+Use the bootstrap scripts for one-command setup:
 
 ```bash
 # Clone the project
@@ -75,7 +71,7 @@ npm run dev
 ## What's Included
 
 - **No PostgreSQL**: Uses JSON files for all data storage
-- **Portable Docker setup**: Run without installing Node.js on your system (see [Docker Guide](./DOCKER_GUIDE.md))
+- **Portable Docker setup**: Run without installing Node.js on your system
 - **Cross-platform scripts**: `bootstrap.sh` (Linux/Mac) and `bootstrap.bat` (Windows) for one-command setup
 - **No native modules**: Replaced `canvas` with pure-JS `jimp` — no Python/C++ build tools needed
 - **No admin/sudo required**: All dependencies install without elevated privileges
