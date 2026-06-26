@@ -167,6 +167,7 @@ class WorkerPool {
         
         // Return worker to idle
         this.idle.add(worker);
+        console.log(`[workerPool] Worker finished task. Idle: ${this.idle.size}, Queue: ${this.queue.length}`);
         
         // Process the queue if there are pending tasks
         if (this.queue.length > 0) {
@@ -206,10 +207,13 @@ class WorkerPool {
    */
   _checkDrain() {
     if (this.idle.size === this.size && this.queue.length === 0) {
+      console.log(`[workerPool] DRAINED — all ${this.size} workers idle, queue empty`);
       // Resolve all pending drain promises
       const resolvers = this._drainResolvers;
       this._drainResolvers = [];
       resolvers.forEach(resolve => resolve());
+    } else {
+      console.log(`[workerPool] Not drained — idle: ${this.idle.size}/${this.size}, queue: ${this.queue.length}`);
     }
   }
 }

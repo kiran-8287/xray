@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { CheckCircle2, AlertCircle, Upload as UploadIcon, AlertTriangle, Wand2 } from "lucide-react";
+import { CheckCircle2, AlertCircle, Upload as UploadIcon, AlertTriangle, Wand2, X } from "lucide-react";
 import UploadDropZone from "../components/upload/UploadDropZone";
 import UploadFileQueue from "../components/upload/UploadFileQueue";
 import { useUploadContext } from "../context/UploadContext";
@@ -153,7 +153,30 @@ export default function UploadPage() {
   const [confirmUpload, setConfirmUpload] = useState(false);
   const [duplicateFilenames, setDuplicateFilenames] = useState<string[]>([]);
 
+  // Pipeline-specific state
+  const [processing, setProcessing] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState<{ n: number; total: number } | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const [streamErrors, setStreamErrors] = useState<{ id: string; reason: string }[]>([]);
+
   const handleFilesSelected = (newFiles: File[]) => {
+    // Check if any of the new files are raw files
+    const hasRawFiles = newFiles.some(
+      (f) => f.name.endsWith(".dump.pgm") || f.name.endsWith(".tip")
+    );
+
+    if (hasRawFiles) {
+      // Clear previous errors/warnings
+      setDuplicateWarning(null);
+      setStreamErrors([]);
+      // Add files to state so UploadFileQueue renders
+      setFiles((prev) => [...prev, ...newFiles]);
+      // Route all files (including co-submitted PNGs) to raw processing pipeline
+      processRawFiles(newFiles);
+      return;
+    }
+
+    // Existing PNG flow: unchanged
     setFiles((prev) => [...prev, ...newFiles]);
     const startIdx = staged.length;
     const newStaged = newFiles.map((f) => ({
@@ -169,6 +192,103 @@ export default function UploadPage() {
     }
     setSelectedForMass(newIndices);
   };
+
+  /**
+   * Process raw files via NDJSON streaming endpoint
+   * Parses the NDJSON stream progressively and appends items to staged panel as they complete.
+   */
+  async function processRawFiles(files: File[]) {
+    const formData = new FormData();
+    files.forEach((f) => formData.append("rawFiles", f));
+
+    setProcessing(true);
+    setProcessingProgress({ n: 0, total: files.length });
+    console.log(`[frontend] Starting raw file processing for ${files.length} files`);
+
+    try {
+      const response = await fetch("http://localhost:8080/api/process-raw-files", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed = 0;
+      let errors = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop()!; // last element may be incomplete
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          let msg;
+          try {
+            msg = JSON.parse(line);
+          } catch {
+            console.warn("Malformed NDJSON line:", line);
+            continue;
+          }
+
+          if (msg.status === "done") {
+            completed++;
+            setProcessingProgress({ n: completed, total: files.length });
+            console.log(`[frontend] Received done: ${msg.id} (${msg.fileType}) ${msg.width}x${msg.height} — staged count: ${completed}`);
+
+            // Append to staged panel immediately
+            setStaged((prev) => {
+              const next = [...prev, {
+                file: new File([], msg.id),
+                category: msg.fileType === "dump" ? "bags" : "non-threats",
+                subcategory: "",
+                valid_region_points: null,
+                preProcessed: true,
+                preGeneratedFilepath: msg.filepath,
+                fileType: msg.fileType,
+                itemId: msg.id,
+                width: msg.width,
+                height: msg.height,
+              }];
+              console.log(`[frontend] staged updated: now ${next.length} items`);
+              return next;
+            });
+          } else if (msg.status === "error") {
+            errors++;
+            console.log(`[frontend] Received error: ${msg.id} — ${msg.reason}`);
+            setStreamErrors((prev) => [...prev, { id: msg.id, reason: msg.reason }]);
+          } else if (msg.status === "complete") {
+            console.log(`[frontend] Stream complete. Total: ${msg.total}, Processed: ${msg.processed}, Duplicates: ${msg.duplicates}, Failed: ${msg.failed}`);
+            setProcessing(false);
+            setProcessingProgress(null);
+            if (msg.duplicates > 0) {
+              setDuplicateWarning(`${msg.duplicates} file(s) skipped — already in library`);
+            }
+          }
+        }
+      }
+
+      // If stream ended without a "complete" line
+      if (processing) {
+        console.log(`[frontend] Stream ended without complete line. Staged: ${completed}, Errors: ${errors}`);
+        setProcessing(false);
+        setProcessingProgress(null);
+      }
+    } catch (err) {
+      console.error("processRawFiles error:", err);
+      setProcessing(false);
+      setProcessingProgress(null);
+    }
+  }
 
   const handleUpload = async () => {
     const missingCategory: string[] = [];
@@ -209,14 +329,27 @@ export default function UploadPage() {
     try {
       const formData = new FormData();
       formData.append("folderName", folderName);
+
+      // Only append file bytes for non-pre-processed items
       staged.forEach((s) => {
-        formData.append("images", s.file);
+        if (!s.preProcessed) formData.append("images", s.file);
       });
+
+      // Build metadata with pre-processed fields when applicable
       const metadata = staged.map((s) => ({
-        originalname: s.file.name,
+        originalname: s.preProcessed ? s.itemId! : s.file.name,
         category: s.category,
         subcategory: s.subcategory,
         valid_region_points: s.valid_region_points || null,
+        ...(s.preProcessed && {
+          preProcessed: true,
+          preGeneratedFilepath: s.preGeneratedFilepath,
+          itemId: s.itemId,
+          width: s.width,
+          height: s.height,
+          pixelDataFilename: s.pixelDataFilename,
+          fileType: s.fileType,
+        }),
       }));
       formData.append("metadata", JSON.stringify(metadata));
 
@@ -277,6 +410,50 @@ export default function UploadPage() {
 
       <div className="space-y-6">
         <UploadDropZone onFilesSelected={handleFilesSelected} />
+
+        {/* Processing indicator */}
+        {processing && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex items-center gap-3 shadow-card">
+            <div className="w-5 h-5 bg-amber-500 rounded-full text-white flex items-center justify-center flex-shrink-0 animate-pulse">
+              <span className="text-xs font-bold">...</span>
+            </div>
+            <span className="text-sm font-medium">
+              Processing files… {processingProgress?.n ?? 0} / {processingProgress?.total ?? 0}
+            </span>
+          </div>
+        )}
+
+        {/* Stream errors */}
+        {streamErrors.length > 0 && (
+          <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 shadow-card">
+            <h4 className="text-xs font-semibold text-rose-700 uppercase tracking-wider mb-2">Processing Errors</h4>
+            <ul className="space-y-1">
+              {streamErrors.map((err, i) => (
+                <li key={i} className="text-xs text-rose-600 font-mono">
+                  {err.id}: {err.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Duplicate warning banner (dismissible) */}
+        {duplicateWarning && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex items-center justify-between gap-3 shadow-card">
+            <div className="flex items-center gap-3">
+              <div className="w-5 h-5 bg-amber-500 rounded-full text-white flex items-center justify-center flex-shrink-0">
+                <AlertTriangle size={14} />
+              </div>
+              <span className="text-sm font-medium">{duplicateWarning}</span>
+            </div>
+            <button
+              onClick={() => setDuplicateWarning(null)}
+              className="p-1 rounded-lg hover:bg-amber-100 transition-colors text-amber-600"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
 
         <div className="bg-panel rounded-2xl border border-border p-8 shadow-card">
           <button

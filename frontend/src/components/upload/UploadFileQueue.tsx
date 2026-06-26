@@ -18,7 +18,8 @@ interface UploadFileQueueProps {
 // Simple canvas component that draws the image + valid region overlay
 function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; validRegionPoints: any; alt: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  console.log('ThumbnailWithRegion got validRegionPoints:', validRegionPoints);
+  const retryCountRef = useRef(0);
+  const retryTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -26,47 +27,83 @@ function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; val
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const img = new Image();
-    img.onload = () => {
-      // Set canvas to 96x96 (match the w-24 h-24 class)
-      canvas.width = 96;
-      canvas.height = 96;
-      ctx.clearRect(0, 0, 96, 96);
-      ctx.drawImage(img, 0, 0, 96, 96);
+    // Cleanup previous retry timer
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    retryCountRef.current = 0;
 
-      // Draw valid region overlay if points exist
-      if (validRegionPoints) {
-        let points: { x: number; y: number }[] = [];
-        // Support both direct points array and { points, simplifiedPoints } format
-        const raw = Array.isArray(validRegionPoints)
-          ? validRegionPoints
-          : validRegionPoints.simplifiedPoints || validRegionPoints.points || [];
-        console.log('ThumbnailWithRegion raw points:', raw);
-        points = raw.map((p: any) => ({
-          x: typeof p.x === "number" && p.x <= 1 ? p.x * 96 : p.x,
-          y: typeof p.y === "number" && p.y <= 1 ? p.y * 96 : p.y,
-        }));
-        console.log('ThumbnailWithRegion scaled points:', points);
+    const drawImage = (imageSrc: string) => {
+      const img = new Image();
+      img.onload = () => {
+        // Set canvas to 96x96 (match the w-24 h-24 class)
+        canvas.width = 96;
+        canvas.height = 96;
+        ctx.clearRect(0, 0, 96, 96);
+        ctx.drawImage(img, 0, 0, 96, 96);
 
-        if (points.length >= 2) {
-          ctx.save();
-          ctx.strokeStyle = "rgba(22, 163, 74, 0.9)";
-          ctx.lineWidth = 2;
-          ctx.setLineDash([3, 2]);
-          ctx.fillStyle = "rgba(22, 163, 74, 0.25)";
-          ctx.beginPath();
-          ctx.moveTo(points[0].x, points[0].y);
-          for (let i = 1; i < points.length; i++) {
-            ctx.lineTo(points[i].x, points[i].y);
+        // Draw valid region overlay if points exist
+        if (validRegionPoints) {
+          let points: { x: number; y: number }[] = [];
+          // Support both direct points array and { points, simplifiedPoints } format
+          const raw = Array.isArray(validRegionPoints)
+            ? validRegionPoints
+            : validRegionPoints.simplifiedPoints || validRegionPoints.points || [];
+          points = raw.map((p: any) => ({
+            x: typeof p.x === "number" && p.x <= 1 ? p.x * 96 : p.x,
+            y: typeof p.y === "number" && p.y <= 1 ? p.y * 96 : p.y,
+          }));
+
+          if (points.length >= 2) {
+            ctx.save();
+            ctx.strokeStyle = "rgba(22, 163, 74, 0.9)";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([3, 2]);
+            ctx.fillStyle = "rgba(22, 163, 74, 0.25)";
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+              ctx.lineTo(points[i].x, points[i].y);
+            }
+            if (points.length > 2) ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
           }
-          if (points.length > 2) ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-          ctx.restore();
         }
+      };
+      img.onerror = () => {
+        // Retry with exponential backoff: 500ms, 1s, 2s, 4s, 8s (max 5 retries)
+        if (retryCountRef.current < 5) {
+          const delay = 500 * Math.pow(2, retryCountRef.current);
+          retryCountRef.current += 1;
+          retryTimerRef.current = window.setTimeout(() => {
+            drawImage(imageSrc);
+          }, delay);
+        } else {
+          // Give up — draw placeholder
+          canvas.width = 96;
+          canvas.height = 96;
+          ctx.clearRect(0, 0, 96, 96);
+          ctx.fillStyle = "#e5e7eb";
+          ctx.fillRect(0, 0, 96, 96);
+          ctx.fillStyle = "#9ca3af";
+          ctx.font = "10px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("loading...", 48, 52);
+        }
+      };
+      img.src = imageSrc;
+    };
+
+    drawImage(src);
+
+    return () => {
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
       }
     };
-    img.src = src;
   }, [src, validRegionPoints]);
 
   return (
@@ -79,7 +116,9 @@ function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; val
 }
 
 export default function UploadFileQueue({ files, staged, setStaged, setFiles, uploading, handleUpload, selectedForMass, onToggleSelect, onSelectAll }: UploadFileQueueProps) {
+  console.log(`[UploadFileQueue] render called. files=${files.length}, staged=${staged.length}`);
   if (files.length === 0) {
+    console.log(`[UploadFileQueue] returning null because files.length === 0`);
     return null;
   }
 
@@ -311,7 +350,9 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
           <tbody className="divide-y divide-border">
             {staged.map((s, idx) => {
               const file = s.file as File;
-              const preview = URL.createObjectURL(file);
+              const preview = s.preProcessed
+                ? `http://localhost:8080/data/library_images/${s.itemId}.png`
+                : URL.createObjectURL(file);
               const isBags = s.category === "bags";
               const inlineSubOptions = getInlineSubcategoryOptions(s.category);
 
@@ -336,11 +377,11 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                     />
                   </td>
                   <td className="py-3 px-4 align-top">
-                    <select
+                  <select
                       className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
                       value={s.category || ""}
                       onChange={(e) => handleInlineCategoryChange(idx, e.target.value)}
-                      disabled={uploading}
+                      disabled={uploading || (s.preProcessed && s.fileType === "dump")}
                     >
                       <option value="">NONE</option>
                       {categoryOptions.map((cat) => (
@@ -349,11 +390,11 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                     </select>
                   </td>
                   <td className="py-3 px-4 align-top">
-                    <select
+                  <select
                       className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
                       value={s.subcategory || ""}
                       onChange={(e) => handleInlineSubcategoryChange(idx, e.target.value)}
-                      disabled={uploading || !s.category}
+                      disabled={uploading || !s.category || (s.preProcessed && s.fileType === "dump")}
                     >
                       <option value="">NONE</option>
                       {inlineSubOptions.length > 0 ? (

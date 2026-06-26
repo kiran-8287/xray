@@ -2,8 +2,11 @@ import Jimp from 'jimp';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
-import { ReadDump } from './dumpRead.js';
-import { readTip } from './tipRead.js';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { ReadDump } = require('./dumpRead.cjs');
+const { readTip } = require('./tipRead.cjs');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const libraryImagesRoot = path.resolve(__dirname, "../../data/library_images");

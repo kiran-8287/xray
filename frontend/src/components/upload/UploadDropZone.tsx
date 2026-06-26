@@ -46,7 +46,7 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       <input
         id="fileInput"
         type="file"
-        accept="image/*"
+        accept=".pgm,.tip,image/*"
         multiple
         // @ts-ignore webkitdirectory
         webkitdirectory=""

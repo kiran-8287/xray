@@ -9,8 +9,12 @@ import { v4 as uuidv4 } from "uuid";
 import { generateDataset } from "./api/datasetGenerator.js";
 import { isObjectInsideContainer } from "./lib/geometry.js";
 import Jimp from "jimp";
-import { ReadDump } from "./lib/dumpRead.js";
-import { readTip } from "./lib/tipRead.js";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { ReadDump } = require("./lib/dumpRead.cjs");
+const { readTip } = require("./lib/tipRead.cjs");
+import WorkerPool from "./lib/workerPool.js";
 import {
     getItems,
     getItemById,
@@ -72,6 +76,9 @@ const storage = multer.diskStorage({
     },
 });
 const upload = multer({ storage: storage });
+
+// Multer setup for raw file uploads (memory storage for streaming)
+const rawUpload = multer({ storage: multer.memoryStorage() });
 
 function safeNowStamp() {
     return new Date().toISOString().replace(/[:.]/g, "-");
@@ -220,6 +227,142 @@ app.post("/api/read-tip", upload.single("file"), async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ ok: false, error: String(error) });
+    }
+});
+
+// Helper functions for raw file processing
+function deriveItemId(filename) {
+    const dotIndex = filename.indexOf(".");
+    if (dotIndex === -1) return filename;
+    return filename.slice(0, dotIndex);
+}
+
+function classifyFileType(filename) {
+    if (filename.endsWith(".dump.pgm")) return "dump";
+    if (filename.endsWith(".tip")) return "tip";
+    return null;
+}
+
+// Endpoint to process raw files (.dump.pgm and .tip) with worker pool
+// Streams NDJSON results back to client as files are processed
+app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res) => {
+    // Set NDJSON headers immediately before any async work
+    res.setHeader("Content-Type", "application/x-ndjson");
+    res.setHeader("Transfer-Encoding", "chunked");
+    res.status(200).flushHeaders();
+
+    try {
+        // 1. Read existing items once for duplicate detection
+        const items = await getItems();
+        const existingIds = new Set(items.map(i => i.id));
+
+        // 2. Process each file: derive ID, classify type, check duplicates
+        const nonDuplicates = [];
+        let duplicateCount = 0;
+
+        const files = req.files || [];
+        console.log(`[process-raw-files] Received ${files.length} files`);
+        for (const file of files) {
+            const itemId = deriveItemId(file.originalname);
+            const fileType = classifyFileType(file.originalname);
+            if (!fileType) {
+                // Skip files that are neither .dump.pgm nor .tip
+                console.log(`[process-raw-files] Skipping unrecognized file: ${file.originalname}`);
+                continue;
+            }
+
+            if (existingIds.has(itemId)) {
+                duplicateCount++;
+                console.log(`[process-raw-files] Duplicate skipped: ${itemId}`);
+            } else {
+                nonDuplicates.push({ file, itemId, fileType });
+                console.log(`[process-raw-files] Queued: ${itemId} (${fileType})`);
+            }
+        }
+        console.log(`[process-raw-files] Summary: ${nonDuplicates.length} to process, ${duplicateCount} duplicates`);
+
+        // If no non-duplicate files, send complete line immediately
+        if (nonDuplicates.length === 0) {
+            res.write(JSON.stringify({
+                status: "complete",
+                total: 0,
+                processed: 0,
+                duplicates: duplicateCount,
+                failed: 0,
+            }) + "\n");
+            res.end();
+            return;
+        }
+
+        // 3. Save file buffers to temp files and dispatch to worker pool
+        const pool = new WorkerPool(4);
+        let processedCount = 0;
+        let failedCount = 0;
+        const tempDir = path.resolve(__dirname, "../data/temp");
+        await fs.mkdir(tempDir, { recursive: true });
+
+        for (const { file, itemId, fileType } of nonDuplicates) {
+            // Write buffer to temp file
+            const tempPath = path.join(tempDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
+            await fs.writeFile(tempPath, file.buffer);
+
+            pool.addTask(
+                {
+                    filePath: tempPath,
+                    itemId,
+                    fileType,
+                    pixelDataDir: pixelDataRoot,
+                    libraryImagesDir: libraryImagesRoot,
+                },
+                (result) => {
+                    // Write NDJSON line immediately — flush to stream
+                    const line = JSON.stringify(result);
+                    res.write(line + "\n");
+                    console.log(`[process-raw-files] NDJSON sent: ${line}`);
+
+                    if (result.status === "done") {
+                        processedCount++;
+                        console.log(`[process-raw-files] Done: ${result.id} (${result.fileType}) ${result.width}x${result.height}`);
+                    }
+                    if (result.status === "error") {
+                        failedCount++;
+                        console.log(`[process-raw-files] Error: ${result.id} — ${result.reason}`);
+                    }
+
+                    // Clean up temp file asynchronously
+                    fs.unlink(tempPath).catch(() => {});
+                }
+            );
+        }
+
+        // 4. Wait for all tasks to complete
+        console.log(`[process-raw-files] Waiting for ${nonDuplicates.length} tasks to complete...`);
+        await pool.drain();
+        console.log(`[process-raw-files] All tasks done. Processed: ${processedCount}, Failed: ${failedCount}`);
+
+        // 5. Write the complete summary line
+        const summary = {
+            status: "complete",
+            total: nonDuplicates.length,
+            processed: processedCount,
+            duplicates: duplicateCount,
+            failed: failedCount,
+        };
+        const summaryLine = JSON.stringify(summary);
+        res.write(summaryLine + "\n");
+        console.log(`[process-raw-files] Summary sent: ${summaryLine}`);
+        res.end();
+
+    } catch (err) {
+        console.error("process-raw-files error:", err);
+        if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: err.message });
+        } else {
+            // Stream already started, try to end gracefully
+            try {
+                res.end();
+            } catch (_) {}
+        }
     }
 });
 
@@ -490,6 +633,56 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
             // Extract ID from filename without extension
             const itemId = path.basename(file.originalname, path.extname(file.originalname));
             
+            // If metadata provided for this file, allow overrides and extra data
+            const fileMeta = metadataByName[file.originalname] || {};
+
+            // NEW: Handle pre-processed items (already on disk, no file bytes)
+            if (fileMeta.preProcessed === true) {
+                const metaItemId = fileMeta.itemId || itemId;
+                const category = fileMeta.category || "non-threats";
+                const subcategory = fileMeta.subcategory || "General";
+
+                // Create item with pre-generated filepath — no Jimp.read, no file move
+                const item = await createItem({
+                    id: metaItemId,
+                    filename: metaItemId,
+                    filepath: fileMeta.preGeneratedFilepath,
+                    category,
+                    subcategory,
+                    name: metaItemId,
+                    pixel_value: category === "bags" ? 42000 + Math.floor(Math.random() * 10000) : 32767,
+                    width: fileMeta.width || 512,
+                    height: fileMeta.height || 512,
+                    pixel_data_path: fileMeta.pixelDataFilename || null,
+                });
+
+                // Create sub-table records based on category
+                if (category === "bags") {
+                    await createBag({
+                        item_id: item.id,
+                        valid_region_points: fileMeta.valid_region_points || null
+                    });
+                } else if (category === "threats") {
+                    await createThreat({
+                        item_id: item.id,
+                        threat_type: null,
+                        severity: null
+                    });
+                    await createNonThreatItem({
+                        item_id: item.id,
+                        subcategory_slug: subcategory.toLowerCase().replace(/\s+/g, "-")
+                    });
+                } else {
+                    await createNonThreatItem({
+                        item_id: item.id,
+                        subcategory_slug: subcategory.toLowerCase().replace(/\s+/g, "-")
+                    });
+                }
+
+                processed.push(metaItemId);
+                continue; // Skip the rest of the loop for pre-processed items
+            }
+
             // Check if item already exists
             if (await itemExists(itemId)) {
                 errors.push({ filename: file.originalname, message: `Item ${itemId} already exists in library` });
@@ -520,8 +713,6 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
     subcategory = parsed.subcategory;
     const name = path.basename(file.originalname, path.extname(file.originalname));
 
-    // If metadata provided for this file, allow overrides and extra data
-    const fileMeta = metadataByName[file.originalname] || {};
     if (fileMeta.category) {
       category = fileMeta.category;
     }

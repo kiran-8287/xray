@@ -125,11 +125,11 @@ function ReadDump(filename, raw = false, FlippedAndRotated = false, DenoiseRequi
 
   if (FlippedAndRotated == true) {
     console.log("The Image is flipped and Rotated");
-    return [flipTranspose(high, rows, cols), flipTranspose(low, rows, cols), flipTranspose(R, rows, cols)];
+    return [flipTranspose(high, rows, cols), flipTranspose(low, rows, cols), flipTranspose(R, rows, cols), rows, cols];
   }
   else {
     console.log("The Image is Not flipped and Rotated");
-    return [high, low, R];
+    return [high, low, R, rows, cols];
   }
 }
 

@@ -5,6 +5,15 @@ export interface StagedItem {
   category: string;
   subcategory: string;
   valid_region_points?: any | null;
+
+  // Pipeline fields for pre-processed raw-file items
+  preProcessed?: boolean;
+  preGeneratedFilepath?: string;
+  fileType?: "dump" | "tip";
+  itemId?: string;
+  width?: number;
+  height?: number;
+  pixelDataFilename?: string;
 }
 
 interface UploadContextValue {
