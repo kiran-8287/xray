@@ -26,20 +26,24 @@ where npm >nul 2>nul
 if %errorlevel% == 0 (
     echo npm found! Installing dependencies and starting...
     
+    REM Disable npm audit and funding prompts
+    set npm_config_audit=false
+    set npm_config_fund=false
+    
     REM Install all dependencies (including concurrently)
     echo Installing root dependencies...
-    call npm install
+    call npm install --no-audit --no-fund
     
     REM Install backend dependencies
     echo Installing backend dependencies...
     cd backend
-    call npm install
+    call npm install --no-audit --no-fund
     cd ..
     
     REM Install frontend dependencies
     echo Installing frontend dependencies...
     cd frontend
-    call npm install
+    call npm install --no-audit --no-fund
     cd ..
     
     echo.

@@ -1,4 +1,4 @@
-import { createCanvas } from 'canvas';
+import Jimp from 'jimp';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
@@ -98,9 +98,6 @@ function applyAffineTransform(
  * Returns a PNG buffer of the composited scene.
  */
 export async function renderSceneAsync(objects, width = 800, height = 600) {
-  const canvas = createCanvas(width, height);
-  const ctx = canvas.getContext('2d');
-  
   // Initialize density buffer with 0 (air)
   const densityBuffer = new Float32Array(width * height);
 
@@ -171,22 +168,18 @@ export async function renderSceneAsync(objects, width = 800, height = 600) {
   }
 
   // Convert density buffer to final grayscale image using Beer-Lambert Law
-  const finalImg = ctx.createImageData(width, height);
-  const data = finalImg.data;
+  const image = new Jimp(width, height, 0x000000);
   
   for (let i = 0; i < densityBuffer.length; i++) {
     const density = densityBuffer[i];
     const intensity = 65535 * Math.exp(-density);
     const g = Math.round((intensity / 65535) * 255);
     
-    const idx = i * 4;
-    data[idx] = g;       // R
-    data[idx + 1] = g;   // G
-    data[idx + 2] = g;   // B
-    data[idx + 3] = 255; // A
+    const x = i % width;
+    const y = Math.floor(i / width);
+    image.setPixelColor(Jimp.rgbaToInt(g, g, g, 255), x, y);
   }
   
-  ctx.putImageData(finalImg, 0, 0);
-  return canvas.toBuffer('image/png');
+  return await image.getBufferAsync(Jimp.MIME_PNG);
 }
 

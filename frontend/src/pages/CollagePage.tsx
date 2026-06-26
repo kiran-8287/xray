@@ -15,49 +15,26 @@ export default function CollagePage() {
     | { selectedBags?: Item[]; selectedThreats?: Item[]; selectedOthers?: Item[]; densityPreset?: "empty" | "few" | "filled" }
     | undefined;
 
-  // Selections from library (restored from localStorage on refresh)
-  const [selectedBags, setSelectedBags] = useState<Item[]>(() => {
+  // Clear all stored selections and combinations on page load
+  useEffect(() => {
     try {
-      const saved = localStorage.getItem("selectedBags");
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
-  const [selectedThreats, setSelectedThreats] = useState<Item[]>(() => {
-    try {
-      const saved = localStorage.getItem("selectedThreats");
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
-  const [selectedOthers, setSelectedOthers] = useState<Item[]>(() => {
-    try {
-      const saved = localStorage.getItem("selectedOthers");
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
-
-  const [combinations, setCombinations] = useState<CombinatorialResult[]>(() => {
-    try {
-      const cached = sessionStorage.getItem("collageCombinations");
-      if (cached) {
-        return JSON.parse(cached);
-      }
-    } catch {
-      // ignore
+      localStorage.removeItem("selectedBags");
+      localStorage.removeItem("selectedThreats");
+      localStorage.removeItem("selectedOthers");
+      sessionStorage.removeItem("collageCombinations");
+      sessionStorage.removeItem("collageFailures");
+    } catch (err) {
+      console.error("Error clearing collage storage:", err);
     }
-    return [];
-  });
+  }, []);
 
-  const [failures, setFailures] = useState<FailureLog[]>(() => {
-    try {
-      const cached = sessionStorage.getItem("collageFailures");
-      if (cached) {
-        return JSON.parse(cached);
-      }
-    } catch {
-      // ignore
-    }
-    return [];
-  });
+  // Selections from library (fresh start - no restoration from localStorage)
+  const [selectedBags, setSelectedBags] = useState<Item[]>([]);
+  const [selectedThreats, setSelectedThreats] = useState<Item[]>([]);
+  const [selectedOthers, setSelectedOthers] = useState<Item[]>([]);
+
+  const [combinations, setCombinations] = useState<CombinatorialResult[]>([]);
+  const [failures, setFailures] = useState<FailureLog[]>([]);
 
   const [currentPage, setCurrentPage] = useState(0);
   const [showLogs, setShowLogs] = useState(false);

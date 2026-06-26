@@ -8,10 +8,11 @@
     "start": "node src/server.js"
   },
   "dependencies": {
-    "canvas": "^3.2.3",
+    "jimp": "^0.22.12",
     "cors": "^2.8.6",
     "express": "^4.22.2",
     "multer": "^2.1.1",
+    "sharp": "^0.33.5",
     "uuid": "^14.0.0"
   }
 }

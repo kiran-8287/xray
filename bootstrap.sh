@@ -19,20 +19,24 @@ if command -v docker &> /dev/null && command -v docker-compose &> /dev/null; the
 elif command -v npm &> /dev/null; then
     echo "npm found! Installing dependencies and starting..."
     
+    # Disable npm audit and funding prompts
+    export npm_config_audit=false
+    export npm_config_fund=false
+    
     # Install all dependencies (including concurrently)
     echo "Installing root dependencies..."
-    npm install
+    npm install --no-audit --no-fund
     
     # Install backend dependencies
     echo "Installing backend dependencies..."
     cd backend
-    npm install
+    npm install --no-audit --no-fund
     cd ..
     
     # Install frontend dependencies
     echo "Installing frontend dependencies..."
     cd frontend
-    npm install
+    npm install --no-audit --no-fund
     cd ..
     
     echo ""

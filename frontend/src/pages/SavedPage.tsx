@@ -116,6 +116,7 @@ export default function SavedPage() {
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedLayout, setSelectedLayout] = useState<SavedLayout | null>(null);
+  const [libraryItemIds, setLibraryItemIds] = useState<Set<string>>(new Set());
   const pageSize = 20;
 
   useEffect(() => {
@@ -129,19 +130,55 @@ export default function SavedPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // Fetch library items to validate layouts
+  useEffect(() => {
+    const fetchLibraryItems = async () => {
+      try {
+        const res = await fetch("http://localhost:8080/api/items/categorized");
+        const data = await res.json();
+        if (data.ok) {
+          const ids = new Set<string>();
+          const extractIds = (categorized: any) => {
+            if (!categorized) return;
+            for (const items of Object.values(categorized)) {
+              if (Array.isArray(items)) {
+                items.forEach((item: any) => ids.add(item.id));
+              }
+            }
+          };
+          extractIds(data.categorized);
+          setLibraryItemIds(ids);
+        }
+      } catch (err) {
+        console.error("Failed to fetch library items:", err);
+      }
+    };
+    fetchLibraryItems();
+  }, []);
+
+  // Load layouts and filter out those with missing library items
   useEffect(() => {
     fetch("http://localhost:8080/api/saved-layouts")
       .then((res) => res.json())
       .then((data) => {
         if (data.ok) {
-          setLayouts(data.layouts);
+          // Filter layouts: only keep those where all referenced items exist in library
+          const validLayouts = data.layouts.filter((layout: SavedLayout) => {
+            try {
+              const objects = layout.layout_json?.objects || [];
+              return objects.every((obj: any) => libraryItemIds.has(obj.id));
+            } catch {
+              return false;
+            }
+          });
+          setLayouts(validLayouts);
         } else {
           setError(data.error || "Failed to load layouts");
         }
       })
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [libraryItemIds]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this saved layout?")) return;

@@ -8,7 +8,7 @@ import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import { generateDataset } from "./api/datasetGenerator.js";
 import { isObjectInsideContainer } from "./lib/geometry.js";
-import { loadImage } from "canvas";
+import Jimp from "jimp";
 import { ReadDump } from "./lib/dumpRead.js";
 import { readTip } from "./lib/tipRead.js";
 import {
@@ -532,9 +532,9 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
             let height = 512;
             try {
                 const savedFilePath = path.join(libraryImagesRoot, file.filename);
-                const loadedImg = await loadImage(savedFilePath);
-                width = loadedImg.width;
-                height = loadedImg.height;
+                const loadedImg = await Jimp.read(savedFilePath);
+                width = loadedImg.bitmap.width;
+                height = loadedImg.bitmap.height;
             } catch (dimErr) {
                 console.warn("Warning: could not detect image dimensions for", file.filename, dimErr);
             }
