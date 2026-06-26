@@ -6,16 +6,23 @@ set -e
 echo "=== Synthetic X-Ray Generation System - Bootstrap ==="
 echo ""
 
-# Check if Docker is available
-if command -v docker &> /dev/null && command -v docker-compose &> /dev/null; then
+# Check if Docker is available (Compose V1 or V2)
+DOCKER_COMPOSE_CMD=""
+if command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE_CMD="docker-compose"
+elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    DOCKER_COMPOSE_CMD="docker compose"
+fi
+
+if [ -n "$DOCKER_COMPOSE_CMD" ]; then
     echo "Docker found! Starting with Docker..."
-    docker-compose up -d --build
+    $DOCKER_COMPOSE_CMD up -d --build
     echo ""
     echo "✅ Success! The app is now running!"
     echo "📱 Frontend: http://localhost:5174"
     echo "🔧 Backend: http://localhost:8080"
     echo ""
-    echo "To stop the app: docker-compose down"
+    echo "To stop the app: $DOCKER_COMPOSE_CMD down"
 elif command -v npm &> /dev/null; then
     echo "npm found! Installing dependencies and starting..."
     

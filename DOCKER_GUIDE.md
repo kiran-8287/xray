@@ -29,6 +29,7 @@ Here are the key files we added/modified:
 | `Dockerfile` | `/backend/` | Instructions to build the backend container |
 | `Dockerfile` | `/frontend/` | Instructions to build the frontend container |
 | `docker-compose.yml` | Root project folder | Orchestrates running both backend and frontend together |
+| `.dockerignore` | Root, backend, frontend | Excludes build artifacts and large files from Docker context for fast, portable builds |
 | `bootstrap.sh` | Root project folder | Quick start script for Linux/Mac |
 | `bootstrap.bat` | Root project folder | Quick start script for Windows |
 | `.gitignore` | Root project folder | Tells Git which files to ignore (like node_modules, generated data) |
@@ -46,7 +47,7 @@ First, make sure you have Docker installed on your computer:
 ### Step 1: Clone the Project
 ```bash
 git clone <your-project-repo-url>
-cd xray1
+cd xray
 ```
 
 ### Step 2: Quick Start (Easiest Way)
@@ -91,7 +92,7 @@ Press `Ctrl+C` to stop viewing logs (containers will keep running).
 ## Stopping the Project
 
 ### If you used the bootstrap scripts:
-- The script will show you this command: `docker-compose down`
+- The script will show you the correct command for your setup.
 - Run that to stop both containers.
 
 ### Manually stop:

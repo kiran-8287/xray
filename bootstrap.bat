@@ -4,19 +4,28 @@ REM Bootstrap script for Windows
 echo === Synthetic X-Ray Generation System - Bootstrap ===
 echo.
 
-REM Check if Docker is available
+REM Check if Docker is available (Compose V1 or V2)
 where docker >nul 2>nul
 if %errorlevel% == 0 (
-    where docker-compose >nul 2>nul
+    docker compose version >nul 2>nul
     if %errorlevel% == 0 (
+        set DOCKER_COMPOSE_CMD=docker compose
+    ) else (
+        where docker-compose >nul 2>nul
+        if %errorlevel% == 0 (
+            set DOCKER_COMPOSE_CMD=docker-compose
+        )
+    )
+
+    if defined DOCKER_COMPOSE_CMD (
         echo Docker found! Starting with Docker...
-        docker-compose up -d --build
+        %DOCKER_COMPOSE_CMD% up -d --build
         echo.
         echo Success! The app is now running!
         echo Frontend: http://localhost:5174
         echo Backend: http://localhost:8080
         echo.
-        echo To stop the app: docker-compose down
+        echo To stop the app: %DOCKER_COMPOSE_CMD% down
         goto :eof
     )
 )

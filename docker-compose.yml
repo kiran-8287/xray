@@ -22,5 +22,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  node_modules_backend:
-  node_modules_frontend:
+
+

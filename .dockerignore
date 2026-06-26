@@ -1,0 +1,36 @@
+# Dependencies
+node_modules
+npm-debug.log
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# IDE / OS files
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Build outputs
+dist
+build
+
+# Large / generated data (mounted as volumes instead)
+backend/data
+frontend/dist
+
+# Extracted scanner assets (upload via the app, not baked into image)
+extracted_dump_tip
+extracted_files_low_high
+"dump and tip"
+
+# Docker
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# Docs
+*.md
+!LICENSE*
