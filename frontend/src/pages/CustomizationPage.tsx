@@ -106,6 +106,18 @@ function getObjectSubcategory(obj: SceneObject, categorizedList: any): string | 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
 
+function getItemDisplaySize(item: Item): { width: number; height: number } {
+  const width = Number.isFinite(item.width) ? Math.round(item.width) : 0;
+  const height = Number.isFinite(item.height) ? Math.round(item.height) : 0;
+
+  if (width > 0 && height > 0) {
+    return { width, height };
+  }
+
+  const fallback = 120;
+  return { width: fallback, height: fallback };
+}
+
 export default function CustomizationPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -278,8 +290,9 @@ export default function CustomizationPage() {
       // and the valid region polygon maps correctly without any scaling.
       // This preserves every pixel and keeps the valid region in sync
       // across the editor and customization canvas.
-      const bagWidth = bagItem.width || bagItem.height || Math.min(CANVAS_W, CANVAS_H);
-      const bagHeight = bagItem.height || bagItem.width || Math.min(CANVAS_W, CANVAS_H);
+      const bagSize = getItemDisplaySize(bagItem);
+      const bagWidth = bagSize.width;
+      const bagHeight = bagSize.height;
 
       bagObject = {
         id: "initial-bag",
@@ -320,8 +333,9 @@ export default function CustomizationPage() {
           ? JSON.parse(item.polygon_json)
           : item.polygon_json;
       }
-      const w = item.width ? Math.round(item.width) : 80;
-      const h = item.height ? Math.round(item.height) : 80;
+      const itemSize = getItemDisplaySize(item);
+      const w = itemSize.width;
+      const h = itemSize.height;
       let pos = null as { x: number; y: number; rotation?: number } | null;
       if (bagObject) {
         pos = getRandomPositionInContainer(w, h, bagObject, itemOutline);
@@ -359,8 +373,9 @@ export default function CustomizationPage() {
           ? JSON.parse(threatItem.polygon_json)
           : threatItem.polygon_json;
       }
-      const w = threatItem.width ? Math.round(threatItem.width) : 120;
-      const h = threatItem.height ? Math.round(threatItem.height) : 60;
+      const threatSize = getItemDisplaySize(threatItem);
+      const w = threatSize.width;
+      const h = threatSize.height;
       let pos = null as { x: number; y: number; rotation?: number } | null;
       if (bagObject) {
         pos = getRandomPositionInContainer(w, h, bagObject, threatOutline);
