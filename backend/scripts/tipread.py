@@ -10,7 +10,6 @@ from pathlib import Path
 from PIL import Image
 import numpy as np
 
-
 def read_tip(filename):
     """Read a .tip file and return (low_raw, high_raw) as uint16 arrays."""
     with open(filename, "rb") as f:
@@ -79,7 +78,6 @@ def convert_tip_to_png(input_root, synthesis_root, lowhigh_root):
 
     print(f"\nDone. Converted {len(tip_paths)} .tip files from {input_root}")
 
-
 if __name__ == "__main__":
     base = Path(__file__).resolve().parent
     root = base.parent
@@ -96,5 +94,4 @@ if __name__ == "__main__":
             root / "extracted_synthesis" / category,
             root / "extracted_files_low_high" / category,
         )
-
     print("\nAll done!")

@@ -12,9 +12,6 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-#from denoise import LVstPMGuidedDenoise
-
-
 def ReadDump(filename, raw=False, FlippedAndRotated=False, DenoiseRequired=False):
     """read dump file and return arrays of high, low, R, high_raw, low_raw"""
 
@@ -84,9 +81,6 @@ def ReadDump(filename, raw=False, FlippedAndRotated=False, DenoiseRequired=False
                 R[i, j] = 0
             elif low[i, j] >= 60000:
                 R[i, j] = np.inf
-    if DenoiseRequired == True and check_denoise == False:
-
-        low, high = LVstPMGuidedDenoise(low, high, 1.6, 100, 1, 5, 5, 3, 10000, 10000)
 
     if raw == True:
         return high, low, high_raw, low_raw
@@ -99,7 +93,6 @@ def ReadDump(filename, raw=False, FlippedAndRotated=False, DenoiseRequired=False
 
         return high, low, R
 
-
 def to_uint16(array):
     """Convert a float64 array (values 0-65535) to uint16 for 16-bit PNG save."""
     # Clip to valid uint16 range and convert
@@ -110,13 +103,11 @@ def save_array_png_16bit(array, path: Path):
     """Save a float64 array as 16-bit PNG (full 0-65535 precision)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     img = to_uint16(array)
-    try {
-    Image.fromarray(img).save(str(path))
-    return True
-} catch {
-    return False
-}
-
+    try:
+        Image.fromarray(img).save(str(path))
+        return True
+    except Exception:
+        return False
 
 def convert_dump_to_png(input_root: Path, output_root: Path, channel_root: Path, source: str = "high"):
     input_root = input_root.resolve()
@@ -152,7 +143,6 @@ def convert_dump_to_png(input_root: Path, output_root: Path, channel_root: Path,
                 print(f"Failed to save {channel_name} channel {channel_path}")
 
     print(f"Done. Converted {len(paths)} files to {output_root} and saved high/low channels to {channel_root}")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
