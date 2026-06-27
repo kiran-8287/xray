@@ -35,17 +35,17 @@ def import_from_path(module_name, file_path):
     return mod
 
 
-def resolve_data_synthesis_dir():
-    """Resolve the data_synthesis/ directory relative to this script's location.
+def resolve_scripts_dir():
+    """Resolve the backend/scripts/ directory relative to this script's location.
     
     Script is at: backend/src/lib/process_raw_file.py
-    data_synthesis is at: <project_root>/data_synthesis/
-    So we go up 4 levels to reach project root, then into data_synthesis.
+    scripts is at: backend/scripts/
+    So we go up 2 levels to reach backend/, then into scripts.
     """
     script_dir = Path(__file__).resolve().parent  # backend/src/lib/
-    project_root = script_dir.parent.parent.parent  # go up to project root
-    synthesis_dir = project_root / "data_synthesis"
-    return synthesis_dir
+    scripts_dir = script_dir.parent.parent / "scripts"  # backend/scripts/
+
+    return scripts_dir
 
 
 def main():
@@ -64,11 +64,11 @@ def main():
     pixel_data_dir = args.pixel_data_dir
 
     try:
-        # Resolve the data_synthesis directory and dynamically import the reader
-        synthesis_dir = resolve_data_synthesis_dir()
+        # Resolve the scripts directory and dynamically import the reader
+        scripts_dir = resolve_scripts_dir()
 
         if file_type == "dump":
-            dumpread_path = synthesis_dir / "dumpread.py"
+            dumpread_path = scripts_dir / "dumpread.py"
             if not dumpread_path.exists():
                 raise FileNotFoundError(f"dumpread.py not found at {dumpread_path}")
             dumpread = import_from_path("dumpread", str(dumpread_path))
@@ -84,7 +84,7 @@ def main():
             rows, cols = pixel_array.shape
 
         else:  # file_type == "tip"
-            tipread_path = synthesis_dir / "tipread.py"
+            tipread_path = scripts_dir / "tipread.py"
             if not tipread_path.exists():
                 raise FileNotFoundError(f"tipread.py not found at {tipread_path}")
             tipread = import_from_path("tipread", str(tipread_path))
