@@ -6,6 +6,8 @@ node_modules/
 frontend/dist/
 
 # Generated data
+backend/data/items.json
+backend/data/savedLayouts.json
 backend/data/library_images/
 backend/data/exports/
 backend/data/collage_images/

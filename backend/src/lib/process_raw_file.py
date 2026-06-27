@@ -17,7 +17,7 @@ import uuid
 import argparse
 from pathlib import Path
 import numpy as np
-import cv2
+from PIL import Image
 
 def import_from_path(module_name, file_path):
     """Dynamically import a Python module from an arbitrary file path."""
@@ -82,9 +82,7 @@ def main():
         # --- Write 16-bit grayscale PNG ---
         os.makedirs(library_images_dir, exist_ok=True)
         png_path = os.path.join(library_images_dir, f"{item_id}.png")
-        success = cv2.imwrite(png_path, img)
-        if not success:
-            raise RuntimeError(f"cv2.imwrite failed to write PNG to {png_path}")
+        Image.fromarray(img).save(png_path)
         # --- Write pixel data JSON ---
         os.makedirs(pixel_data_dir, exist_ok=True)
         pixel_filename = f"{item_id}.json"

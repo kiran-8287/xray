@@ -10,7 +10,7 @@ import struct
 from pathlib import Path
 
 import numpy as np
-import cv2
+from PIL import Image
 
 #from denoise import LVstPMGuidedDenoise
 
@@ -93,7 +93,7 @@ def ReadDump(filename, raw=False, FlippedAndRotated=False, DenoiseRequired=False
 
     elif FlippedAndRotated == True:
         print("The Image is flipped and Rotated")
-        return cv2.flip(np.transpose(high),1), cv2.flip(np.transpose(low),1), cv2.flip(np.transpose(R), 1)
+        return np.fliplr(np.transpose(high)), np.fliplr(np.transpose(low)), np.fliplr(np.transpose(R))
     else:
         print("The Image is Not flipped and Rotated")
 
@@ -110,7 +110,12 @@ def save_array_png_16bit(array, path: Path):
     """Save a float64 array as 16-bit PNG (full 0-65535 precision)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     img = to_uint16(array)
-    return cv2.imwrite(str(path), img)
+    try {
+    Image.fromarray(img).save(str(path))
+    return True
+} catch {
+    return False
+}
 
 
 def convert_dump_to_png(input_root: Path, output_root: Path, channel_root: Path, source: str = "high"):
