@@ -1,5 +1,8 @@
 FROM node:20-alpine
 
+# Install curl for Docker healthcheck
+RUN apk add --no-cache curl
+
 WORKDIR /app
 
 COPY package*.json ./
