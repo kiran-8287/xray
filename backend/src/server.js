@@ -5,15 +5,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import multer from "multer";
-import { v4 as uuidv4 } from "uuid";
 import { generateDataset } from "./api/datasetGenerator.js";
 import { isObjectInsideContainer } from "./lib/geometry.js";
 import Jimp from "jimp";
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-const { ReadDump } = require("./lib/dumpRead.cjs");
-const { readTip } = require("./lib/tipRead.cjs");
 import WorkerPool from "./lib/workerPool.js";
 import {
     getItems,
@@ -64,15 +58,30 @@ await fs.mkdir(pixelDataRoot, { recursive: true });
 // Serve static files from data directory
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
 
-// Multer setup for file uploads
+// Helper function to generate unique filename (no UUID, use actual filename)
+async function getUniqueFilename(originalName) {
+    const ext = path.extname(originalName);
+    const base = path.basename(originalName, ext);
+    let filename = originalName;
+    let counter = 1;
+    
+    // Check if file exists, if so append counter
+    while (await fs.stat(path.join(libraryImagesRoot, filename)).catch(() => null)) {
+        filename = `${base}_${counter}${ext}`;
+        counter++;
+    }
+    return filename;
+}
+
+// Multer setup for file uploads (use actual filenames, no UUID)
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, libraryImagesRoot);
     },
     filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname);
-        const filename = `${uuidv4()}${ext}`;
-        cb(null, filename);
+        // Start with original filename; multer will save with this name
+        // Duplicates are handled in the upload handler
+        cb(null, file.originalname);
     },
 });
 const upload = multer({ storage: storage });
@@ -103,131 +112,6 @@ function parseFilename(filename) {
 // ------------------------------
 app.get("/api/health", (_req, res) => {
     res.json({ ok: true, service: "synthetic-xray-backend" });
-});
-
-// Endpoint to read dump.pgm file
-app.post("/api/read-dump", upload.single("file"), async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ ok: false, error: "No file uploaded" });
-        }
-        const filePath = req.file.path;
-        const data = ReadDump(filePath);
-        
-        const itemId = path.basename(req.file.originalname, path.extname(req.file.originalname));
-        
-        // Check if item already exists
-        let existingItem = await getItemById(itemId);
-        if (existingItem) {
-            await fs.unlink(filePath); // clean up uploaded temp file
-            return res.status(409).json({ 
-                ok: false, 
-                error: `Item with ID ${itemId} already exists in the library!` 
-            });
-        }
-        
-        // Store pixel data
-        const pixelDataId = uuidv4();
-        const pixelDataFilename = `${pixelDataId}.json`;
-        const pixelDataPath = path.join(pixelDataRoot, pixelDataFilename);
-        await fs.writeFile(pixelDataPath, JSON.stringify(data), "utf8");
-        
-        // Save original dump file
-        const originalFilePath = path.join(libraryImagesRoot, `${pixelDataId}${path.extname(req.file.originalname)}`);
-        await fs.rename(filePath, originalFilePath);
-        
-        const width = data.high[0].length;
-        const height = data.high.length;
-        
-        // Create new item
-        const item = await createItem({
-            id: itemId,
-            filename: req.file.originalname,
-            filepath: `${pixelDataId}${path.extname(req.file.originalname)}`,
-            category: "bags",
-            subcategory: "General",
-            name: itemId,
-            pixel_value: 42000 + Math.floor(Math.random() * 10000),
-            width,
-            height,
-            pixel_data_path: pixelDataFilename,
-            original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`
-        });
-        await createBag({
-            item_id: item.id,
-            valid_region_points: null
-        });
-        
-        res.json({ ok: true, data, pixelDataPath, itemId });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ ok: false, error: String(error) });
-    }
-});
-
-// Endpoint to read .tip file
-app.post("/api/read-tip", upload.single("file"), async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ ok: false, error: "No file uploaded" });
-        }
-        const filePath = req.file.path;
-        const data = readTip(filePath);
-        
-        const itemId = path.basename(req.file.originalname, path.extname(req.file.originalname));
-        
-        // Check if item already exists
-        let existingItem = await getItemById(itemId);
-        if (existingItem) {
-            await fs.unlink(filePath); // clean up uploaded temp file
-            return res.status(409).json({ 
-                ok: false, 
-                error: `Item with ID ${itemId} already exists in the library!` 
-            });
-        }
-        
-        // Store pixel data
-        const pixelDataId = uuidv4();
-        const pixelDataFilename = `${pixelDataId}.json`;
-        const pixelDataPath = path.join(pixelDataRoot, pixelDataFilename);
-        await fs.writeFile(pixelDataPath, JSON.stringify(data), "utf8");
-        
-        // Save original tip file
-        const originalFilePath = path.join(libraryImagesRoot, `${pixelDataId}${path.extname(req.file.originalname)}`);
-        await fs.rename(filePath, originalFilePath);
-        
-        const width = data.high_raw[0].length;
-        const height = data.high_raw.length;
-        
-        // Create new item
-        const item = await createItem({
-            id: itemId,
-            filename: req.file.originalname,
-            filepath: `${pixelDataId}${path.extname(req.file.originalname)}`,
-            category: "threats",
-            subcategory: "General",
-            name: itemId,
-            pixel_value: 10000 + Math.floor(Math.random() * 10000),
-            width,
-            height,
-            pixel_data_path: pixelDataFilename,
-            original_file_path: `${pixelDataId}${path.extname(req.file.originalname)}`
-        });
-        await createThreat({
-            item_id: item.id,
-            threat_type: null,
-            severity: null
-        });
-        await createNonThreatItem({
-            item_id: item.id,
-            subcategory_slug: "general"
-        });
-        
-        res.json({ ok: true, data, pixelDataPath, itemId });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ ok: false, error: String(error) });
-    }
 });
 
 // Helper functions for raw file processing
@@ -607,19 +491,14 @@ app.delete('/api/saved-layouts/:id', async (req, res) => {
 app.post("/api/upload", upload.array("images"), async (req, res) => {
     try {
         const { folderName, description = "" } = req.body;
-        const files = req.files;
+        const files = req.files || [];
         // Optional metadata: JSON string or object keyed by original filename
-        let metadataByName = {};
+        let metadataArray = [];
         if (req.body.metadata) {
             try {
                 const parsed = typeof req.body.metadata === 'string' ? JSON.parse(req.body.metadata) : req.body.metadata;
                 if (Array.isArray(parsed)) {
-                    for (const m of parsed) {
-                        if (m.originalname) metadataByName[m.originalname] = m;
-                    }
-                } else if (parsed && typeof parsed === 'object') {
-                    // If object keyed by filename
-                    metadataByName = parsed;
+                    metadataArray = parsed;
                 }
             } catch (err) {
                 console.warn('Warning: failed to parse upload metadata', err);
@@ -628,60 +507,14 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
 
         const errors = [];
         const processed = [];
+        const processedIds = new Set(); // Track which metadata entries were processed
 
         for (const file of files) {
             // Extract ID from filename without extension
             const itemId = path.basename(file.originalname, path.extname(file.originalname));
             
-            // If metadata provided for this file, allow overrides and extra data
-            const fileMeta = metadataByName[file.originalname] || {};
-
-            // NEW: Handle pre-processed items (already on disk, no file bytes)
-            if (fileMeta.preProcessed === true) {
-                const metaItemId = fileMeta.itemId || itemId;
-                const category = fileMeta.category || "non-threats";
-                const subcategory = fileMeta.subcategory || "General";
-
-                // Create item with pre-generated filepath — no Jimp.read, no file move
-                const item = await createItem({
-                    id: metaItemId,
-                    filename: metaItemId,
-                    filepath: fileMeta.preGeneratedFilepath,
-                    category,
-                    subcategory,
-                    name: metaItemId,
-                    pixel_value: category === "bags" ? 42000 + Math.floor(Math.random() * 10000) : 32767,
-                    width: fileMeta.width || 512,
-                    height: fileMeta.height || 512,
-                    pixel_data_path: fileMeta.pixelDataFilename || null,
-                });
-
-                // Create sub-table records based on category
-                if (category === "bags") {
-                    await createBag({
-                        item_id: item.id,
-                        valid_region_points: fileMeta.valid_region_points || null
-                    });
-                } else if (category === "threats") {
-                    await createThreat({
-                        item_id: item.id,
-                        threat_type: null,
-                        severity: null
-                    });
-                    await createNonThreatItem({
-                        item_id: item.id,
-                        subcategory_slug: subcategory.toLowerCase().replace(/\s+/g, "-")
-                    });
-                } else {
-                    await createNonThreatItem({
-                        item_id: item.id,
-                        subcategory_slug: subcategory.toLowerCase().replace(/\s+/g, "-")
-                    });
-                }
-
-                processed.push(metaItemId);
-                continue; // Skip the rest of the loop for pre-processed items
-            }
+            // Find metadata for this file
+            const fileMeta = metadataArray.find(m => m.originalname === file.originalname) || {};
 
             // Check if item already exists
             if (await itemExists(itemId)) {
@@ -696,27 +529,27 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
             }
 
             // Classify by filename prefix only
-    const filename = file.originalname.toLowerCase();
-    let category, subcategory, pixel_value;
+            const filename = file.originalname.toLowerCase();
+            let category, subcategory, pixel_value;
 
-    if (filename.startsWith("bag")) {
-      category = "bags";
-      pixel_value = 42000 + Math.floor(Math.random() * 10000);
-    } else if (filename.startsWith("threat")) {
-      category = "threats";
-      pixel_value = 10000 + Math.floor(Math.random() * 10000);
-    } else {
-      category = "non-threats";
-      pixel_value = 32767;
-    }
-    const parsed = parseFilename(file.originalname);
-    subcategory = parsed.subcategory;
-    const name = path.basename(file.originalname, path.extname(file.originalname));
+            if (filename.startsWith("bag")) {
+                category = "bags";
+                pixel_value = 42000 + Math.floor(Math.random() * 10000);
+            } else if (filename.startsWith("threat")) {
+                category = "threats";
+                pixel_value = 10000 + Math.floor(Math.random() * 10000);
+            } else {
+                category = "non-threats";
+                pixel_value = 32767;
+            }
+            const parsed = parseFilename(file.originalname);
+            subcategory = parsed.subcategory;
+            const name = path.basename(file.originalname, path.extname(file.originalname));
 
-    if (fileMeta.category) {
-      category = fileMeta.category;
-    }
-    if (fileMeta.subcategory) subcategory = fileMeta.subcategory;
+            if (fileMeta.category) {
+                category = fileMeta.category;
+            }
+            if (fileMeta.subcategory) subcategory = fileMeta.subcategory;
             
             // Detect actual image dimensions from the saved file
             let width = 512;
@@ -730,11 +563,11 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
                 console.warn("Warning: could not detect image dimensions for", file.filename, dimErr);
             }
 
-            // Create item with our new ID
+            // Create item with actual filename (no UUID)
             const item = await createItem({
                 id: itemId,
                 filename: file.originalname,
-                filepath: file.filename,
+                filepath: file.filename, // This is the actual filename, not a UUID
                 category,
                 subcategory,
                 name,
@@ -787,6 +620,61 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
             }
 
             processed.push(itemId);
+            processedIds.add(file.originalname);
+        }
+
+        // Process pre-processed metadata items that were NOT in req.files
+        // (i.e., items already processed by /api/process-raw-files)
+        for (const m of metadataArray) {
+            if (m.preProcessed === true && !processedIds.has(m.originalname)) {
+                try {
+                    const metaItemId = m.itemId || m.originalname;
+                    const category = m.category || "non-threats";
+                    const subcategory = m.subcategory || "General";
+
+                    // Create item with pre-generated filepath — file already exists on disk
+                    const item = await createItem({
+                        id: metaItemId,
+                        filename: metaItemId,
+                        filepath: m.preGeneratedFilepath,
+                        category,
+                        subcategory,
+                        name: metaItemId,
+                        pixel_value: category === "bags" ? 42000 + Math.floor(Math.random() * 10000) : 32767,
+                        width: m.width || 512,
+                        height: m.height || 512,
+                        pixel_data_path: m.pixelDataFilename || null,
+                    });
+
+                    // Create sub-table records based on category
+                    if (category === "bags") {
+                        await createBag({
+                            item_id: item.id,
+                            valid_region_points: m.valid_region_points || null
+                        });
+                    } else if (category === "threats") {
+                        await createThreat({
+                            item_id: item.id,
+                            threat_type: null,
+                            severity: null
+                        });
+                        await createNonThreatItem({
+                            item_id: item.id,
+                            subcategory_slug: subcategory.toLowerCase().replace(/\s+/g, "-")
+                        });
+                    } else {
+                        await createNonThreatItem({
+                            item_id: item.id,
+                            subcategory_slug: subcategory.toLowerCase().replace(/\s+/g, "-")
+                        });
+                    }
+
+                    processed.push(metaItemId);
+                } catch (err) {
+                    console.error("Error processing preProcessed metadata:", m.originalname, err);
+                    errors.push({ filename: m.originalname, message: String(err) });
+                }
+            }
         }
 
         res.json({ 

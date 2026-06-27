@@ -1,5 +1,4 @@
 """process_raw_file.py — Process .dump.pgm and .tip files via Python readers.
-
 CLI usage:
     python process_raw_file.py \\
         --file-path /path/to/file.dump.pgm \\
@@ -7,22 +6,18 @@ CLI usage:
         --item-id P01X010-2024101200923 \\
         --library-images-dir /path/to/library_images \\
         --pixel-data-dir /path/to/pixel_data
-
 Outputs a single JSON line to stdout:
     Success: {"status":"done","id":"...","filepath":"...","pixelDataFilename":"...","width":...,"height":...,"fileType":"..."}
     Error:   {"status":"error","id":"...","reason":"..."}
 """
-
 import sys
 import json
 import os
 import uuid
 import argparse
 from pathlib import Path
-
 import numpy as np
 import cv2
-
 
 def import_from_path(module_name, file_path):
     """Dynamically import a Python module from an arbitrary file path."""
@@ -34,7 +29,6 @@ def import_from_path(module_name, file_path):
     spec.loader.exec_module(mod)
     return mod
 
-
 def resolve_scripts_dir():
     """Resolve the backend/scripts/ directory relative to this script's location.
     
@@ -44,9 +38,7 @@ def resolve_scripts_dir():
     """
     script_dir = Path(__file__).resolve().parent  # backend/src/lib/
     scripts_dir = script_dir.parent.parent / "scripts"  # backend/scripts/
-
     return scripts_dir
-
 
 def main():
     parser = argparse.ArgumentParser(description="Process raw .dump.pgm and .tip files")
@@ -56,61 +48,47 @@ def main():
     parser.add_argument("--library-images-dir", required=True, help="Output directory for the generated PNG")
     parser.add_argument("--pixel-data-dir", required=True, help="Output directory for pixel data JSON")
     args = parser.parse_args()
-
     file_path = args.file_path
     file_type = args.file_type
     item_id = args.item_id
     library_images_dir = args.library_images_dir
     pixel_data_dir = args.pixel_data_dir
-
     try:
         # Resolve the scripts directory and dynamically import the reader
         scripts_dir = resolve_scripts_dir()
-
         if file_type == "dump":
             dumpread_path = scripts_dir / "dumpread.py"
             if not dumpread_path.exists():
                 raise FileNotFoundError(f"dumpread.py not found at {dumpread_path}")
             dumpread = import_from_path("dumpread", str(dumpread_path))
-
             # ReadDump returns (high, low, R) as numpy 2D float64 arrays (when raw=False)
             high, low, R = dumpread.ReadDump(file_path, raw=False)
             pixel_array = high  # 2D float64, shape (rows, cols)
-
             # Convert to uint16 using the existing helper in dumpread.py
             img = dumpread.to_uint16(pixel_array)  # np.uint16 array
-
             # Dimensions from the high array shape
             rows, cols = pixel_array.shape
-
         else:  # file_type == "tip"
             tipread_path = scripts_dir / "tipread.py"
             if not tipread_path.exists():
                 raise FileNotFoundError(f"tipread.py not found at {tipread_path}")
             tipread = import_from_path("tipread", str(tipread_path))
-
             # read_tip returns (low_raw, high_raw) as numpy 2D uint16 arrays
             low_raw, high_raw = tipread.read_tip(file_path)
-
             # Apply 270° rotation (k=3), matching tipread.py's convert_tip_to_png behavior
             img = np.rot90(high_raw, k=3)  # uint16 array
-
             # Dimensions after rotation
             rows, cols = img.shape
-
         # --- Write 16-bit grayscale PNG ---
         os.makedirs(library_images_dir, exist_ok=True)
         png_path = os.path.join(library_images_dir, f"{item_id}.png")
         success = cv2.imwrite(png_path, img)
         if not success:
             raise RuntimeError(f"cv2.imwrite failed to write PNG to {png_path}")
-
         # --- Write pixel data JSON ---
         os.makedirs(pixel_data_dir, exist_ok=True)
-        pixel_uuid = str(uuid.uuid4())
-        pixel_filename = f"pre_{pixel_uuid}.json"
+        pixel_filename = f"{item_id}.json"
         pixel_path = os.path.join(pixel_data_dir, pixel_filename)
-
         # Convert pixel array to nested list for JSON serialization
         # Use the original pixel_array (before rotation for dump, before rotation for tip we use the rotated version)
         # For dump, pixel_array is the original high array
@@ -119,10 +97,8 @@ def main():
             pixel_data_for_json = pixel_array.tolist()  # convert to json-serializable
         else:
             pixel_data_for_json = img.tolist()  # rotated version
-
         with open(pixel_path, "w") as f:
             json.dump(pixel_data_for_json, f)
-
         # --- Output success result as JSON to stdout ---
         result = {
             "status": "done",
@@ -134,7 +110,6 @@ def main():
             "fileType": file_type,
         }
         print(json.dumps(result))
-
     except Exception as e:
         # Output error result as JSON to stdout
         error_result = {
@@ -144,7 +119,6 @@ def main():
         }
         print(json.dumps(error_result))
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

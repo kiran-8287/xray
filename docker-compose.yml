@@ -10,6 +10,12 @@ services:
     volumes:
       - ./backend/data:/app/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/items/categorized"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
 
   frontend:
     build:
@@ -18,7 +24,10 @@ services:
     ports:
       - "5174:5174"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    environment:
+      - VITE_API_URL=http://backend:8080
     restart: unless-stopped
 
 volumes:

@@ -3,6 +3,7 @@ import { CheckCircle2, AlertCircle, Upload as UploadIcon, AlertTriangle, Wand2, 
 import UploadDropZone from "../components/upload/UploadDropZone";
 import UploadFileQueue from "../components/upload/UploadFileQueue";
 import { useUploadContext } from "../context/UploadContext";
+import { API_BASE_URL } from "../config/api";
 
 const LIBRARIES = [
   { slug: "bags", name: "Bags", colorCls: "bg-blue-50 text-blue-700 border-blue-200" },
@@ -206,7 +207,7 @@ export default function UploadPage() {
     console.log(`[frontend] Starting raw file processing for ${files.length} files`);
 
     try {
-      const response = await fetch("http://localhost:8080/api/process-raw-files", {
+      const response = await fetch(`${API_BASE_URL}/api/process-raw-files`, {
         method: "POST",
         body: formData,
       });
@@ -353,7 +354,7 @@ export default function UploadPage() {
       }));
       formData.append("metadata", JSON.stringify(metadata));
 
-      const res = await fetch("http://localhost:8080/api/upload", {
+      const res = await fetch(`${API_BASE_URL}/api/upload`, {
         method: "POST",
         body: formData,
       });
@@ -367,6 +368,19 @@ export default function UploadPage() {
           setUploadStatus("error");
         } else {
           setUploadStatus("success");
+          // Refresh library after successful upload by fetching categorized items
+          try {
+            const libraryRes = await fetch(`${API_BASE_URL}/api/items/categorized`);
+            if (libraryRes.ok) {
+              const libraryData = await libraryRes.json();
+              // Store in session storage so LibraryPage can pick it up
+              sessionStorage.setItem("refreshedCategorizedItems", JSON.stringify(libraryData));
+              // Also trigger a refresh event for any listeners
+              window.dispatchEvent(new CustomEvent("libraryRefresh", { detail: libraryData }));
+            }
+          } catch (refreshErr) {
+            console.warn("Failed to refresh library cache:", refreshErr);
+          }
           setTimeout(() => {
             clearAll();
           }, 1000);
@@ -473,12 +487,9 @@ export default function UploadPage() {
 
           {staged.length === 0 && (
             <div className="mt-6 py-8 text-center">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-surface border-2 border-dashed border-border flex items-center justify-center">
-                <UploadIcon size={28} className="text-muted/40" />
-              </div>
               <p className="text-lg font-semibold text-muted">No files selected</p>
               <p className="text-sm text-muted/60 mt-2 max-w-sm mx-auto leading-relaxed">
-                Drag and drop a folder or individual image files into the dropzone above to queue them for upload
+                Drag and drop a folder or individual dump or tip files into the dropzone above to queue them for upload
               </p>
             </div>
           )}

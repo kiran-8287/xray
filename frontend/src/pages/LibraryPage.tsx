@@ -4,6 +4,7 @@ import { Image, AlertTriangle, CheckCircle2, X, XCircle, Trash2, Loader2, Settin
 import type { Item, CategorizedItems } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import { generateCombinations } from "../lib/combinationGenerator";
+import { API_BASE_URL } from "../config/api";
 function normalizeCategoryName(cat: string): string {
   const normalized = (cat || "").toLowerCase().trim();
   if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) {
@@ -194,19 +195,49 @@ export default function LibraryPage() {
     fetchCategorizedItems();
   }, []);
 
+  // Listen for library refresh events from upload page
+  useEffect(() => {
+    const handleLibraryRefresh = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const data = customEvent.detail;
+      if (data) {
+        const merged = mergeCategorizedItems(data.categorized || data);
+        setCategorizedItems(merged);
+        showNotification("success", "Library refreshed with new items!");
+      }
+    };
+
+    window.addEventListener("libraryRefresh", handleLibraryRefresh);
+    return () => window.removeEventListener("libraryRefresh", handleLibraryRefresh);
+  }, []);
+
   useEffect(() => {
     localStorage.setItem("selectedItemIds", JSON.stringify(Array.from(selectedItems)));
   }, [selectedItems]);
 
   const fetchCategorizedItems = async () => {
     try {
-      const res = await fetch("http://localhost:8080/api/items/categorized");
+      // Check for recently refreshed data from upload
+      const cachedData = sessionStorage.getItem("refreshedCategorizedItems");
+      if (cachedData) {
+        sessionStorage.removeItem("refreshedCategorizedItems");
+        const data = JSON.parse(cachedData);
+        const merged = mergeCategorizedItems(data.categorized || data);
+        setCategorizedItems(merged);
+        if (!Object.keys(merged).includes(activeCategory)) {
+          setActiveCategory(Object.keys(merged)[0] || "bags");
+          setActiveSubcategory("all");
+        }
+        return;
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/items/categorized`);
       const data = await res.json();
       if (data.ok) {
         const merged = mergeCategorizedItems(data.categorized);
         setCategorizedItems(merged);
         if (!Object.keys(merged).includes(activeCategory)) {
-          setActiveCategory(Object.keys(merged)[0] || "bags");
+          setActiveCategory(Object.keys(merged)[0] || "bars");
           setActiveSubcategory("all");
         }
       }

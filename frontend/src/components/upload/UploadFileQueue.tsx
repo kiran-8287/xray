@@ -351,7 +351,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             {staged.map((s, idx) => {
               const file = s.file as File;
               const preview = s.preProcessed
-                ? `http://localhost:8080/data/library_images/${s.itemId}.png`
+                ? `http://localhost:8080/data/library_images/${s.preGeneratedFilepath}`
                 : URL.createObjectURL(file);
               const isBags = s.category === "bags";
               const inlineSubOptions = getInlineSubcategoryOptions(s.category);
@@ -381,7 +381,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
                       value={s.category || ""}
                       onChange={(e) => handleInlineCategoryChange(idx, e.target.value)}
-                      disabled={uploading || (s.preProcessed && s.fileType === "dump")}
+                      disabled={uploading}
                     >
                       <option value="">NONE</option>
                       {categoryOptions.map((cat) => (
@@ -394,7 +394,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
                       value={s.subcategory || ""}
                       onChange={(e) => handleInlineSubcategoryChange(idx, e.target.value)}
-                      disabled={uploading || !s.category || (s.preProcessed && s.fileType === "dump")}
+                      disabled={uploading || !s.category}
                     >
                       <option value="">NONE</option>
                       {inlineSubOptions.length > 0 ? (
@@ -466,7 +466,15 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             <h3 className="text-lg font-semibold mb-4">Edit: {(editDraft.file as File).name}</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <img src={URL.createObjectURL(editDraft.file)} alt={(editDraft.file as File).name} className="w-full h-56 object-contain bg-surface border border-border rounded" />
+                <img
+                  src={
+                    editDraft.preProcessed
+                      ? `http://localhost:8080/data/library_images/${editDraft.preGeneratedFilepath}`
+                      : URL.createObjectURL(editDraft.file as File)
+                  }
+                  alt={(editDraft.file as File).name}
+                  className="w-full h-56 object-contain bg-surface border border-border rounded"
+                />
               </div>
               <div>
                 <label className="text-xs text-muted">Category</label>
@@ -522,7 +530,11 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
       )}
       {editingIndex != null && editDraft && isValidRegionEditorOpen && (
         <ValidRegionEditor
-          imageSrc={URL.createObjectURL(editDraft.file)}
+          imageSrc={
+            editDraft.preProcessed
+              ? `http://localhost:8080/data/library_images/${editDraft.preGeneratedFilepath}`
+              : URL.createObjectURL(editDraft.file as File)
+          }
           initialPoints={
             editDraft.valid_region_points
               ? (Array.isArray(editDraft.valid_region_points)
