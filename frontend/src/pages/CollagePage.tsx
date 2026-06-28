@@ -1,12 +1,46 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Plus, Loader2, CheckCircle2, XCircle, Grid3X3, BookOpen, ChevronLeft, ChevronRight, AlertTriangle, List, X, FolderOpen } from "lucide-react";
+import { API_BASE_URL } from "../config/api";
 import type { Item } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import SyntheticPreview from "../components/collage/SyntheticPreview";
 import { getRectCorners, getTransformedPolygon } from "../lib/geometry";
 
 const ITEMS_PER_PAGE = 50;
+
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Recursively strip known unserialisable / unstable properties from objects
+ *  destined for sessionStorage.  Defensive measure against ORM metadata
+ *  (e.g. SQLAlchemy `_sa_*` keys) or custom class instances crept in via
+ *  `item.validRegionData` (assigned straight from DB JSONB in
+ *  backend/src/server.js:432) or any other ad-hoc augmentations. */
+function cleanForSerialization<T>(value: T): T {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== "object") return value;
+
+  if (Array.isArray(value)) {
+    return value.map((item) => cleanForSerialization(item)) as unknown as T;
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (key.startsWith("_sa_")) continue;
+    if (typeof val === "function") continue;
+    if (key === "validRegionData") continue; // see note above
+    out[key] = cleanForSerialization(val);
+  }
+  return out as T;
+}
+
+/** Return a lightweight identity key for an item — stable across saves. */
+function itemKey(item: Item): string {
+  return item.id + "|" + item.category + "|" + item.name;
+}
 
 export default function CollagePage() {
   const navigate = useNavigate();
@@ -15,20 +49,99 @@ export default function CollagePage() {
     | { selectedBags?: Item[]; selectedThreats?: Item[]; selectedOthers?: Item[]; densityPreset?: "empty" | "few" | "filled" }
     | undefined;
 
-  // Clear all stored selections and combinations on page load
+  // shelf-storage: restore previous state from sessionStorage/localStorage
+  // when no fresh locationState is present, with backend fallback for stale item refs
   useEffect(() => {
-    try {
-      localStorage.removeItem("selectedBags");
-      localStorage.removeItem("selectedThreats");
-      localStorage.removeItem("selectedOthers");
-      sessionStorage.removeItem("collageCombinations");
-      sessionStorage.removeItem("collageFailures");
-    } catch (err) {
-      console.error("Error clearing collage storage:", err);
+    if (locationState && locationState.selectedBags && locationState.selectedBags.length > 0) {
+      return; // fresh navigation from Library — handled by the locationState effect below
     }
+
+    const restoredCombos = [];
+    const restoredFailures = [];
+    const restoredBags = [];
+    const restoredThreats = [];
+    const restoredOthers = [];
+    let restoreError = null;
+
+    const readJSON = (raw) => { if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } };
+
+    try {
+      restoredCombos.push(...(readJSON(sessionStorage.getItem("collageCombinations")) || []));
+      restoredFailures.push(...(readJSON(sessionStorage.getItem("collageFailures")) || []));
+      restoredBags.push(...(readJSON(localStorage.getItem("selectedBags")) || []));
+      restoredThreats.push(...(readJSON(localStorage.getItem("selectedThreats")) || []));
+      restoredOthers.push(...(readJSON(localStorage.getItem("selectedOthers")) || []));
+    } catch (err) {
+      console.error("[CollagePage] error reading storage:", err);
+      restoreError = String(err);
+    }
+
+    if (
+      restoredCombos.length === 0 && restoredFailures.length === 0 &&
+      restoredBags.length === 0 && restoredThreats.length === 0 && restoredOthers.length === 0
+    ) return;
+
+    const applyRestore = (fb, ft, fo) => {
+      const bags = fb || restoredBags;
+      const threats = ft || restoredThreats;
+      const others = fo || restoredOthers;
+      setCombinations(restoredCombos);
+      setFailures(restoredFailures);
+      setSelectedBags(bags); setSelectedThreats(threats); setSelectedOthers(others);
+      if (restoreError) console.warn("[CollagePage] " + restoreError);
+      try {
+        sessionStorage.setItem("collageCombinations", JSON.stringify(restoredCombos));
+        sessionStorage.setItem("collageFailures", JSON.stringify(restoredFailures));
+        localStorage.setItem("selectedBags", JSON.stringify(bags));
+        localStorage.setItem("selectedThreats", JSON.stringify(threats));
+        localStorage.setItem("selectedOthers", JSON.stringify(others));
+      } catch (e) {
+        console.error("[CollagePage] error re-saving after restore:", e);
+      }
+    };
+
+    // Detects stale item refs (e.g. hard refresh cleared localStorage but sessionStorage kept combos).
+    // Rebuilds item arrays by fetching items from the backend matching combo item ids.
+    const comboItemIds = new Set();
+    restoredCombos.forEach(c => {
+      comboItemIds.add(c.bag.id);
+      if (c.threat) comboItemIds.add(c.threat.id);
+      c.others.forEach(o => comboItemIds.add(o.id));
+    });
+
+    if (restoredCombos.length > 0 && comboItemIds.size > 0 &&
+        restoredBags.length === 0 && restoredThreats.length === 0 && restoredOthers.length === 0) {
+      (async () => {
+        try {
+          const res = await fetch(API_BASE_URL + "/api/items/categorized");
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          const cat = data.categorized || data;
+          const matchedBags = [], matchedThreats = [], matchedOthers = [];
+          for (const subcats of Object.values(cat)) {
+            for (const items of Object.values(subcats)) {
+              for (const item of items) {
+                if (!comboItemIds.has(item.id)) continue;
+                const cl = (item.category || "").toLowerCase();
+                if (cl.includes("bag")) matchedBags.push(item);
+                else if (cl.includes("threat")) matchedThreats.push(item);
+                else matchedOthers.push(item);
+              }
+            }
+          }
+          applyRestore(matchedBags, matchedThreats, matchedOthers);
+        } catch (e) {
+          console.error("[CollagePage] fetch fresh items failed:", e);
+          applyRestore();
+        }
+      })();
+      return;
+    }
+
+    applyRestore();
   }, []);
 
-  // Selections from library (fresh start - no restoration from localStorage)
+  // Selections from library
   const [selectedBags, setSelectedBags] = useState<Item[]>([]);
   const [selectedThreats, setSelectedThreats] = useState<Item[]>([]);
   const [selectedOthers, setSelectedOthers] = useState<Item[]>([]);
