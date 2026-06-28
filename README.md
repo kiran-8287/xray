@@ -1,8 +1,4 @@
-﻿# Synthetic X-Ray Bag Scan Generation System
-
-## Quick Start
-
-### Prerequisites
+﻿### Prerequisites
 - **Docker Desktop (Recommended):** [Install Docker Desktop](https://www.docker.com/get-started)
   - **Important:** After installing, launch Docker Desktop and wait for it to show **"Docker Desktop is running"** (look for the whale icon in your system tray). Containers will not start without it.
 - **OR Node.js 18+:** [Install Node.js](https://nodejs.org/)
@@ -28,7 +24,6 @@ chmod +x bootstrap.sh
 .\bootstrap.bat
 ```
 
-> On Windows, always use `.\bootstrap.bat` (with the `.\` prefix) to ensure you're running it from the correct directory.
 
 #### B) Or Run Docker Commands Manually
 
@@ -46,7 +41,6 @@ docker compose ps
 docker compose down
 ```
 
-> **Note:** Use `docker compose` (v2, no hyphen) — this is the modern Docker Compose syntax. The older `docker-compose` (with hyphen) is deprecated.
 
 #### C) Access the Application
 
@@ -122,15 +116,3 @@ Then open **http://localhost:5174** in your browser.
 - If Docker fails with permission errors, make sure Docker Desktop is running **as administrator** (right-click → Run as administrator).
 
 ---
-
-## What's Included
-
-- **No PostgreSQL**: Uses JSON files for all data storage
-- **Portable Docker setup**: Run without installing Node.js on your system
-- **Cross-platform scripts**: `bootstrap.sh` (Linux/Mac) and `bootstrap.bat` (Windows) for one-command setup
-- **No native modules**: Replaced `canvas` with pure-JS `jimp` — no Python/C++ build tools needed
-- **No admin/sudo required**: All dependencies install without elevated privileges
-- **Clean npm output**: Audit and funding prompts disabled (`--no-audit --no-fund`) in all scripts
-- **Vite compatibility**: Frontend uses `npx vite` to avoid Windows permission issues
-- **Data auto-creation**: All necessary directories and files are created automatically
-- **Data persistence**: Your library items and saved workspaces are stored in `backend/data/` and survive container restarts or process stops
