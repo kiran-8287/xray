@@ -2,14 +2,55 @@ import React, { useState } from "react";
 import { 
   HelpCircle, X, ChevronRight, Upload, Grid, Settings, 
   Layers, BookOpen, Award, FileText, MousePointer, Keyboard,
-  PenTool, Square, Circle, ZoomIn
+  PenTool, Square, Circle, ZoomIn, Save, FolderOpen, Image
 } from "lucide-react";
 
 export default function HelpMenu() {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<string>("beer-lambert");
+  const [activeSection, setActiveSection] = useState<string>("getting-started");
 
   const sections = [
+    {
+      id: "getting-started",
+      title: "Getting Started",
+      icon: <BookOpen size={16} />,
+      content: (
+        <div className="space-y-4 animate-fade-in">
+          <h4 className="text-lg font-bold text-ink">Welcome to X-Ray Collage Generator</h4>
+          <p className="text-sm text-muted leading-relaxed">
+            This application helps you create realistic X-ray scan collages by combining bag scans with various objects. The system uses Beer-Lambert law to simulate realistic X-ray attenuation when objects overlap.
+          </p>
+          <div className="bg-sky-50 border border-sky-200 text-sky-800 rounded-xl p-4 text-sm">
+            <span className="font-bold">▎ Application Overview</span>
+            <p className="mt-1">
+              The app consists of 5 main pages: Upload, Library, Collage, Customize, and Saved. Each page serves a specific purpose in the workflow of creating X-ray scan collages.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 mt-4">
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">1. Upload</p>
+              <p className="text-xs text-muted leading-relaxed">Upload scanned bag images (PNG) or raw dump/tip files to add them to your library.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">2. Library</p>
+              <p className="text-xs text-muted leading-relaxed">Browse, organize, and manage your scanned items. Select bags and objects to create combinations.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">3. Collage</p>
+              <p className="text-xs text-muted leading-relaxed">View generated combinations of bags with objects. Bulk save all workspaces at once.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">4. Customize</p>
+              <p className="text-xs text-muted leading-relaxed">Fine-tune individual workspaces by adjusting object positions, rotations, and validating placements.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">5. Saved</p>
+              <p className="text-xs text-muted leading-relaxed">View and manage all your saved workspace layouts with preview thumbnails.</p>
+            </div>
+          </div>
+        </div>
+      ),
+    },
     {
       id: "beer-lambert",
       title: "Beer–Lambert Law",
@@ -48,9 +89,9 @@ export default function HelpMenu() {
       icon: <Upload size={16} />,
       content: (
         <div className="space-y-4 animate-fade-in">
-          <h4 className="text-lg font-bold text-ink">Uploading Custom Scanned Bags</h4>
+          <h4 className="text-lg font-bold text-ink">Uploading Scanned Bags & Raw Files</h4>
           <p className="text-sm text-muted leading-relaxed">
-            You can upload bulk grayscale PNG images directly from your computer to add them to your local libraries.
+            You can upload bulk grayscale PNG images or raw dump/tip files directly from your computer to add them to your local libraries.
           </p>
           <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm">
             <span className="font-bold">▎ Important: Filename Naming Standard</span>
@@ -59,7 +100,21 @@ export default function HelpMenu() {
             </p>
           </div>
           <div className="space-y-2">
-            <h5 className="text-xs font-semibold text-ink uppercase tracking-wider">File Requirements</h5>
+            <h5 className="text-xs font-semibold text-ink uppercase tracking-wider">Supported File Types</h5>
+            <ul className="text-xs text-muted list-disc list-inside space-y-1">
+              <li><strong>PNG Images:</strong> Grayscale PNG files (preferably 512×512 or square dimensions).</li>
+              <li><strong>Raw Dump Files:</strong> .dump.pgm files for bulk processing with NDJSON streaming.</li>
+              <li><strong>Raw Tip Files:</strong> .tip files for bulk processing with NDJSON streaming.</li>
+            </ul>
+          </div>
+          <div className="bg-sky-50 border border-sky-200 text-sky-800 rounded-xl p-4 text-sm">
+            <span className="font-bold">▎ Raw File Processing</span>
+            <p className="mt-1">
+              When you upload raw dump or tip files, the system processes them via NDJSON streaming. You'll see real-time progress as files are processed and staged for upload. Pre-processed files are automatically categorized as "bags" (dump files) or "non-threats" (tip files).
+            </p>
+          </div>
+          <div className="space-y-2">
+            <h5 className="text-xs font-semibold text-ink uppercase tracking-wider">PNG File Requirements</h5>
             <ul className="text-xs text-muted list-disc list-inside space-y-1">
               <li>Format: Grayscale PNG files only.</li>
               <li>Sizing: Preferably 512×512 or square dimensions for optimal preview.</li>
@@ -80,7 +135,7 @@ export default function HelpMenu() {
             Browse all uploaded scanned bags organized dynamically by category. You can perform multi-selection across categories to bundle objects for collages.
           </p>
           <div className="bg-sky-50 border border-sky-200 text-sky-800 rounded-xl p-4 text-sm">
-            <span className="font-bold">▎ Library Sidebar navigation</span>
+            <span className="font-bold">▎ Library Sidebar Navigation</span>
             <p className="mt-1">
               Select category groups from the left pane to focus on relevant objects. Filter further using subcategory chips at the top of the item grid.
             </p>
@@ -94,6 +149,20 @@ export default function HelpMenu() {
               <p className="text-xs font-semibold text-ink mb-1">Valid Region Trigger</p>
               <p className="text-xs text-muted leading-relaxed">On "Bags" category cards, click the mini Edit icon to open the custom Valid Placement Region Editor.</p>
             </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">Multi-Selection</p>
+              <p className="text-xs text-muted leading-relaxed">Select multiple items across categories to generate K-combinations for collage generation.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">K-Combinations</p>
+              <p className="text-xs text-muted leading-relaxed">Set the K value in the selection tray to control how many combinations to generate from selected items.</p>
+            </div>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm">
+            <span className="font-bold">▎ Item Management</span>
+            <p className="mt-1">
+              You can edit item details (category/subcategory), delete individual items, or bulk delete entire categories/subcategories. All changes are saved to the backend database.
+            </p>
           </div>
         </div>
       ),
@@ -106,13 +175,29 @@ export default function HelpMenu() {
         <div className="space-y-4 animate-fade-in">
           <h4 className="text-lg font-bold text-ink">Collage Generator</h4>
           <p className="text-sm text-muted leading-relaxed">
-            Pre-generated bag and item combinations show in a responsive card grid to preview compound X-ray scans.
+            Pre-generated bag and item combinations show in a responsive card grid to preview compound X-ray scans. Click any collage to open it in the Customization Workspace.
           </p>
           <div className="bg-sky-50 border border-sky-200 text-sky-800 rounded-xl p-4 text-sm">
             <span className="font-bold">▎ Clean vs Threat Flags</span>
             <p className="mt-1">
               Collages containing items classified in the threats database automatically get tagged with a red "Threat" badge. Clean collages show a green "Clean" badge.
             </p>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm">
+            <span className="font-bold">▎ Bulk Save All Workspaces</span>
+            <p className="mt-1">
+              Use the folder icon button in the top-right to bulk save all generated combinations at once. This saves all workspaces to the Saved Layouts page with auto-generated annotations describing each bag and its contents.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">Pagination</p>
+              <p className="text-xs text-muted leading-relaxed">Combinations are paginated (50 per page) for easy browsing through large result sets.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">Failure Logs</p>
+              <p className="text-xs text-muted leading-relaxed">If some combinations fail to generate, click the "Issues" button to see detailed error logs.</p>
+            </div>
           </div>
           <p className="text-xs text-muted leading-relaxed">
             Clicking on any collage card automatically routes you to the Customization Workspace with those exact bag, threat, and clothing scanned bags loaded on the canvas.
@@ -272,7 +357,7 @@ export default function HelpMenu() {
         <div className="space-y-4 animate-fade-in">
           <h4 className="text-lg font-bold text-ink">Customization Workspace</h4>
           <p className="text-sm text-muted leading-relaxed">
-            Rescale, move, or rotate scanned bags within the active bag. Compounding pixel transparency values are calculated live on overlay.
+            Rescale, move, or rotate scanned bags within the active bag. Compounding pixel transparency values are calculated live on overlay. The workspace provides full control over object placement and validation.
           </p>
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
@@ -280,9 +365,31 @@ export default function HelpMenu() {
               <p className="text-xs text-muted leading-relaxed">Use the controls in the bottom-right corner to zoom in/out or maximize the canvas bounds.</p>
             </div>
             <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
-              <p className="text-xs font-semibold text-ink mb-1">Layer Ordering</p>
-              <p className="text-xs text-muted leading-relaxed">Adjust z-order of scanned bags from the toolbar to change overlap calculations (Compounding absorption).</p>
+              <p className="text-xs font-semibold text-ink mb-1">Object Manipulation</p>
+              <p className="text-xs text-muted leading-relaxed">Drag objects to reposition them. Use the blue rotation handle to rotate objects. All changes are tracked in history.</p>
             </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">Undo/Redo</p>
+              <p className="text-xs text-muted leading-relaxed">Use Ctrl+Z to undo and Ctrl+Y to redo changes. Full history tracking for all object manipulations.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">Valid Region Overlay</p>
+              <p className="text-xs text-muted leading-relaxed">Toggle the valid region overlay to see where objects can be placed. Out-of-bounds objects are highlighted in red.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">Grid Overlay</p>
+              <p className="text-xs text-muted leading-relaxed">Toggle grid overlay for better spatial alignment and positioning reference.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">Randomize</p>
+              <p className="text-xs text-muted leading-relaxed">Click the Randomize button to generate new random positions for all non-bag objects.</p>
+            </div>
+          </div>
+          <div className="bg-sky-50 border border-sky-200 text-sky-800 rounded-xl p-4 text-sm">
+            <span className="font-bold">▎ Properties Panel</span>
+            <p className="mt-1">
+              Select any object to view its properties in the right sidebar. You can edit position (X, Y), rotation, and view grayscale pixel values. The panel shows original and synthesized pixel values with live updates.
+            </p>
           </div>
         </div>
       ),
@@ -304,9 +411,77 @@ export default function HelpMenu() {
               <span className="text-xs text-muted font-mono bg-surface px-1.5 py-0.5 rounded border border-border">Drag blue dot handle</span>
             </div>
             <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
-              <span className="text-xs font-semibold text-ink">Save Workspace</span>
-              <span className="text-xs text-muted font-mono bg-surface px-1.5 py-0.5 rounded border border-border">Ctrl + S (Save button)</span>
+              <span className="text-xs font-semibold text-ink">Undo</span>
+              <span className="text-xs text-muted font-mono bg-surface px-1.5 py-0.5 rounded border border-border">Ctrl + Z</span>
             </div>
+            <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
+              <span className="text-xs font-semibold text-ink">Redo</span>
+              <span className="text-xs text-muted font-mono bg-surface px-1.5 py-0.5 rounded border border-border">Ctrl + Y</span>
+            </div>
+            <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
+              <span className="text-xs font-semibold text-ink">Save Workspace</span>
+              <span className="text-xs text-muted font-mono bg-surface px-1.5 py-0.5 rounded border border-border">Save button (min 10 chars)</span>
+            </div>
+            <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
+              <span className="text-xs font-semibold text-ink">Zoom In/Out</span>
+              <span className="text-xs text-muted font-mono bg-surface px-1.5 py-0.5 rounded border border-border">Buttons or Scroll Wheel</span>
+            </div>
+            <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
+              <span className="text-xs font-semibold text-ink">Pan Canvas</span>
+              <span className="text-xs text-muted font-mono bg-surface px-1.5 py-0.5 rounded border border-border">Space + Drag</span>
+            </div>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm">
+            <span className="font-bold">▎ Pro Tips</span>
+            <ul className="mt-1 space-y-1 list-disc list-inside">
+              <li>Workspaces are auto-saved to localStorage as you edit</li>
+              <li>Out-of-bounds objects are automatically detected and highlighted</li>
+              <li>Use the Randomize button to quickly generate new object placements</li>
+              <li>Bulk save from Collage page to save all combinations at once</li>
+            </ul>
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "saved-layouts",
+      title: "Saved Layouts",
+      icon: <FolderOpen size={16} />,
+      content: (
+        <div className="space-y-4 animate-fade-in">
+          <h4 className="text-lg font-bold text-ink">Saved Workspaces</h4>
+          <p className="text-sm text-muted leading-relaxed">
+            The Saved Layouts page displays all your saved workspaces with preview thumbnails. You can view details, delete layouts, and manage your collection of X-ray scan configurations.
+          </p>
+          <div className="bg-sky-50 border border-sky-200 text-sky-800 rounded-xl p-4 text-sm">
+            <span className="font-bold">▎ Layout Information</span>
+            <p className="mt-1">
+              Each saved layout shows a preview thumbnail, creation date, object count, and a breakdown of bags, threats, and other items. Click any layout to view full details.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">Preview Thumbnails</p>
+              <p className="text-xs text-muted leading-relaxed">Visual previews show all objects in the layout with proper layering and positioning.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">Detailed View</p>
+              <p className="text-xs text-muted leading-relaxed">Click a layout to see full details including object positions, rotations, and layer information.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">Delete Layouts</p>
+              <p className="text-xs text-muted leading-relaxed">Remove unwanted layouts using the delete button. Confirmation dialog prevents accidental deletion.</p>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
+              <p className="text-xs font-semibold text-ink mb-1">Pagination</p>
+              <p className="text-xs text-muted leading-relaxed">Layouts are paginated (20 per page) for easy browsing through large collections.</p>
+            </div>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm">
+            <span className="font-bold">▎ Bulk-Saved Layouts</span>
+            <p className="mt-1">
+              Layouts saved from the Collage page (bulk save) have synthesized IDs starting with "SB" and include complete workspace data with all object positions and valid regions.
+            </p>
           </div>
         </div>
       ),

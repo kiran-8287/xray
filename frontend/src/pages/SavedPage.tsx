@@ -296,7 +296,7 @@ export default function SavedPage() {
                 <div className="p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 flex-1">
-                      <h2 className="text-base font-semibold text-ink truncate" title={layout.name}>{layout.name}</h2>
+                      <h2 className="text-base font-semibold text-ink truncate" title={layout.id}>{layout.id}</h2>
                       <p className="mt-1 text-xs text-muted">Saved {new Date(layout.created_at).toLocaleString()}</p>
                       <p className="mt-1 text-[10px] font-mono text-accent-sky bg-accent/5 px-1.5 py-0.5 rounded border border-accent/20 inline-block">
                         ID: {layout.id}
@@ -330,7 +330,7 @@ export default function SavedPage() {
               >
                 <div className="flex items-center justify-between gap-4 border-b border-border bg-nav px-5 py-4">
                   <div className="min-w-0">
-                    <h2 className="truncate text-lg font-semibold text-ink">{selectedLayout.name}</h2>
+                    <h2 className="truncate text-lg font-semibold text-ink">{selectedLayout.id}</h2>
                     <p className="text-xs text-muted">Saved {new Date(selectedLayout.created_at).toLocaleString()}</p>
                   </div>
                   <button
@@ -381,7 +381,6 @@ export default function SavedPage() {
                                     {isBag ? "Bag" : isThreat ? "Threat" : obj.library || "Other"}
                                   </span>
                                 </div>
-                                <p className="mt-1 break-all text-xs text-muted">{obj.filepath}</p>
                                 {transform && (
                                   <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted">
                                     <span>X: {Math.round(transform.x)}</span>

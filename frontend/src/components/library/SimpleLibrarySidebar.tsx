@@ -1,5 +1,8 @@
 ﻿import React, { useState } from 'react';
 import { Folder, Check, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { BsFillLuggageFill } from 'react-icons/bs';
+import { GiPistolGun } from 'react-icons/gi';
+import { LuFolderCheck } from 'react-icons/lu';
 import type { Item } from '../../types/library';
 import { getCategoryConfig } from '../../config/categories';
 
@@ -76,7 +79,7 @@ export default function SimpleLibrarySidebar({
                   className={`flex-1 flex items-center gap-3 px-3 py-2 rounded-xl transition-all ${isCatActive ? 'bg-panel border-border shadow-sm font-bold text-accent' : 'hover:bg-panel/50 text-ink'}`}
                 >
                   <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm transition-transform group-hover:scale-105 ${config.bg} ${config.text}`}>
-                    <Folder size={14} />
+                    {catKey === 'bags' ? <BsFillLuggageFill /> : catKey === 'threats' ? <GiPistolGun /> : catKey === 'non-threats' ? <LuFolderCheck /> : <Folder size={14} />}
                   </div>
                   <span className="text-xs font-bold uppercase tracking-tight truncate">{config.label}</span>
                   <span className="ml-auto text-[10px] font-bold font-mono text-muted/70 bg-surface px-2 py-0.5 rounded-full border border-border">{itemsInCat.length}</span>

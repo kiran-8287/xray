@@ -5,6 +5,7 @@ import type { Item, CategorizedItems } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import { generateCombinations } from "../lib/combinationGenerator";
 import { API_BASE_URL } from "../config/api";
+import { getCategoryConfig } from "../config/categories";
 function normalizeCategoryName(cat: string): string {
   const normalized = (cat || "").toLowerCase().trim();
   if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) {
@@ -35,33 +36,6 @@ function mergeCategorizedItems(categorized: any): any {
   return merged;
 }
 
-const CATEGORY_MAP: Record<string, { bg: string; text: string; border: string; borderAccent: string; label: string; slug: string }> = {
-  bags: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", borderAccent: "border-blue-500", label: "Bags", slug: "bags" },
-  trays: { bg: "bg-slate-50", text: "text-slate-700", border: "border-slate-200", borderAccent: "border-slate-500", label: "Trays", slug: "trays" },
-  clothing: { bg: "bg-green-50", text: "text-green-700", border: "border-green-200", borderAccent: "border-green-500", label: "Clothing", slug: "clothing" },
-  clothes: { bg: "bg-green-50", text: "text-green-700", border: "border-green-200", borderAccent: "border-green-500", label: "Clothes", slug: "clothes" },
-  electronics: { bg: "bg-violet-50", text: "text-violet-700", border: "border-violet-200", borderAccent: "border-violet-500", label: "Electronics", slug: "electronics" },
-  "food-drink": { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", borderAccent: "border-amber-500", label: "Food & Drink", slug: "food-drink" },
-  food: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", borderAccent: "border-amber-500", label: "Food", slug: "food" },
-  "threat-prohibited-objects": { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threat-prohibited-objects" },
-  threats: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threats" },
-  threat: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threat" },
-  "non-threats": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", borderAccent: "border-gray-500", label: "Non-Threats", slug: "non-threats" },
-  bag: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", borderAccent: "border-blue-500", label: "Bags", slug: "bag" },
-  tray: { bg: "bg-slate-50", text: "text-slate-700", border: "border-slate-200", borderAccent: "border-slate-500", label: "Trays", slug: "tray" },
-  "toiletries-medical": { bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200", borderAccent: "border-sky-500", label: "Toiletries & Medical", slug: "toiletries-medical" },
-  "stationery-office": { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200", borderAccent: "border-indigo-500", label: "Stationery & Office", slug: "stationery-office" },
-  stationary: { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200", borderAccent: "border-indigo-500", label: "Stationary", slug: "stationary" },
-  "sports-outdoors": { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", borderAccent: "border-emerald-500", label: "Sports & Outdoors", slug: "sports-outdoors" },
-  miscellaneous: { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", borderAccent: "border-gray-500", label: "Miscellaneous", slug: "miscellaneous" },
-  misc: { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", borderAccent: "border-gray-500", label: "Misc", slug: "misc" },
-  lag: { bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200", borderAccent: "border-sky-500", label: "LAG", slug: "lag" },
-};
-
-function getCategoryConfig(category: string): { bg: string; text: string; border: string; borderAccent: string; label: string; slug: string } {
-  const normalized = normalizeCategoryName(category);
-  return CATEGORY_MAP[normalized] || CATEGORY_MAP.miscellaneous;
-}
 
 const SUBCATEGORY_MAP: Record<string, { name: string; slug: string }[]> = {
   bags: [

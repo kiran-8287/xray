@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { 
-  ZoomIn, ZoomOut, Maximize2, Sliders, ShieldAlert, ShieldCheck
+  ZoomIn, ZoomOut, Maximize2, Sliders, ShieldAlert, ShieldCheck, Loader2
 } from "lucide-react";
 import type { SceneObject } from "../types/customization";
 import type { Item } from "../types/library";
@@ -128,10 +128,12 @@ export default function CustomizationPage() {
   const [historyIndex, setHistoryIndex] = useState(0);
   const [showValidRegion, setShowValidRegion] = useState(true);
   const [showGrid, setShowGrid] = useState(false);
-  const [exportState, setExportState] = useState<{ status: "idle" | "saving" | "success" | "error"; message: string }>({ status: "idle", message: "" });
-  const [showSaveModal, setShowSaveModal] = useState(false);
-  const [workspaceAnnotation, setWorkspaceAnnotation] = useState<string>(`Workspace ${new Date().toISOString()}`);
   const [outOfBoundsNotification, setOutOfBoundsNotification] = useState<{ show: boolean; count: number }>({ show: false, count: 0 });
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [saveState, setSaveState] = useState<{ status: "idle" | "saving" | "success" | "error"; message: string }>({ status: "idle", message: "" });
+  const [showBackNavigationModal, setShowBackNavigationModal] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
+  const [lastSavedObjects, setLastSavedObjects] = useState<string | null>(null);
   
   const canvasDivRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -181,6 +183,9 @@ export default function CustomizationPage() {
             setObjects(parsed);
             setHistory([parsed]);
             setHistoryIndex(0);
+            // Initialize lastSavedObjectsRef with loaded objects (they're already "saved")
+            setLastSavedObjects(JSON.stringify(parsed));
+            setHasUnsavedChanges(false);
             // Clean up the session storage
             sessionStorage.removeItem(storageKey);
             return;
@@ -201,7 +206,10 @@ export default function CustomizationPage() {
           setObjects(parsed);
           setHistory([parsed]);
           setHistoryIndex(0);
-          return;
+          // Initialize lastSavedObjectsRef with loaded objects (they're already "saved")
+            setLastSavedObjects(JSON.stringify(parsed));
+            setHasUnsavedChanges(false);
+            return;
         }
       }
     } catch (err) {
@@ -238,6 +246,15 @@ export default function CustomizationPage() {
     const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
     localStorage.setItem(storageKey, JSON.stringify(objects));
   }, [objects, searchParams]);
+
+  // Track unsaved changes by comparing with last saved state
+  useEffect(() => {
+    if (!hasInitialized.current || objects.length === 0) return;
+    
+    const currentObjectsStr = JSON.stringify(objects);
+    const hasChanges = lastSavedObjects !== currentObjectsStr;
+    setHasUnsavedChanges(hasChanges);
+  }, [objects]);
 
   // Shared builder extracted so the Randomize button can call it again
   function buildAndSetObjects(
@@ -623,32 +640,32 @@ export default function CustomizationPage() {
     setPixelStats(new Map(stats));
   };
 
-  const handleExport = async () => {
-    // Recompute out-of-bounds now to avoid stale values
+  // Auto-save function - generates annotation from workspace contents
+  const handleAutoSave = async () => {
+    // Check for out-of-bounds objects
     const bagObjectNow = objects.find(o => o.library === "bag");
     const outOfBoundsNow = objects.filter(
       obj => bagObjectNow && obj.library !== "bag" && !isObjectInsideContainer(obj, bagObjectNow)
     );
 
     if (outOfBoundsNow.length > 0) {
-      setExportState({ status: "error", message: `Cannot save: ${outOfBoundsNow.length} object(s) out of bounds.` });
-      setTimeout(() => setExportState({ status: "idle", message: "" }), 3000);
+      setSaveState({ status: "error", message: `Cannot save: ${outOfBoundsNow.length} object(s) out of bounds.` });
+      setTimeout(() => setSaveState({ status: "idle", message: "" }), 3000);
       return;
     }
 
-    // Open modal to let user add an annotation / name before actually saving
-    setWorkspaceAnnotation(`Workspace ${new Date().toISOString()}`);
-    setShowSaveModal(true);
-  };
-
-  const doSaveWorkspace = async (name: string) => {
-    setShowSaveModal(false);
-    setExportState({ status: "saving", message: "Saving layout..." });
+    setSaveState({ status: "saving", message: "Saving..." });
     try {
+      // Generate auto-annotation from workspace contents
+      const threatNames = objects.filter(o => o.library === "threat").map(o => o.name);
+      const otherNames = objects.filter(o => o.library !== "bag" && o.library !== "threat").map(o => o.name);
+      const allObjects = [...threatNames, ...otherNames];
+      const annotation = `${bagObjectNow?.name || "Workspace"}${allObjects.length > 0 ? ` containing ${allObjects.join(", ")}` : ""}`;
+
       const bagObject = objects.find(o => o.library === "bag");
       const validRegionPolygon = bagObject ? getTransformedValidRegion(bagObject) : [];
 
-      // Find the bag's top-left corner (first corner of its rectangle)
+      // Find the bag's top-left corner
       let bagTopLeft: { x: number; y: number } = { x: 0, y: 0 };
       if (bagObject) {
         const bagCorners = getRectCorners(
@@ -666,7 +683,6 @@ export default function CustomizationPage() {
           obj.transform.rotation
         );
         
-        // Transform coordinates relative to bag's top-left corner
         const relativeCorners = corners.map(c => ({
           x: c.x - bagTopLeft.x,
           y: c.y - bagTopLeft.y
@@ -682,17 +698,11 @@ export default function CustomizationPage() {
           name: obj.name,
           library: obj.library,
           filepath: obj.filepath,
-          // Original center coordinates (absolute)
           center: { x: obj.transform.x, y: obj.transform.y },
-          // Center coordinates relative to bag's top-left
           relativeCenter,
-          // Original dimensions
           size: { width: obj.transform.width, height: obj.transform.height },
-          // Rotation
           rotation: obj.transform.rotation,
-          // 4 corner coordinates (absolute)
           corners,
-          // 4 corner coordinates (relative to bag's top-left)
           relativeCorners,
           originalPixelValue: obj.originalPixelValue,
           currentPixelValue: obj.currentPixelValue,
@@ -702,28 +712,22 @@ export default function CustomizationPage() {
         };
       });
 
-      // Transform valid region relative to bag's top-left
       const relativeValidRegion = validRegionPolygon.map(p => ({
         x: p.x - bagTopLeft.x,
         y: p.y - bagTopLeft.y
       }));
 
       const layout_json = {
-        name,
-        // Bag top-left corner (origin for relative coordinates)
+        name: annotation,
         bagOrigin: bagTopLeft,
-        // Bag information
         bag: bagObject ? {
           id: bagObject.id,
           name: bagObject.name,
           filepath: bagObject.filepath,
           size: { width: bagObject.transform.width, height: bagObject.transform.height },
         } : null,
-        // All objects
         objects: objectsWithSegmentation,
-        // Valid region (absolute coordinates)
         validRegionPolygon,
-        // Valid region (relative to bag's top-left)
         relativeValidRegion,
         createdAt: new Date().toISOString(),
       };
@@ -732,7 +736,7 @@ export default function CustomizationPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name,
+          name: annotation,
           filepath: null,
           layout_json,
         }),
@@ -743,19 +747,104 @@ export default function CustomizationPage() {
       }
 
       const data = await response.json();
-      setExportState({ status: "success", message: `Layout saved: ${data.layout.id}` });
+      setSaveState({ status: "success", message: `Saved successfully!` });
       setLastSavedTime(Date.now());
+      setHasUnsavedChanges(false);
+      setLastSavedObjects(JSON.stringify(objects));
+      
+      // Update localStorage so collage page reflects the changes
+      const bagId = searchParams.get("bagId") || "";
+      const threatId = searchParams.get("threatId") || "";
+      const otherIds = searchParams.get("otherIds") || "";
+      const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+      localStorage.setItem(storageKey, JSON.stringify(objects));
+      
+      // Also update the collage combinations in sessionStorage
+      // This ensures when user navigates back, the collage page shows updated data
+      const precomputedId = searchParams.get("precomputed") || "";
+      if (precomputedId) {
+        try {
+          const collageCombosKey = "collageCombinations";
+          const collageCombosStr = sessionStorage.getItem(collageCombosKey);
+          if (collageCombosStr) {
+            const collageCombos = JSON.parse(collageCombosStr);
+            const updatedCombos = collageCombos.map((combo: any) => {
+              if (combo.id === precomputedId) {
+                return {
+                  ...combo,
+                  objects: objects,
+                  bag: objects.find((o: any) => o.library === "bag") || combo.bag,
+                  threat: objects.find((o: any) => o.library === "threat") || combo.threat,
+                  others: objects.filter((o: any) => o.library !== "bag" && o.library !== "threat")
+                };
+              }
+              return combo;
+            });
+            sessionStorage.setItem(collageCombosKey, JSON.stringify(updatedCombos));
+          }
+        } catch (err) {
+          console.error("Error updating collage combinations:", err);
+        }
+      }
       
       setTimeout(() => {
-        setExportState({ status: "idle", message: "" });
+        setSaveState({ status: "idle", message: "" });
       }, 3000);
     } catch (error) {
-      console.error("Export error:", error);
-      setExportState({ status: "error", message: "Failed to save layout. Make sure backend is running." });
+      console.error("Save error:", error);
+      setSaveState({ status: "error", message: "Failed to save. Make sure backend is running." });
       
       setTimeout(() => {
-        setExportState({ status: "idle", message: "" });
+        setSaveState({ status: "idle", message: "" });
       }, 3000);
+    }
+  };
+
+  // Handle back navigation with unsaved changes warning
+  const handleBackNavigation = () => {
+    if (hasUnsavedChanges) {
+      setShowBackNavigationModal(true);
+      setPendingNavigation(() => () => navigate(-1));
+    } else {
+      navigate(-1);
+    }
+  };
+
+  // Intercept browser back/close/refresh using beforeunload event
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = "You have unsaved changes. Are you sure you want to leave?";
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [hasUnsavedChanges]);
+
+  const handleBackNavigationConfirm = async (action: "save" | "discard" | "cancel") => {
+    if (action === "save") {
+      await handleAutoSave();
+      setShowBackNavigationModal(false);
+      if (pendingNavigation) {
+        pendingNavigation();
+        setPendingNavigation(null);
+      }
+    } else if (action === "discard") {
+      setShowBackNavigationModal(false);
+      setHasUnsavedChanges(false);
+      if (pendingNavigation) {
+        pendingNavigation();
+        setPendingNavigation(null);
+      }
+    } else {
+      setShowBackNavigationModal(false);
+      setPendingNavigation(null);
     }
   };
 
@@ -797,64 +886,59 @@ export default function CustomizationPage() {
         selectedObjectId={selectedObjectId}
         showValidRegion={showValidRegion}
         showGrid={showGrid}
-        exportSaving={exportState.status === "saving"}
         outOfBoundsCount={outOfBoundsObjects.length}
         handleUndo={handleUndo}
         handleRedo={handleRedo}
         setShowValidRegion={setShowValidRegion}
         setShowGrid={setShowGrid}
         handleDeleteSelected={handleDeleteSelected}
-        handleExport={handleExport}
         handleRandomize={handleRandomize}
+        handleSave={handleAutoSave}
+        hasUnsavedChanges={hasUnsavedChanges}
+        handleBack={handleBackNavigation}
       />
 
-      {exportState.status !== "idle" && (
+      {/* Save Status Notification */}
+      {saveState.status !== "idle" && (
         <div className={`absolute top-28 right-4 z-50 px-4 py-2.5 rounded-xl shadow-panel border flex items-center gap-2 animate-slide-up ${
-          exportState.status === "success" 
+          saveState.status === "success" 
             ? "bg-emerald-50 border-emerald-200 text-emerald-800" 
-            : "bg-rose-50 border-rose-200 text-rose-800"
+            : saveState.status === "error"
+            ? "bg-rose-50 border-rose-200 text-rose-800"
+            : "bg-blue-50 border-blue-200 text-blue-800"
         }`}>
-          {exportState.status === "success" ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
-          <span className="font-semibold text-xs">{exportState.message}</span>
+          {saveState.status === "success" ? <ShieldCheck size={16} /> : saveState.status === "error" ? <ShieldAlert size={16} /> : <Loader2 size={16} className="animate-spin" />}
+          <span className="font-semibold text-xs">{saveState.message}</span>
         </div>
       )}
 
-      {showSaveModal && (
-        <div className="fixed inset-0 z-[9999] flex items-start justify-center p-6 pt-20">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowSaveModal(false)} />
-          <div className="relative z-[10000] w-full max-w-xl bg-white rounded-2xl shadow-lg border border-border p-5">
-            <h3 className="text-sm font-semibold text-ink mb-2">Save Workspace</h3>
-            <p className="text-xs text-muted mb-3">Add an annotation describing the bag and objects (this becomes the workspace name)</p>
-            <label className="space-y-2 text-sm block">
-              <span className="text-muted text-xs">Annotation / Workspace name</span>
-              <textarea
-                value={workspaceAnnotation}
-                onChange={(e) => setWorkspaceAnnotation(e.target.value)}
-                className="min-h-[120px] w-full rounded-3xl border border-border bg-white p-3 text-sm text-ink resize-none"
-                placeholder="e.g. Medium backpack containing laptop, phone, charger, and a water bottle"
-              />
-            </label>
-            <div className="mt-2 text-xs text-muted">
-              <span>Minimum 10 characters required to enable Save.</span>
-            </div>
-
-            
-
-            <div className="flex items-center justify-end gap-3 mt-4">
+      {/* Back Navigation Warning Modal */}
+      {showBackNavigationModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+          <div className="relative z-[10000] w-full max-w-md bg-white rounded-2xl shadow-lg border border-border p-6">
+            <h3 className="text-base font-semibold text-ink mb-2">Unsaved Changes</h3>
+            <p className="text-sm text-muted mb-5">
+              You have unsaved changes in this workspace. What would you like to do?
+            </p>
+            <div className="flex flex-col gap-2">
               <button
-                type="button"
-                onClick={() => setShowSaveModal(false)}
-                className="px-4 py-2 rounded-xl bg-panel border border-border text-sm text-muted hover:bg-surface"
+                onClick={async () => await handleBackNavigationConfirm("save")}
+                className="w-full px-4 py-2.5 rounded-xl bg-gradient-to-r from-accent to-accent-sky text-white font-semibold text-sm hover:shadow-btn-hover transition-all"
               >
-                Cancel
+                Save & Continue
               </button>
               <button
-                type="button"
-                onClick={() => doSaveWorkspace(workspaceAnnotation.trim() || `Workspace ${new Date().toISOString()}`)}
-                className={`px-4 py-2 rounded-xl text-white font-semibold text-sm ${workspaceAnnotation.trim().length >= 10 ? 'bg-gradient-to-r from-accent to-accent-sky' : 'bg-surface text-muted cursor-not-allowed opacity-60'}`}
-                disabled={workspaceAnnotation.trim().length < 10}
+                onClick={() => handleBackNavigationConfirm("discard")}
+                className="w-full px-4 py-2.5 rounded-xl bg-panel border border-border text-ink font-semibold text-sm hover:bg-surface transition-all"
               >
-                Save Workspace
+                Discard Changes
+              </button>
+              <button
+                onClick={() => handleBackNavigationConfirm("cancel")}
+                className="w-full px-4 py-2.5 rounded-xl text-muted font-semibold text-sm hover:text-ink transition-all"
+              >
+                Cancel
               </button>
             </div>
           </div>

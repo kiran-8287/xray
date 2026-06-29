@@ -1,7 +1,7 @@
 import React from "react";
 import { 
-  Undo2, Redo2, Save, Trash2, RotateCw, Settings, 
-  Layers, Layout, Shuffle, Grid, AlertTriangle
+  Undo2, Redo2, Trash2, RotateCw, Settings, 
+  Layers, Layout, Shuffle, Grid, AlertTriangle, Save, ChevronLeft
 } from "lucide-react";
 
 interface WorkspaceToolbarProps {
@@ -11,15 +11,16 @@ interface WorkspaceToolbarProps {
   selectedObjectId: string | null;
   showValidRegion: boolean;
   showGrid: boolean;
-  exportSaving: boolean;
   outOfBoundsCount: number;
   handleUndo: () => void;
   handleRedo: () => void;
   setShowValidRegion: (val: boolean) => void;
   setShowGrid: (val: boolean) => void;
   handleDeleteSelected: () => void;
-  handleExport: () => void;
   handleRandomize: () => void;
+  handleSave: () => void;
+  hasUnsavedChanges: boolean;
+  handleBack: () => void;
 }
 
 export default function WorkspaceToolbar({
@@ -29,18 +30,27 @@ export default function WorkspaceToolbar({
   selectedObjectId,
   showValidRegion,
   showGrid,
-  exportSaving,
   outOfBoundsCount,
   handleUndo,
   handleRedo,
   setShowValidRegion,
   setShowGrid,
   handleDeleteSelected,
-  handleExport,
   handleRandomize,
+  handleSave,
+  hasUnsavedChanges,
+  handleBack,
 }: WorkspaceToolbarProps) {
   return (
     <div className="bg-panel border-b border-border px-4 py-2 flex items-center gap-1.5 shadow-card relative z-20 h-11 flex-shrink-0 text-sm">
+      {/* Back Button */}
+      <button
+        onClick={handleBack}
+        className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface transition-all border-none bg-transparent cursor-pointer"
+        title="Back to Collage"
+      >
+        <ChevronLeft size={16} />
+      </button>
 
       {/* Undo/Redo */}
       <button
@@ -123,14 +133,15 @@ export default function WorkspaceToolbar({
         </>
       )}
 
-      {/* Export Save Button */}
+      {/* Save Button */}
       <button
-        onClick={handleExport}
-        disabled={exportSaving}
+        onClick={handleSave}
         className="ml-auto flex items-center gap-1.5 px-4 py-1.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover transition-all text-xs"
+        title="Save Workspace"
       >
         <Save size={14} />
-        {exportSaving ? "Saving..." : "Save Workspace"}
+        Save
+        {hasUnsavedChanges && <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />}
       </button>
     </div>
   );

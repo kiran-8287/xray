@@ -172,7 +172,7 @@ export function normalizeCategoryName(cat: string): string {
 const CATEGORY_MAP: Record<string, CategoryConfig> = {
   bags: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", borderAccent: "border-blue-500", label: "Bags", slug: "bags" },
   threats: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threats" },
-  "non-threats": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", borderAccent: "border-gray-500", label: "Non-Threats", slug: "non-threats" },
+  "non-threats": { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", borderAccent: "border-emerald-500", label: "Non-Threats", slug: "non-threats" },
 };
 
 export function getCategoryConfig(category: string): CategoryConfig {

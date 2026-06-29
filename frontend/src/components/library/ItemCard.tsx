@@ -164,44 +164,32 @@ export default function ItemCard({
 
       {/* Meta Section */}
       <div className="p-3 border-t border-surface">
-        <div className="flex items-center justify-between mb-1">
-          <h5 className="font-semibold text-ink text-xs truncate flex-1 mr-2" title={item.name}>
-            {formatDisplayName(item.name)}
-          </h5>
-          {item.category === "bags" && item.valid_region_points && item.valid_region_points.length > 0 && (
-            <div title="Valid region saved" className="flex-shrink-0">
-              <CheckCircle2 size={14} className="text-green-600" />
-            </div>
-          )}
-        </div>
-        <div className="flex items-center justify-between">
-          <span className={`inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-md border ${config.bg} ${config.text} ${config.border}`}>
-            {item.category}
-          </span>
-          <div className="flex items-center gap-1">
-            {item.category === "bags" && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEditRegion();
-                }}
-                className="p-1 rounded-md bg-panel border border-border text-muted hover:border-accent/50 hover:text-accent shadow-card transition-all"
-                title="Edit valid region"
-              >
-                <Edit3 size={12} />
-              </button>
-            )}
+        <h5 className="font-semibold text-ink text-xs truncate" title={item.name}>
+          {formatDisplayName(item.name)}
+        </h5>
+        <div className="flex items-center justify-end gap-1">
+          {item.category === "bags" && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onDelete();
+                onEditRegion();
               }}
-              className="p-1 rounded-md bg-panel border border-border text-muted hover:border-red-500 hover:text-red-600 shadow-card transition-all"
-              title="Delete item"
+              className="p-1 rounded-md bg-panel border border-border text-muted hover:border-accent/50 hover:text-accent shadow-card transition-all"
+              title="Edit valid region"
             >
-              <Trash2 size={12} />
+              <Edit3 size={12} />
             </button>
-          </div>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="p-1 rounded-md bg-panel border border-border text-muted hover:border-red-500 hover:text-red-600 shadow-card transition-all"
+            title="Delete item"
+          >
+            <Trash2 size={12} />
+          </button>
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Loader2, CheckCircle2, XCircle, Grid3X3, BookOpen, ChevronLeft, ChevronRight, AlertTriangle, List, X, FolderOpen } from "lucide-react";
+import { Plus, Loader2, CheckCircle2, XCircle, Grid3X3, ChevronLeft, ChevronRight, AlertTriangle, List, X, FolderOpen } from "lucide-react";
+import { IoMdPhotos } from "react-icons/io";
 import { API_BASE_URL } from "../config/api";
 import type { Item } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
@@ -468,7 +469,7 @@ export default function CollagePage() {
             onClick={() => navigate("/library")}
             className="px-6 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover transition-all text-base inline-flex items-center gap-2 cursor-pointer"
           >
-            <BookOpen size={18} />
+            <IoMdPhotos />
             Go to Library
           </button>
         </div>

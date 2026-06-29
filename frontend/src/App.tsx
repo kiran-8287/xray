@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, NavLink } from "react-router-dom";
-import { Grid3X3, BookOpen, Bookmark, Upload } from "lucide-react";
+import { Grid3X3, Bookmark, Upload } from "lucide-react";
+import { IoMdPhotos } from "react-icons/io";
 import UploadPage from "./pages/UploadPage";
 import CollagePage from "./pages/CollagePage";
 import CustomizationPage from "./pages/CustomizationPage";
@@ -28,7 +29,7 @@ export default function App() {
               Upload
             </NavLink>
             <NavLink to="/library" className={getNavLinkClass}>
-              <BookOpen size={15} />
+              <IoMdPhotos />
               Library
             </NavLink>
             <NavLink to="/collage" className={getNavLinkClass}>

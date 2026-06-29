@@ -1,5 +1,6 @@
 import React from "react";
 import { Grid3X3, Loader2, Settings2 } from "lucide-react";
+import { IoMdPhotos } from "react-icons/io";
 
 interface SelectionTrayProps {
   selectedCount: number;
@@ -70,7 +71,7 @@ export default function SelectionTray({
         disabled={selectedCount === 0}
         className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover hover:opacity-95 transition-all flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        <Grid3X3 size={15} />
+        <IoMdPhotos />
         Generate Collage
       </button>
     </div>
