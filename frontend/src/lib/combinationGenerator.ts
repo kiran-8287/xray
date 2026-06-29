@@ -7,31 +7,10 @@ import {
   getTransformedValidRegion,
 } from "./customizationHelpers";
 import { generateSynthesizedId } from "./synthesizedIdGenerator";
-import { normalizeCategoryName } from "../config/categories";
 import type { Point } from "../types/geometry";
-
-// Declare require for TypeScript compatibility (used for lazy loading to avoid circular dependencies)
-declare const require: (module: string) => any;
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
-const BAG_DISPLAY_SIZE = Math.min(CANVAS_W, CANVAS_H) * 0.85;
-
-// Use centralized normalizeCategoryName from config
-// normalizeCategoryName function removed - using import from config
-
-function getStencilKind(category: string): string {
-  const normalized = category.toLowerCase();
-  if (normalized.includes("bag")) return "bag";
-  if (normalized.includes("tray")) return "tray";
-  if (normalized.includes("threat") || normalized.includes("prohibited")) return "threat";
-  if (normalized.includes("cloth")) return "clothes";
-  if (normalized.includes("electronics")) return "electronics";
-  if (normalized.includes("food") || normalized.includes("drink")) return "food";
-  if (normalized.includes("stationery") || normalized.includes("stationary") || normalized.includes("office")) return "stationary";
-  if (normalized.includes("lag")) return "lag";
-  return "stationary"; // fallback
-}
 
 function parseOutline(item: Item): { x: number; y: number }[] | undefined {
   if (item.valid_region_points) {
@@ -119,7 +98,7 @@ function createNonThreatSceneObject(
   return {
     id: item.id,
     name: item.name,
-    library: getStencilKind(item.category),
+    library: "non-threat",
     originalPixelValue: item.pixel_value,
     currentPixelValue: item.pixel_value,
     oldPixelValue: null,
@@ -145,8 +124,7 @@ function nonThreatComboHash(nonThreatIds: string[], positions: { x: number; y: n
 
 function pickRandomSubset<T>(arr: T[], min: number, max: number): T[] {
   const count = min + Math.floor(Math.random() * (max - min + 1));
-  const shuffled = [...arr].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, Math.min(count, arr.length));
+  return shuffleArray(arr).slice(0, Math.min(count, arr.length));
 }
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -160,7 +138,6 @@ function shuffleArray<T>(arr: T[]): T[] {
 
 /**
  * Try to place a threat inside a bag at a given position and rotation.
- * Returns the position if valid, null otherwise.
  */
 function tryPlaceThreat(
   threat: Item,
@@ -255,6 +232,80 @@ function tryPlaceNonThreats(
 }
 
 /**
+ * Build a shuffled list of position+rotation candidates for a threat inside a bag.
+ * Uses a quantized grid of positions inside the bag's valid region, adds random
+ * samples if the grid is sparse, forms the Cartesian product with rotation angles,
+ * then shuffles the full candidate list.
+ */
+function buildPositionRotationCandidates(
+  bagObj: SceneObject,
+  threat: Item,
+  target: number
+): { x: number; y: number; rotation: number }[] {
+  const validRegion: Point[] = getTransformedValidRegion(bagObj) || [];
+
+  let minX = 0, maxX = 0, minY = 0, maxY = 0;
+  if (validRegion.length >= 3) {
+    minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
+    validRegion.forEach((p: Point) => {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    });
+  }
+
+  const threatW = threat.width ? Math.round(threat.width) : 120;
+  const threatH = threat.height ? Math.round(threat.height) : 60;
+
+  const gridStep = Math.max(threatW, threatH) * 0.6;
+  const positionCandidates: { x: number; y: number }[] = [];
+
+  if (validRegion.length >= 3) {
+    for (let px = minX + threatW / 2; px <= maxX - threatW / 2; px += gridStep) {
+      for (let py = minY + threatH / 2; py <= maxY - threatH / 2; py += gridStep) {
+        positionCandidates.push({ x: px, y: py });
+      }
+    }
+  }
+
+  // If grid produced too few candidates, add random ones to expand search
+  const requiredRandom = Math.max(0, target * 10 - positionCandidates.length);
+  for (let i = 0; i < requiredRandom; i++) {
+    const rx = minX + threatW / 2 + Math.random() * Math.max(0, maxX - minX - threatW);
+    const ry = minY + threatH / 2 + Math.random() * Math.max(0, maxY - minY - threatH);
+    positionCandidates.push({ x: rx, y: ry });
+  }
+
+  // Rotation angles: choose a reasonable step depending on target size
+  const rotationStep = target <= 12 ? 30 : target <= 24 ? 15 : target <= 72 ? 10 : 5;
+  const rotationAngles: number[] = [];
+  for (let angle = 0; angle < 360; angle += rotationStep) rotationAngles.push(angle);
+
+  // Cartesian product of positions × rotations
+  const candidates: { x: number; y: number; rotation: number }[] = [];
+  for (const p of positionCandidates) {
+    for (const r of rotationAngles) {
+      candidates.push({ x: p.x, y: p.y, rotation: r });
+    }
+  }
+
+  // Shuffle candidates using Fisher-Yates
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+
+  // Cap the number of candidates to avoid excessive memory usage in extreme cases.
+  const MAX_CANDIDATES = Math.max(1000, target * 200, 5000);
+  if (candidates.length > MAX_CANDIDATES) {
+    return candidates.slice(0, MAX_CANDIDATES);
+  }
+
+  return candidates;
+}
+
+/**
  * Generate unique placements for a (bag, threat) pair.
  * Uses systematic rotation stepping and random position sampling.
  * Returns the results and a failure log if the pair couldn't meet its target.
@@ -273,60 +324,7 @@ function generateThreatPlacements(
   const usedIds = globalUsedIds ?? new Set<string>();
   const bagObj = createBagSceneObject(bag);
 
-  // Build an unbiased, shuffled candidate list (positions × rotations)
-  // and iterate through it without modulo cycling to avoid bias.
-  // The helper will return a shuffled Cartesian product of positions and rotations.
-  // Import placed candidates generator from placementUtils.
-  // (Positions are quantized to a grid and expanded with random samples.)
-  const candidates = (function () {
-    try {
-      // Lazy import to avoid circular dependency issues
-      // Use dynamic import for TypeScript compatibility
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const placementUtils = require("./placementUtils");
-      const mod = (placementUtils as any).default || placementUtils;
-      const { buildPositionRotationCandidates } = mod;
-      return buildPositionRotationCandidates(bagObj, threat, target);
-    } catch (e) {
-      // Fallback to existing generation if import fails
-      const validRegion = getTransformedValidRegion(bagObj);
-      let minX = 0, maxX = 0, minY = 0, maxY = 0;
-      if (validRegion.length >= 3) {
-        minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
-        validRegion.forEach((p: Point) => {
-          if (p.x < minX) minX = p.x;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.y > maxY) maxY = p.y;
-        });
-      }
-      const threatW = threat.width ? Math.round(threat.width) : 120;
-      const threatH = threat.height ? Math.round(threat.height) : 60;
-      const gridStep = Math.max(threatW, threatH) * 0.6;
-      const positionCandidates: { x: number; y: number }[] = [];
-      if (validRegion.length >= 3) {
-        for (let px = minX + threatW / 2; px <= maxX - threatW / 2; px += gridStep) {
-          for (let py = minY + threatH / 2; py <= maxY - threatH / 2; py += gridStep) {
-            positionCandidates.push({ x: px, y: py });
-          }
-        }
-      }
-      if (positionCandidates.length < target * 2) {
-        for (let i = 0; i < target * 10; i++) {
-          const rx = minX + threatW / 2 + Math.random() * (maxX - minX - threatW || 0);
-          const ry = minY + threatH / 2 + Math.random() * (maxY - minY - threatH || 0);
-          positionCandidates.push({ x: rx, y: ry });
-        }
-      }
-      const rotationStep = target <= 12 ? 30 : target <= 24 ? 15 : target <= 72 ? 10 : 5;
-      const rotationAngles: number[] = [];
-      for (let angle = 0; angle < 360; angle += rotationStep) rotationAngles.push(angle);
-      const all: { x: number; y: number; rotation: number }[] = [];
-      for (const p of positionCandidates) for (const r of rotationAngles) all.push({ x: p.x, y: p.y, rotation: r });
-      return shuffleArray(all);
-    }
-  })();
-
+  const candidates = buildPositionRotationCandidates(bagObj, threat, target);
   const maxAttempts = Math.max(target * 100, 2000);
 
   for (let idx = 0; idx < candidates.length && results.length < target && idx < maxAttempts; idx++) {
@@ -398,24 +396,12 @@ function generateThreatPlacements(
   let failure: FailureLog | null = null;
   if (results.length < target) {
     if (results.length === 0) {
-      // Check if the issue is that the threat simply doesn't fit at all
-        let anyValidPlacement = false;
-        if (Array.isArray((candidates as any) || [])) {
-          for (const c of candidates as any[]) {
-            if (tryPlaceThreat(threat, bagObj, c.x, c.y, c.rotation)) {
-              anyValidPlacement = true;
-              break;
-            }
-          }
-        }
       failure = {
         bagName: bag.name,
         bagId: bag.id,
         threatName: threat.name,
         threatId: threat.id,
-        reason: anyValidPlacement
-          ? `Threat "${threat.name}" could not be placed in bag "${bag.name}" — no valid non-overlapping position found for non-threat items`
-          : `Threat "${threat.name}" does not fit inside bag "${bag.name}" at any rotation or position`,
+        reason: `Threat "${threat.name}" does not fit inside bag "${bag.name}" at any rotation or position`,
         expected: target,
         actual: 0,
       };
@@ -601,8 +587,6 @@ export function generateCombinations(
     const availablePairs = pairs.filter(p => !p.isExhausted);
     if (availablePairs.length === 0) return null;
 
-    // Calculate weights based on inverse usage
-    const totalUsage = availablePairs.reduce((sum, p) => sum + (p.usageCount + 1), 0);
     const maxUsage = Math.max(...availablePairs.map(p => p.usageCount), 1);
 
     let totalWeight = 0;
@@ -700,7 +684,6 @@ export function generateCombinations(
     const combo = tryGenerateOne(pair);
     if (combo) {
       results.push(combo);
-      usedIds.add(combo.id);
       consecutiveFailures = 0;
     } else {
       consecutiveFailures++;
