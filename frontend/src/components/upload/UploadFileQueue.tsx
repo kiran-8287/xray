@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
-import ValidRegionEditor from "../ValidRegionEditor";
-import { Trash2, Edit3, CheckSquare } from "lucide-react";
+import ValidRegionEditor from "./ValidRegionEditor";
+import { Trash2, Edit3, CheckSquare, Sparkles, Loader2 } from "lucide-react";
 import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName } from "../../config/categories";
 
 interface UploadFileQueueProps {
@@ -130,6 +130,9 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   // Mass assign state (for the top row dropdowns)
   const [massCategory, setMassCategory] = useState("");
   const [massSubcategory, setMassSubcategory] = useState("");
+  
+  // Auto-generate valid region state
+  const [autoGeneratingIndices, setAutoGeneratingIndices] = useState<Set<number>>(new Set());
 
   const massSubcategoryOptions = useMemo(() => {
     if (!massCategory) return [];
@@ -272,6 +275,58 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     setIsValidRegionEditorOpen(true);
   };
 
+  const handleAutoGenerateRegion = async (idx: number) => {
+    if (autoGeneratingIndices.has(idx)) return;
+    
+    const stagedItem = staged[idx];
+    if (!stagedItem || stagedItem.category !== "bags") return;
+    
+    setAutoGeneratingIndices(prev => new Set(prev).add(idx));
+    
+    try {
+      // Use the itemId to find the pixel data file
+      const pixelDataPath = `${stagedItem.itemId}.json`;
+      
+      const res = await fetch(`http://localhost:8080/api/auto-valid-region`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId: stagedItem.itemId,
+          pixelDataPath: pixelDataPath
+        }),
+      });
+      const data = await res.json();
+      
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to auto-generate valid region");
+      }
+      
+      // Update staged item with generated region
+      const copy = [...staged];
+      copy[idx] = {
+        ...copy[idx],
+        valid_region_points: {
+          points: data.data.points,
+          simplifiedPoints: data.data.points
+        }
+      };
+      setStaged(copy);
+      
+      // Show success notification
+      console.log(`Auto-generated valid region with ${data.data.points.length} points for item ${idx + 1}`);
+    } catch (err) {
+      console.error("Failed to auto-generate valid region:", err);
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      alert(`Auto-generation failed: ${msg}`);
+    } finally {
+      setAutoGeneratingIndices(prev => {
+        const next = new Set(prev);
+        next.delete(idx);
+        return next;
+      });
+    }
+  };
+
   return (
     <div className="bg-panel rounded-2xl border border-border shadow-card overflow-hidden flex flex-col">
       <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-nav flex-shrink-0">
@@ -409,14 +464,30 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
                   <td className="py-3 px-4 align-top">
                     {isBags ? (
-                      <button
-                        type="button"
-                        onClick={() => handleInlineValidRegion(idx)}
-                        className="text-xs px-2.5 py-1.5 rounded-lg border border-border bg-surface hover:bg-surface/80 transition-colors flex items-center gap-1"
-                      >
-                        <Edit3 size={12} />
-                        {s.valid_region_points ? "Edit" : "Set"}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleAutoGenerateRegion(idx)}
+                          disabled={autoGeneratingIndices.has(idx)}
+                          className="text-xs px-2 py-1.5 rounded-lg border border-border bg-surface hover:bg-amber-50 hover:border-amber-300 transition-colors flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Auto-generate valid region from pixel data"
+                        >
+                          {autoGeneratingIndices.has(idx) ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <Sparkles size={12} />
+                          )}
+                          Auto
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleInlineValidRegion(idx)}
+                          className="text-xs px-2.5 py-1.5 rounded-lg border border-border bg-surface hover:bg-surface/80 transition-colors flex items-center gap-1"
+                        >
+                          <Edit3 size={12} />
+                          {s.valid_region_points ? "Edit" : "Set"}
+                        </button>
+                      </div>
                     ) : (
                       <span className="text-xs text-muted/50">—</span>
                     )}
@@ -558,6 +629,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             }
             setIsValidRegionEditorOpen(false);
           }}
+          onAutoGenerate={editDraft.category === "bags" ? () => handleAutoGenerateRegion(editingIndex!) : undefined}
+          isAutoGenerating={editingIndex != null ? autoGeneratingIndices.has(editingIndex) : false}
         />
       )}
     </div>

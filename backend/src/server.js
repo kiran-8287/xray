@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { generateDataset } from "./api/datasetGenerator.js";
 import { isObjectInsideContainer } from "./lib/geometry.js";
+import { generateValidRegion } from "./lib/autoValidRegion.js";
 import Jimp from "jimp";
 import WorkerPool from "./lib/workerPool.js";
 import {
@@ -725,6 +726,112 @@ app.delete("/api/items/:id", async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Auto-generate valid region from raw pixel data (for pre-upload staged items)
+app.post("/api/auto-valid-region", async (req, res) => {
+    try {
+        const { itemId, pixelDataPath } = req.body;
+        
+        if (!itemId || !pixelDataPath) {
+            return res.status(400).json({ ok: false, error: "Missing itemId or pixelDataPath" });
+        }
+
+        const fullPath = path.join(pixelDataRoot, pixelDataPath);
+        
+        // Check if pixel data file exists
+        try {
+            await fs.access(fullPath);
+        } catch {
+            return res.status(404).json({ ok: false, error: `Pixel data file not found: ${pixelDataPath}` });
+        }
+
+        console.log(`[auto-valid-region] Processing staged item: ${itemId} from ${fullPath}`);
+        
+        const result = await generateValidRegion(fullPath);
+        
+        console.log(`[auto-valid-region] Success: ${itemId} - ${result.points.length} points (${result.width}x${result.height}, ${result.pixelCount} pixels)`);
+
+        res.json({
+            ok: true,
+            message: `Valid region auto-generated with ${result.points.length} points`,
+            data: {
+                points: result.points,
+                width: result.width,
+                height: result.height,
+                pixelCount: result.pixelCount
+            }
+        });
+    } catch (error) {
+        console.error(`[auto-valid-region] Error:`, error);
+        res.status(500).json({ ok: false, error: String(error) });
+    }
+});
+
+// Auto-generate valid region from raw pixel data (for uploaded items)
+app.post("/api/items/:id/auto-valid-region", async (req, res) => {
+    try {
+        const item = await getItemById(req.params.id);
+        if (!item) {
+            return res.status(404).json({ ok: false, error: "Item not found" });
+        }
+        if (item.category !== "bags") {
+            return res.status(400).json({ ok: false, error: "Only bag items support valid region generation" });
+        }
+
+        // Find pixel data file
+        let pixelDataPath = null;
+        const possibleFilenames = [
+            item.pixel_data_path,
+            `${item.name}.json`,
+            `${item.id}.json`
+        ];
+
+        for (const filename of possibleFilenames) {
+            if (!filename) continue;
+            const testPath = path.join(pixelDataRoot, filename);
+            try {
+                await fs.access(testPath);
+                pixelDataPath = testPath;
+                break;
+            } catch {
+                // Continue to next possible filename
+            }
+        }
+
+        if (!pixelDataPath) {
+            return res.status(404).json({ ok: false, error: "Pixel data not found for this item. Raw file may not have been processed." });
+        }
+
+        console.log(`[auto-valid-region] Processing: ${item.id} from ${pixelDataPath}`);
+        
+        const result = await generateValidRegion(pixelDataPath);
+        
+        // Save the generated region to the bag
+        const { points, width, height, pixelCount } = result;
+        await updateBag(item.id, {
+            valid_region_points: {
+                points,
+                simplifiedPoints: points
+            }
+        });
+
+        console.log(`[auto-valid-region] Success: ${item.id} - ${points.length} points (${width}x${height}, ${pixelCount} pixels)`);
+
+        res.json({
+            ok: true,
+            message: `Valid region auto-generated with ${points.length} points`,
+            data: {
+                points,
+                width,
+                height,
+                pixelCount
+            }
+        });
+    } catch (error) {
+        console.error(`[auto-valid-region] Error for ${req.params.id}:`, error);
+        res.status(500).json({ ok: false, error: String(error) });
     }
 });
 

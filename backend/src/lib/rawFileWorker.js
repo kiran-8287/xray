@@ -20,7 +20,7 @@ const PYTHON_SCRIPT = path.join(__dirname, "process_raw_file.py");
  */
 function runPythonScript(filePath, itemId, fileType, pixelDataDir, libraryImagesDir) {
   return new Promise((resolve, reject) => {
-    const proc = spawn("python3", [
+    const proc = spawn("python", [
       PYTHON_SCRIPT,
       "--file-path", filePath,
       "--file-type", fileType,

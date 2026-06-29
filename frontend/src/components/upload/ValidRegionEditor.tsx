@@ -13,7 +13,9 @@ import {
   ZoomOut,
   Maximize2,
   Grid,
-  AlertTriangle
+  AlertTriangle,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 
 interface Point {
@@ -33,6 +35,8 @@ interface ValidRegionEditorProps {
   onSave: (points: Point[]) => void;
   onCancel: () => void;
   onDelete: () => void;
+  onAutoGenerate?: () => Promise<void>;
+  isAutoGenerating?: boolean;
   requireValidRegion?: boolean; // When true, prevents saving/deleting without a valid region
 }
 
@@ -43,6 +47,8 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   onSave,
   onCancel,
   onDelete,
+  onAutoGenerate,
+  isAutoGenerating = false,
   requireValidRegion = false
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -786,6 +792,21 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
           
           {/* Actions */}
           <div className="flex items-center gap-2 ml-auto">
+            {onAutoGenerate && (
+              <button
+                onClick={onAutoGenerate}
+                disabled={isAutoGenerating}
+                className="px-3 py-1.5 bg-amber-50 text-amber-700 rounded-xl text-xs font-semibold border border-amber-200 hover:bg-amber-100 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                title="Auto-generate valid region from pixel data"
+              >
+                {isAutoGenerating ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Sparkles size={14} />
+                )}
+                {isAutoGenerating ? 'Generating...' : 'Auto Generate'}
+              </button>
+            )}
             {selectedPolygonId && (
               <button
                 onClick={deleteSelectedPolygon}

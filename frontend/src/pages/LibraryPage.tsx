@@ -5,16 +5,10 @@ import type { Item, CategorizedItems } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import { generateCombinations } from "../lib/combinationGenerator";
 import { API_BASE_URL } from "../config/api";
-import { getCategoryConfig } from "../config/categories";
-function normalizeCategoryName(cat: string): string {
-  const normalized = (cat || "").toLowerCase().trim();
-  if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) {
-    return "non-threats";
-  }
-  if (normalized.includes("bag")) return "bags";
-  if (normalized.includes("threat") || normalized.includes("electronic") || normalized === "electronics") return "threats";
-  return "non-threats";
-}
+import { getCategoryConfig, normalizeCategoryName, LIBRARIES_UI, getLibrarySubcategories } from "../config/categories";
+
+// Use centralized category normalization
+// mergeCategorizedItems function removed - using normalizeCategoryName from config
 
 function mergeCategorizedItems(categorized: any): any {
   if (!categorized) return null;
@@ -36,47 +30,15 @@ function mergeCategorizedItems(categorized: any): any {
   return merged;
 }
 
-
-const SUBCATEGORY_MAP: Record<string, { name: string; slug: string }[]> = {
-  bags: [
-    { name: "General", slug: "general" },
-    { name: "Backpack", slug: "backpack" },
-    { name: "Laptop Bag", slug: "laptop-bag" },
-    { name: "Duffel Bag", slug: "duffel-bag" },
-    { name: "Suitcase", slug: "suitcase" },
-  ],
-  threats: [
-    { name: "General", slug: "general" },
-    { name: "Firearms", slug: "firearms" },
-    { name: "Knives", slug: "knives" },
-    { name: "Explosives", slug: "explosives" },
-  ],
-  "non-threats": [
-    { name: "General", slug: "general" },
-    { name: "Clothing", slug: "clothing" },
-    { name: "Electronics", slug: "electronics" },
-    { name: "Food", slug: "food" },
-    { name: "Toiletries", slug: "toiletries" },
-    { name: "Miscellaneous", slug: "miscellaneous" },
-  ],
-};
-
-function getLibrarySubcategories(librarySlug: string): { name: string; slug: string }[] {
-  return SUBCATEGORY_MAP[librarySlug] || SUBCATEGORY_MAP["non-threats"];
-}
-
-const LIBRARIES = [
-  { slug: "bags", name: "Bags", colorCls: "bg-blue-50 text-blue-700 border-blue-200" },
-  { slug: "threats", name: "Threats", colorCls: "bg-rose-50 text-rose-700 border-rose-200" },
-  { slug: "non-threats", name: "Non-Threats", colorCls: "bg-gray-50 text-gray-700 border-gray-200" },
-];
+// Use centralized library definitions
+const LIBRARIES = LIBRARIES_UI;
 
 import SimpleLibrarySidebar from "../components/library/SimpleLibrarySidebar";
 import LibraryToolbar from "../components/library/LibraryToolbar";
 import ItemCard from "../components/library/ItemCard";
 import ItemRow from "../components/library/ItemRow";
 import SelectionTray from "../components/library/SelectionTray";
-import ValidRegionEditor from "../components/ValidRegionEditor";
+import ValidRegionEditor from "../components/upload/ValidRegionEditor";
 
 type NotificationType = "info" | "success" | "warning" | "error";
 type Notification = { id: number; type: NotificationType; message: string };
@@ -277,7 +239,7 @@ export default function LibraryPage() {
 
     try {
       await Promise.all(
-        items.map((item) => fetch(`http://localhost:8080/api/items/${item.id}`, { method: "DELETE" }))
+        items.map((item) => fetch(`${API_BASE_URL}/api/items/${item.id}`, { method: "DELETE" }))
       );
       await fetchCategorizedItems();
       setSelectedItems((prev) => {
@@ -306,7 +268,7 @@ export default function LibraryPage() {
 
     try {
       await Promise.all(
-        items.map((item) => fetch(`http://localhost:8080/api/items/${item.id}`, { method: "DELETE" }))
+        items.map((item) => fetch(`${API_BASE_URL}/api/items/${item.id}`, { method: "DELETE" }))
       );
       await fetchCategorizedItems();
       setSelectedItems((prev) => {
@@ -326,7 +288,7 @@ export default function LibraryPage() {
     if (!confirmed) return;
 
     try {
-      await fetch(`http://localhost:8080/api/items/${itemId}`, { method: "DELETE" });
+      await fetch(`${API_BASE_URL}/api/items/${itemId}`, { method: "DELETE" });
       await fetchCategorizedItems();
       setSelectedItems((prev) => {
         const next = new Set(prev);
@@ -384,7 +346,7 @@ export default function LibraryPage() {
     setIsItemSaving(true);
 
     try {
-      const res = await fetch(`http://localhost:8080/api/items/${editingItem.id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/items/${editingItem.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editDraft),
@@ -406,7 +368,7 @@ export default function LibraryPage() {
   const handleValidRegionSave = async (points: any[]) => {
     if (!editingRegionItem) return;
     try {
-      const res = await fetch(`http://localhost:8080/api/items/${editingRegionItem.id}/valid-region`, {
+      const res = await fetch(`${API_BASE_URL}/api/items/${editingRegionItem.id}/valid-region`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ points, simplifiedPoints: points }),
@@ -428,7 +390,7 @@ export default function LibraryPage() {
   const handleValidRegionDelete = async () => {
     if (!editingRegionItem) return;
     try {
-      const res = await fetch(`http://localhost:8080/api/items/${editingRegionItem.id}/valid-region`, {
+      const res = await fetch(`${API_BASE_URL}/api/items/${editingRegionItem.id}/valid-region`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -695,7 +657,7 @@ export default function LibraryPage() {
             <div className="flex flex-col sm:flex-row gap-4 p-5 bg-surface border-b border-border">
               <div className="w-full sm:w-1/3 rounded-3xl overflow-hidden bg-surface border border-border">
                 <img
-                  src={`http://localhost:8080/data/library_images/${editingItem.filepath}`}
+                  src={`${API_BASE_URL}/data/library_images/${editingItem.filepath}`}
                   alt={editingItem.filename}
                   className="w-full h-64 object-contain bg-white"
                 />
@@ -818,7 +780,7 @@ export default function LibraryPage() {
       {editingRegionItem && isValidRegionEditorOpen && (
         <ValidRegionEditor
           key={editingRegionItem.id}
-          imageSrc={`http://localhost:8080/data/library_images/${editingRegionItem.filepath}`}
+          imageSrc={`${API_BASE_URL}/data/library_images/${editingRegionItem.filepath}`}
           initialPoints={editingRegionItem.valid_region_points}
           itemId={editingRegionItem.id}
           onSave={handleValidRegionSave}

@@ -6,7 +6,7 @@ import CollagePage from "./pages/CollagePage";
 import CustomizationPage from "./pages/CustomizationPage";
 import LibraryPage from "./pages/LibraryPage";
 import SavedPage from "./pages/SavedPage";
-import HelpMenu from "./components/HelpMenu";
+import HelpMenu from "./components/common/HelpMenu";
 import { UploadProvider } from "./context/UploadContext";
 
 export default function App() {

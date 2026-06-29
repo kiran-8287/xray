@@ -1,3 +1,4 @@
+// Category configuration - Single source of truth for all category/subcategory data
 export interface LibraryCategory {
   slug: string;
   name: string;
@@ -13,6 +14,7 @@ export interface CategoryConfig {
   slug: string;
 }
 
+// Complete library category definitions with all subcategories
 export const LIBRARIES: LibraryCategory[] = [
   {
     slug: "bags",
@@ -154,11 +156,13 @@ export const LIBRARIES: LibraryCategory[] = [
   },
 ];
 
+// Helper function to get subcategories for a library slug
 export function getLibrarySubcategories(slug: string): { slug: string; name: string }[] {
   const lib = LIBRARIES.find((l) => l.slug === slug);
   return lib ? lib.subcategories : [];
 }
 
+// Normalize category names to standard slugs
 export function normalizeCategoryName(cat: string): string {
   const normalized = (cat || "").toLowerCase().trim();
   if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) {
@@ -169,13 +173,29 @@ export function normalizeCategoryName(cat: string): string {
   return "non-threats";
 }
 
+// Category visual configuration map
 const CATEGORY_MAP: Record<string, CategoryConfig> = {
   bags: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", borderAccent: "border-blue-500", label: "Bags", slug: "bags" },
   threats: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threats" },
   "non-threats": { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", borderAccent: "border-emerald-500", label: "Non-Threats", slug: "non-threats" },
 };
 
+// Get visual configuration for a category
 export function getCategoryConfig(category: string): CategoryConfig {
   const normalized = normalizeCategoryName(category);
   return CATEGORY_MAP[normalized] || CATEGORY_MAP["non-threats"];
 }
+
+// Export SUBCATEGORY_MAP for backward compatibility (used in UploadPage)
+export const SUBCATEGORY_MAP: Record<string, { name: string; slug: string }[]> = {
+  bags: LIBRARIES.find(l => l.slug === "bags")?.subcategories.map(s => ({ name: s.name, slug: s.slug })) || [],
+  threats: LIBRARIES.find(l => l.slug === "threats")?.subcategories.map(s => ({ name: s.name, slug: s.slug })) || [],
+  "non-threats": LIBRARIES.find(l => l.slug === "non-threats")?.subcategories.map(s => ({ name: s.name, slug: s.slug })) || [],
+};
+
+// Export library definitions for UI components
+export const LIBRARIES_UI = [
+  { slug: "bags", name: "Bags", colorCls: "bg-blue-50 text-blue-700 border-blue-200" },
+  { slug: "threats", name: "Threats", colorCls: "bg-rose-50 text-rose-700 border-rose-200" },
+  { slug: "non-threats", name: "Non-Threats", colorCls: "bg-gray-50 text-gray-700 border-gray-200" },
+];

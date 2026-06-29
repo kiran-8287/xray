@@ -7,6 +7,7 @@ import {
   getTransformedValidRegion,
 } from "./customizationHelpers";
 import { generateSynthesizedId } from "./synthesizedIdGenerator";
+import { normalizeCategoryName } from "../config/categories";
 import type { Point } from "../types/geometry";
 
 // Declare require for TypeScript compatibility (used for lazy loading to avoid circular dependencies)
@@ -16,15 +17,8 @@ const CANVAS_W = 800;
 const CANVAS_H = 600;
 const BAG_DISPLAY_SIZE = Math.min(CANVAS_W, CANVAS_H) * 0.85;
 
-function normalizeCategoryName(cat: string): string {
-  const normalized = (cat || "").toLowerCase().trim();
-  if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) {
-    return "non-threats";
-  }
-  if (normalized.includes("bag")) return "bags";
-  if (normalized.includes("threat") || normalized.includes("electronic") || normalized === "electronics") return "threats";
-  return "non-threats";
-}
+// Use centralized normalizeCategoryName from config
+// normalizeCategoryName function removed - using import from config
 
 function getStencilKind(category: string): string {
   const normalized = category.toLowerCase();
@@ -36,7 +30,7 @@ function getStencilKind(category: string): string {
   if (normalized.includes("food") || normalized.includes("drink")) return "food";
   if (normalized.includes("stationery") || normalized.includes("stationary") || normalized.includes("office")) return "stationary";
   if (normalized.includes("lag")) return "lag";
-  return "stationary";
+  return "stationary"; // fallback
 }
 
 function parseOutline(item: Item): { x: number; y: number }[] | undefined {
