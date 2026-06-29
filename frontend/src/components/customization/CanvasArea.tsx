@@ -140,14 +140,9 @@ export default function CanvasArea({
           .filter((obj) => obj.library !== "bag")
           .map((obj) => {
             const isSelected = selectedObjectId === obj.id;
-            // Get the image to check natural dimensions
-            let objWidth = obj.transform.width;
-            let objHeight = obj.transform.height;
-            const img = imgCache.get(`${IMAGE_BASE_URL}${obj.filepath}`);
-            if (img && img.naturalWidth > 0) {
-              objWidth = img.naturalWidth;
-              objHeight = img.naturalHeight;
-            }
+            // Use transform dimensions (now set to natural dimensions from CustomizationPage)
+            const objWidth = obj.transform.width;
+            const objHeight = obj.transform.height;
 
             return (
               <React.Fragment key={obj.id}>

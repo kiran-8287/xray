@@ -455,10 +455,10 @@ app.get('/api/saved-layouts', async (_req, res) => {
 });
 
 app.post('/api/saved-layouts', async (req, res) => {
-    const { name, filepath, layout_json } = req.body;
+    const { id, name, filepath, layout_json } = req.body;
     if (!name || !layout_json) return res.status(400).json({ ok: false, error: 'Missing name or layout_json' });
     try {
-        const layout = await createSavedLayout({ name, filepath, layout_json });
+        const layout = await createSavedLayout({ id, name, filepath, layout_json });
         res.json({ ok: true, layout });
     } catch (err) {
         console.error(err);

@@ -39,7 +39,6 @@ export default function SelectionTray({
       {/* Middle: K-combinations generator */}
       <div className="flex items-center gap-3 ml-auto flex-wrap">
         <div className="flex items-center gap-2">
-          <Settings2 size={14} className="text-muted" />
           <span className="text-xs font-semibold text-muted uppercase tracking-wider">Generate</span>
         </div>
         <input

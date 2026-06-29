@@ -6,7 +6,11 @@ import {
   doObjectsOverlap,
   getTransformedValidRegion,
 } from "./customizationHelpers";
+import { generateSynthesizedId } from "./synthesizedIdGenerator";
 import type { Point } from "../types/geometry";
+
+// Declare require for TypeScript compatibility (used for lazy loading to avoid circular dependencies)
+declare const require: (module: string) => any;
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
@@ -203,6 +207,7 @@ function tryPlaceNonThreats(
     let placed = false;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const pos = getRandomPositionInContainer(w, h, bagObj, outline);
+      if (!pos) continue;
       const testObj: SceneObject = {
         id: "temp",
         name: item.name,
@@ -266,10 +271,12 @@ function generateThreatPlacements(
   target: number,
   density: "empty" | "few" | "filled",
   nonThreats: Item[],
-  existingUsed?: Set<string>
+  existingUsed?: Set<string>,
+  globalUsedIds?: Set<string>
 ): { results: CombinatorialResult[]; failure: FailureLog | null } {
   const results: CombinatorialResult[] = [];
   const usedPlacements = existingUsed ?? new Set<string>();
+  const usedIds = globalUsedIds ?? new Set<string>();
   const bagObj = createBagSceneObject(bag);
 
   // Build an unbiased, shuffled candidate list (positions × rotations)
@@ -280,8 +287,11 @@ function generateThreatPlacements(
   const candidates = (function () {
     try {
       // Lazy import to avoid circular dependency issues
+      // Use dynamic import for TypeScript compatibility
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { buildPositionRotationCandidates } = require("./placementUtils");
+      const placementUtils = require("./placementUtils");
+      const mod = (placementUtils as any).default || placementUtils;
+      const { buildPositionRotationCandidates } = mod;
       return buildPositionRotationCandidates(bagObj, threat, target);
     } catch (e) {
       // Fallback to existing generation if import fails
@@ -378,8 +388,11 @@ function generateThreatPlacements(
     // Add threat (on top)
     objects.push({ ...threatObj, layer: layer++ });
 
+    // Generate unique synthesized ID using global used IDs set
+    const generatedId = generateSynthesizedId(bag.id, Array.from(usedIds));
+    usedIds.add(generatedId.id);
     results.push({
-      id: `${bag.id}-${threat.id}-${results.length}`,
+      id: generatedId.id,
       bag,
       threat,
       others: selectedNonThreats,
@@ -436,10 +449,12 @@ function generateCleanCombinations(
   bag: Item,
   target: number,
   density: "empty" | "few" | "filled",
-  nonThreats: Item[]
+  nonThreats: Item[],
+  globalUsedIds?: Set<string>
 ): CombinatorialResult[] {
   const results: CombinatorialResult[] = [];
   const usedHashes = new Set<string>();
+  const usedIds = globalUsedIds ?? new Set<string>();
   const bagObj = createBagSceneObject(bag);
 
   const maxAttempts = Math.max(target * 50, 1000);
@@ -461,8 +476,11 @@ function generateCleanCombinations(
       if (usedHashes.has(hash)) continue;
       usedHashes.add(hash);
 
+      // Generate unique synthesized ID using global used IDs set
+      const generatedId = generateSynthesizedId(bag.id, Array.from(usedIds));
+      usedIds.add(generatedId.id);
       results.push({
-        id: `${bag.id}-clean-${results.length}`,
+        id: generatedId.id,
         bag,
         others: [],
         objects: [bagObj],
@@ -496,8 +514,11 @@ function generateCleanCombinations(
       objects.push(ntObj);
     });
 
+    // Generate unique synthesized ID using global used IDs set
+    const generatedId = generateSynthesizedId(bag.id, Array.from(usedIds));
+    usedIds.add(generatedId.id);
     results.push({
-      id: `${bag.id}-clean-${results.length}`,
+      id: generatedId.id,
       bag,
       others: selectedNonThreats,
       objects,
@@ -536,6 +557,7 @@ export function generateCombinations(
   const results: CombinatorialResult[] = [];
   const failures: FailureLog[] = [];
   const seenFailures = new Set<string>(); // Avoid duplicate failure logs
+  const usedIds = new Set<string>(); // Track all generated IDs globally
 
   type PairEntry = {
     bag: Item;
@@ -638,7 +660,8 @@ export function generateCombinations(
         1,
         density,
         nonThreats,
-        pair.used
+        pair.used,
+        usedIds
       );
       if (placements.length > 0) {
         pair.usageCount++;
@@ -660,7 +683,8 @@ export function generateCombinations(
         pair.bag,
         1,
         density,
-        nonThreats
+        nonThreats,
+        usedIds
       );
       if (placements.length > 0) {
         pair.usageCount++;
@@ -682,6 +706,7 @@ export function generateCombinations(
     const combo = tryGenerateOne(pair);
     if (combo) {
       results.push(combo);
+      usedIds.add(combo.id);
       consecutiveFailures = 0;
     } else {
       consecutiveFailures++;

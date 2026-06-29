@@ -56,14 +56,14 @@ export default function CollagePage() {
       return; // fresh navigation from Library — handled by the locationState effect below
     }
 
-    const restoredCombos = [];
-    const restoredFailures = [];
-    const restoredBags = [];
-    const restoredThreats = [];
-    const restoredOthers = [];
-    let restoreError = null;
+    const restoredCombos: any[] = [];
+    const restoredFailures: any[] = [];
+    const restoredBags: any[] = [];
+    const restoredThreats: any[] = [];
+    const restoredOthers: any[] = [];
+    let restoreError: string | null = null;
 
-    const readJSON = (raw) => { if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } };
+    const readJSON = (raw: string | null) => { if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } };
 
     try {
       restoredCombos.push(...(readJSON(sessionStorage.getItem("collageCombinations")) || []));
@@ -81,7 +81,7 @@ export default function CollagePage() {
       restoredBags.length === 0 && restoredThreats.length === 0 && restoredOthers.length === 0
     ) return;
 
-    const applyRestore = (fb, ft, fo) => {
+    const applyRestore = (fb: any[] | null, ft: any[] | null, fo: any[] | null) => {
       const bags = fb || restoredBags;
       const threats = ft || restoredThreats;
       const others = fo || restoredOthers;
@@ -106,7 +106,7 @@ export default function CollagePage() {
     restoredCombos.forEach(c => {
       comboItemIds.add(c.bag.id);
       if (c.threat) comboItemIds.add(c.threat.id);
-      c.others.forEach(o => comboItemIds.add(o.id));
+      c.others.forEach((o: any) => comboItemIds.add(o.id));
     });
 
     if (restoredCombos.length > 0 && comboItemIds.size > 0 &&
@@ -117,10 +117,10 @@ export default function CollagePage() {
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
           const cat = data.categorized || data;
-          const matchedBags = [], matchedThreats = [], matchedOthers = [];
-          for (const subcats of Object.values(cat)) {
-            for (const items of Object.values(subcats)) {
-              for (const item of items) {
+          const matchedBags: any[] = [], matchedThreats: any[] = [], matchedOthers: any[] = [];
+          for (const subcats of Object.values(cat as Record<string, any>)) {
+            for (const items of Object.values(subcats as Record<string, any>)) {
+              for (const item of items as any[]) {
                 if (!comboItemIds.has(item.id)) continue;
                 const cl = (item.category || "").toLowerCase();
                 if (cl.includes("bag")) matchedBags.push(item);
@@ -132,13 +132,13 @@ export default function CollagePage() {
           applyRestore(matchedBags, matchedThreats, matchedOthers);
         } catch (e) {
           console.error("[CollagePage] fetch fresh items failed:", e);
-          applyRestore();
+          applyRestore(null, null, null);
         }
       })();
       return;
     }
 
-    applyRestore();
+    applyRestore(null, null, null);
   }, []);
 
   // Selections from library
@@ -333,6 +333,7 @@ export default function CollagePage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            id: comb.id,
             name: annotation,
             filepath: null,
             layout_json,
@@ -356,6 +357,26 @@ export default function CollagePage() {
         message: `Successfully saved ${savedCount} workspace${savedCount !== 1 ? "s" : ""}!${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
         savedCount
       });
+      
+      // Reset collage state after successful bulk save
+      setCombinations([]);
+      setFailures([]);
+      setSelectedBags([]);
+      setSelectedThreats([]);
+      setSelectedOthers([]);
+      setCurrentPage(0);
+      setShowLogs(false);
+      
+      // Clear persisted storage
+      try {
+        sessionStorage.removeItem("collageCombinations");
+        sessionStorage.removeItem("collageFailures");
+        localStorage.removeItem("selectedBags");
+        localStorage.removeItem("selectedThreats");
+        localStorage.removeItem("selectedOthers");
+      } catch (e) {
+        console.error("Error clearing storage after bulk save:", e);
+      }
     } catch (err) {
       console.error(err);
       setBulkSaveState({
@@ -395,13 +416,6 @@ export default function CollagePage() {
             ) : (
               <FolderOpen size={15} />
             )}
-          </button>
-          <button
-            onClick={() => navigate("/library")}
-            className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover hover:opacity-95 transition-all flex items-center gap-1.5 text-sm"
-            title="New Collage"
-          >
-            <Plus size={15} />
           </button>
         </div>
       </div>
@@ -448,7 +462,7 @@ export default function CollagePage() {
           </div>
           <h3 className="text-xl font-bold text-ink mb-2">No scanned bags selected</h3>
           <p className="text-base text-muted mb-8 max-w-md mx-auto leading-relaxed">
-            Please go to the Library page and select bags and objects to generate layered x-ray combinations.
+            Please go to the Library page and select bags and objects to generate combinations.
           </p>
           <button
             onClick={() => navigate("/library")}

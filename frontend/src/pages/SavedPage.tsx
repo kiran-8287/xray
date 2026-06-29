@@ -162,9 +162,18 @@ export default function SavedPage() {
       .then((res) => res.json())
       .then((data) => {
         if (data.ok) {
-          // Filter layouts: only keep those where all referenced items exist in library
+          // Filter layouts:
+          // - Always keep layouts with synthesized IDs (bulk-saved from collage page)
+          // - For other layouts, only keep if all referenced items exist in library
           const validLayouts = data.layouts.filter((layout: SavedLayout) => {
             try {
+              // Check if the layout record itself has a synthesized ID (starts with SB)
+              const hasSynthesizedId = layout.id && typeof layout.id === 'string' && layout.id.startsWith('SB');
+              // If it has a synthesized ID, it's a bulk-saved combo - always keep it
+              if (hasSynthesizedId) return true;
+              // If library items are still loading, skip non-synthesized layouts
+              if (libraryItemIds.size === 0) return false;
+              // Otherwise, check if all referenced items exist in library
               const objects = layout.layout_json?.objects || [];
               return objects.every((obj: any) => libraryItemIds.has(obj.id));
             } catch {
@@ -289,6 +298,9 @@ export default function SavedPage() {
                     <div className="min-w-0 flex-1">
                       <h2 className="text-base font-semibold text-ink truncate" title={layout.name}>{layout.name}</h2>
                       <p className="mt-1 text-xs text-muted">Saved {new Date(layout.created_at).toLocaleString()}</p>
+                      <p className="mt-1 text-[10px] font-mono text-accent-sky bg-accent/5 px-1.5 py-0.5 rounded border border-accent/20 inline-block">
+                        ID: {layout.id}
+                      </p>
                       <p className="mt-2 text-xs text-muted">
                         {objects.length} objects · {bagCount} bag{bagCount !== 1 ? "s" : ""} · {threatCount} threat{threatCount !== 1 ? "s" : ""} · {otherCount} other
                       </p>

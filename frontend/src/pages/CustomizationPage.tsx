@@ -12,6 +12,7 @@ import {
 } from "../lib/customizationHelpers";
 import { getRectCorners } from "../lib/geometry";
 import { computeObjectStats, type ObjectPixelStats } from "../lib/xrayRenderer";
+import { loadMultipleImageDimensions } from "../lib/imageSizeLoader";
 import ScannedBagsSidebar from "../components/customization/ScannedBagsSidebar";
 import WorkspaceToolbar from "../components/customization/WorkspaceToolbar";
 import CanvasArea from "../components/customization/CanvasArea";
@@ -107,8 +108,8 @@ const CANVAS_W = 800;
 const CANVAS_H = 600;
 
 function getItemDisplaySize(item: Item): { width: number; height: number } {
-  const width = Number.isFinite(item.width) ? Math.round(item.width) : 0;
-  const height = Number.isFinite(item.height) ? Math.round(item.height) : 0;
+  const width = Number.isFinite(item.width) ? Math.round(item.width as number) : 0;
+  const height = Number.isFinite(item.height) ? Math.round(item.height as number) : 0;
 
   if (width > 0 && height > 0) {
     return { width, height };
@@ -207,8 +208,25 @@ export default function CustomizationPage() {
       console.error("Error loading saved workspace:", err);
     }
 
-    // 3. Fall back to random generation
-    buildAndSetObjects(categorizedList, searchParams, setObjects, setHistory, setHistoryIndex);
+    // 3. Fall back to random generation - load natural dimensions first
+    const allItems: Item[] = [];
+    Object.values(categorizedList).forEach((subcats: any) => {
+      Object.values(subcats).forEach((items: any) => {
+        if (Array.isArray(items)) {
+          allItems.push(...items);
+        }
+      });
+    });
+
+    const allFilepaths = allItems.map(item => item.filepath).filter(Boolean) as string[];
+    
+    loadMultipleImageDimensions(allFilepaths).then(imageDimensions => {
+      buildAndSetObjects(categorizedList, searchParams, setObjects, setHistory, setHistoryIndex, imageDimensions);
+    }).catch(err => {
+      console.error("Error loading image dimensions:", err);
+      // Fall back to database dimensions if image loading fails
+      buildAndSetObjects(categorizedList, searchParams, setObjects, setHistory, setHistoryIndex, new Map());
+    });
   }, [categorizedList]);
 
   // Save workspace layout to localStorage on changes (so page refresh doesn't lose it)
@@ -222,7 +240,14 @@ export default function CustomizationPage() {
   }, [objects, searchParams]);
 
   // Shared builder extracted so the Randomize button can call it again
-  function buildAndSetObjects(catList: any, params: URLSearchParams, setObj: typeof setObjects, setHist: typeof setHistory, setHIdx: typeof setHistoryIndex) {
+  function buildAndSetObjects(
+    catList: any, 
+    params: URLSearchParams, 
+    setObj: typeof setObjects, 
+    setHist: typeof setHistory, 
+    setHIdx: typeof setHistoryIndex,
+    imageDimensions: Map<string, { width: number; height: number }> = new Map()
+  ) {
     const bagId = params.get("bagId");
     const threatId = params.get("threatId");
     const otherIdsStr = params.get("otherIds");
@@ -286,13 +311,13 @@ export default function CustomizationPage() {
           : bagItem.polygon_json;
       }
 
-      // Use the bag's original pixel dimensions so the image renders 1:1
+      // Use the bag's natural image dimensions so the image renders 1:1
       // and the valid region polygon maps correctly without any scaling.
       // This preserves every pixel and keeps the valid region in sync
       // across the editor and customization canvas.
-      const bagSize = getItemDisplaySize(bagItem);
-      const bagWidth = bagSize.width;
-      const bagHeight = bagSize.height;
+      const naturalDims = imageDimensions.get(bagItem.filepath);
+      const bagWidth = naturalDims?.width && naturalDims.width > 0 ? naturalDims.width : getItemDisplaySize(bagItem).width;
+      const bagHeight = naturalDims?.height && naturalDims.height > 0 ? naturalDims.height : getItemDisplaySize(bagItem).height;
 
       bagObject = {
         id: "initial-bag",
@@ -333,9 +358,10 @@ export default function CustomizationPage() {
           ? JSON.parse(item.polygon_json)
           : item.polygon_json;
       }
-      const itemSize = getItemDisplaySize(item);
-      const w = itemSize.width;
-      const h = itemSize.height;
+      // Use natural image dimensions if available, otherwise fall back to database dimensions
+      const naturalDims = imageDimensions.get(item.filepath);
+      const w = naturalDims?.width && naturalDims.width > 0 ? naturalDims.width : getItemDisplaySize(item).width;
+      const h = naturalDims?.height && naturalDims.height > 0 ? naturalDims.height : getItemDisplaySize(item).height;
       let pos = null as { x: number; y: number; rotation?: number } | null;
       if (bagObject) {
         pos = getRandomPositionInContainer(w, h, bagObject, itemOutline);
@@ -373,9 +399,10 @@ export default function CustomizationPage() {
           ? JSON.parse(threatItem.polygon_json)
           : threatItem.polygon_json;
       }
-      const threatSize = getItemDisplaySize(threatItem);
-      const w = threatSize.width;
-      const h = threatSize.height;
+      // Use natural image dimensions if available, otherwise fall back to database dimensions
+      const naturalDims = imageDimensions.get(threatItem.filepath);
+      const w = naturalDims?.width && naturalDims.width > 0 ? naturalDims.width : getItemDisplaySize(threatItem).width;
+      const h = naturalDims?.height && naturalDims.height > 0 ? naturalDims.height : getItemDisplaySize(threatItem).height;
       let pos = null as { x: number; y: number; rotation?: number } | null;
       if (bagObject) {
         pos = getRandomPositionInContainer(w, h, bagObject, threatOutline);
@@ -437,6 +464,8 @@ export default function CustomizationPage() {
   };
 
   const handleAddObject = (item: Item) => {
+    // Use natural image dimensions if available, otherwise fall back to database dimensions
+    const naturalDims = pixelStats.has(item.id) ? null : null; // We'll load fresh
     let width = item.width || 100;
     let height = item.height || 100;
 
@@ -623,9 +652,9 @@ export default function CustomizationPage() {
       let bagTopLeft: { x: number; y: number } = { x: 0, y: 0 };
       if (bagObject) {
         const bagCorners = getRectCorners(
-          { x: bagObject.transform.x, y: bagObject.transform.y },
-          { width: bagObject.transform.width, height: bagObject.transform.height },
-          bagObject.transform.rotation
+          { x: bagObject.transform.x || 0, y: bagObject.transform.y || 0 },
+          { width: bagObject.transform.width || 0, height: bagObject.transform.height || 0 },
+          bagObject.transform.rotation || 0
         );
         bagTopLeft = bagCorners[0];
       }
