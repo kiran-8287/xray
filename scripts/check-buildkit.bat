@@ -2,6 +2,7 @@
 REM Check and disable Docker BuildKit on Windows before building
 
 echo Checking Docker BuildKit status...
+echo.
 
 REM Check if Docker Desktop settings file exists
 if exist "%APPDATA%\Docker\settings-store.json" (
@@ -13,45 +14,33 @@ if exist "%APPDATA%\Docker\settings-store.json" (
     if %errorlevel% neq 0 (
         echo.
         echo ========================================
-        echo WARNING: Docker BuildKit is ENABLED
+        echo ERROR: Docker BuildKit is ENABLED
         echo ========================================
         echo.
         echo BuildKit has a known bug on Windows that causes "invalid file request" errors.
+        echo This will prevent the frontend from building.
         echo.
-        echo To fix this, you have two options:
+        echo To fix this, please follow these steps:
         echo.
-        echo Option 1 (Recommended): Run the auto-fix script
-        echo   powershell -ExecutionPolicy Bypass -File "%~dp0scripts\disable-buildkit.ps1"
-        echo   Then restart Docker Desktop
-        echo.
-        echo Option 2: Manual fix
         echo   1. Open Docker Desktop
-        echo   2. Go to Settings -^> Builders
-        echo   3. Uncheck "Use Docker BuildKit"
-        echo   4. Click "Apply and Restart"
+        echo   2. Go to Settings -^> Builders (or Settings -^> General)
+        echo   3. Look for "Use Docker BuildKit" or "Enable BuildKit"
+        echo   4. UNCHECK it
+        echo   5. Click "Apply ^& Restart"
+        echo   6. Wait for Docker Desktop to fully restart
+        echo   7. Run this script again
         echo.
-        echo After disabling BuildKit, run this command again:
-        echo   docker compose up -d --build
+        echo ========================================
         echo.
-        
-        set /p response="Do you want to run the auto-fix script now? (Y/N): "
-        if /i "%response%"=="Y" (
-            powershell -ExecutionPolicy Bypass -File "%~dp0scripts\disable-buildkit.ps1"
-            echo.
-            echo Please restart Docker Desktop, then run: docker compose up -d --build
-            pause
-            exit /b 1
-        ) else (
-            echo.
-            echo Please disable BuildKit manually and try again.
-            pause
-            exit /b 1
-        )
+        pause
+        exit /b 1
     ) else (
-        echo BuildKit is already disabled. Proceeding with build...
+        echo OK: BuildKit is disabled.
         echo.
     )
 ) else (
-    echo Docker settings file not found. Assuming BuildKit is disabled or using default settings.
+    echo WARNING: Docker settings file not found.
+    echo Assuming BuildKit is disabled or using default settings.
+    echo If you get "invalid file request" errors, disable BuildKit in Docker Desktop settings.
     echo.
 )

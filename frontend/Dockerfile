@@ -8,15 +8,8 @@ RUN npm ci
 # Copy environment file for Docker
 COPY .env.docker ./.env
 
-# Copy only necessary files to avoid BuildKit Windows bug
-COPY src/ ./src/
-COPY public/ ./public/
-COPY index.html .
-COPY tsconfig*.json .
-COPY vite.config.ts .
-COPY postcss.config.js .
-COPY tailwind.config.js .
-COPY eslint.config.js .
+# Copy all source files (node_modules excluded by .dockerignore)
+COPY . .
 
 # Build the application
 RUN npm run build

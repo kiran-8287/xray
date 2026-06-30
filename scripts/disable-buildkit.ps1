@@ -27,14 +27,27 @@ if (Test-Path $settingsPath) {
             
             $settings.$foundProp = $false
             $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath
-            Write-Host "BuildKit disabled. Restart Docker Desktop."
+            Write-Host "BuildKit disabled. Please restart Docker Desktop for changes to take effect."
+            exit 0
         } else {
-            Write-Host "No BuildKit setting found in Docker configuration."
+            Write-Host "WARNING: No BuildKit setting found in Docker configuration."
             Write-Host "Available settings: $($settings.PSObject.Properties.Name -join ', ')"
+            Write-Host ""
+            Write-Host "Docker Desktop may be using a different settings location or version."
+            Write-Host ""
+            Write-Host "Please disable BuildKit manually:"
+            Write-Host "1. Open Docker Desktop"
+            Write-Host "2. Go to Settings -> Builders"
+            Write-Host "3. Uncheck 'Use Docker BuildKit'"
+            Write-Host "4. Click 'Apply & Restart'"
+            exit 1
         }
     } catch {
         Write-Host "Error: $_"
+        exit 1
     }
 } else {
-    Write-Host "Docker settings file not found at: $settingsPath"
+    Write-Host "ERROR: Docker settings file not found at: $settingsPath"
+    Write-Host "Please ensure Docker Desktop is installed."
+    exit 1
 }

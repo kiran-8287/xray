@@ -117,32 +117,31 @@ Then open **http://localhost:5174** in your browser.
 
 ### Fixing Docker BuildKit Issues on Windows
 
-Docker Desktop on Windows has a known bug with BuildKit that causes "invalid file request" errors. This project includes an **automatic fix**:
+Docker Desktop on Windows has a known bug with BuildKit that causes "invalid file request" errors when building the frontend. **This must be fixed before building.**
 
-**Option 1: Use the Bootstrap Script (Recommended)**
+**⚠️ Important: BuildKit must be disabled in Docker Desktop settings before building.**
+
+**Option 1: Manual Docker Desktop Settings (Most Reliable)**
+1. Open Docker Desktop
+2. Go to **Settings** → **Builders** (or **Settings** → **General** in newer versions)
+3. Look for **"Use Docker BuildKit"** or **"Enable BuildKit"**
+4. **Uncheck** it
+5. Click **Apply & Restart**
+6. Wait for Docker Desktop to fully restart
+7. Run `docker compose up -d --build` or `.\bootstrap.bat`
+
+**Option 2: Use the Bootstrap Script**
 ```bash
 .\bootstrap.bat
 ```
-The script will automatically detect and fix BuildKit issues for you.
+The script will check if BuildKit is disabled and prompt you if it's not.
 
-**Option 2: Manual Docker Commands**
-If you prefer to run Docker commands manually:
+**Option 3: PowerShell Auto-Fix**
 ```bash
-REM First, run the auto-fix script
 powershell -ExecutionPolicy Bypass -File "scripts\disable-buildkit.ps1"
-
-REM Restart Docker Desktop (right-click tray icon → Quit, then start again)
-
-REM Then build and start
-docker compose up -d --build
 ```
+Then restart Docker Desktop and run `docker compose up -d --build`
 
-**Option 3: Manual Docker Desktop Settings**
-If the auto-fix doesn't work:
-1. Open Docker Desktop
-2. Go to **Settings** → **Builders**
-3. Uncheck **"Use Docker BuildKit"**
-4. Click **Apply & Restart**
-5. Run `docker compose up -d --build`
+**Note:** The BuildKit setting is stored in Docker Desktop's configuration, not in environment variables. The bootstrap scripts will guide you through disabling it if needed.
 
 ---

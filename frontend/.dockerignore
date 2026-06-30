@@ -12,17 +12,13 @@ npm-debug.log
 .idea
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
 
 # Build outputs
 dist
 build
-
-# Config files not needed in Docker runtime (but needed for build, so keep them)
-# eslint.config.js
-# postcss.config.js
-# tailwind.config.js
-# tsconfig*.json
-# vite.config.ts
+out
 
 # Root-level docker files
 docker-compose*.yml
@@ -32,3 +28,10 @@ Dockerfile
 # Docs
 *.md
 !LICENSE*
+
+# Misc
+.env.development
+.env.local
+.env.*.local
+*.log
+coverage

@@ -26,11 +26,16 @@ if defined DOCKER_COMPOSE_CMD (
     echo Docker found! Starting with Docker...
     echo.
     
-    REM Auto-fix BuildKit issue on Windows
-    powershell -ExecutionPolicy Bypass -File "%~dp0scripts\disable-buildkit.ps1"
-    
-    REM Disable BuildKit for this session as well
-    set DOCKER_BUILDKIT=0
+    REM Check and disable BuildKit if needed
+    echo Checking Docker BuildKit settings...
+    echo.
+    call "%~dp0scripts\check-buildkit.bat"
+    if %errorlevel% neq 0 (
+        echo.
+        echo BuildKit issue detected. Please follow the instructions above.
+        pause
+        exit /b 1
+    )
     
     echo.
     echo Building and starting containers...
