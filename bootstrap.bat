@@ -19,6 +19,17 @@ if %errorlevel% == 0 (
 
     if defined DOCKER_COMPOSE_CMD (
         echo Docker found! Starting with Docker...
+        echo.
+        echo NOTE: If you encounter "invalid file request" errors, disable Docker BuildKit:
+        echo 1. Open Docker Desktop
+        echo 2. Go to Settings -^> Builders
+        echo 3. Uncheck "Use Docker BuildKit"
+        echo 4. Click Apply and Restart
+        echo.
+        
+        REM Disable BuildKit for this session to avoid Windows compatibility issues
+        set DOCKER_BUILDKIT=0
+        
         %DOCKER_COMPOSE_CMD% up -d --build
         echo.
         echo Success! The app is now running!

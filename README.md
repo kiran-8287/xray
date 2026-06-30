@@ -114,5 +114,11 @@ Then open **http://localhost:5174** in your browser.
 - Always use `.\bootstrap.bat` (not just `bootstrap.bat`) to avoid PATH ambiguity.
 - Run commands in **Command Prompt** or **PowerShell** — not in Git Bash or WSL unless you intend to.
 - If Docker fails with permission errors, make sure Docker Desktop is running **as administrator** (right-click → Run as administrator).
+- **If you get "invalid file request" errors:** Docker BuildKit has compatibility issues on Windows. Disable it in Docker Desktop:
+  1. Open Docker Desktop
+  2. Go to **Settings** → **Builders**
+  3. Uncheck **"Use Docker BuildKit"** (or set `DOCKER_BUILDKIT=0` in Docker Desktop settings)
+  4. Click **Apply & Restart**
+  5. Try `docker compose up -d --build` again
 
 ---
