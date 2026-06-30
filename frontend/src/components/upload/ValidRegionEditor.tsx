@@ -17,11 +17,8 @@ import {
   Sparkles,
   Loader2
 } from 'lucide-react';
-
-interface Point {
-  x: number;
-  y: number;
-}
+import type { Point } from '../../types/geometry';
+import { isPointInPolygon } from '../../lib/geometry';
 
 interface Polygon {
   id: string;
@@ -235,18 +232,6 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   const isDeleteDisabled = requireValidRegion && polygons.length === 1 && polygons[0]?.id === 'initial';
   const isClearDisabled = requireValidRegion && polygons.length === 1 && polygons[0]?.id === 'initial';
   const isSaveDisabled = requireValidRegion && (polygons.length === 0 || (polygons.length === 1 && polygons[0]?.id === 'initial' && polygons[0]?.points.length < 3));
-
-  const isPointInPolygon = (point: Point, polygonPoints: Point[]) => {
-    let inside = false;
-    for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i++) {
-      const xi = polygonPoints[i].x, yi = polygonPoints[i].y;
-      const xj = polygonPoints[j].x, yj = polygonPoints[j].y;
-      const intersect = ((yi > point.y) !== (yj > point.y))
-        && (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
-      if (intersect) inside = !inside;
-    }
-    return inside;
-  };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(e);

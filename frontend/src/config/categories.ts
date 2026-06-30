@@ -173,6 +173,27 @@ export function normalizeCategoryName(cat: string): string {
   return "non-threats";
 }
 
+// Normalize categorized items structure by merging subcategories under normalized category keys
+export function normalizeCategorizedItems(categorized: any): any {
+  if (!categorized) return null;
+  const merged: any = {};
+  for (const [catKey, subcats] of Object.entries(categorized)) {
+    const normalized = normalizeCategoryName(catKey);
+    if (!merged[normalized]) {
+      merged[normalized] = {};
+    }
+    for (const [subKey, items] of Object.entries(subcats || {})) {
+      if (!merged[normalized][subKey]) {
+        merged[normalized][subKey] = [];
+      }
+      if (Array.isArray(items)) {
+        merged[normalized][subKey].push(...items);
+      }
+    }
+  }
+  return merged;
+}
+
 // Category visual configuration map
 const CATEGORY_MAP: Record<string, CategoryConfig> = {
   bags: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", borderAccent: "border-blue-500", label: "Bags", slug: "bags" },

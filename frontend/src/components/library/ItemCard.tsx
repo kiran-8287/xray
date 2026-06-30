@@ -1,27 +1,7 @@
 import React from "react";
 import { Check, CheckCircle2, Edit3, Trash2 } from "lucide-react";
 import type { Item } from "../../types/library";
-
-function normalizeCategoryName(cat: string): string {
-  const normalized = (cat || "").toLowerCase().trim();
-  if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) {
-    return "non-threats";
-  }
-  if (normalized.includes("bag")) return "bags";
-  if (normalized.includes("threat") || normalized.includes("electronic") || normalized === "electronics") return "threats";
-  return "non-threats";
-}
-
-const CATEGORY_MAP: Record<string, { bg: string; text: string; border: string; borderAccent: string; label: string; slug: string }> = {
-  bags: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", borderAccent: "border-blue-500", label: "Bags", slug: "bags" },
-  threats: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", borderAccent: "border-rose-500", label: "Threats", slug: "threats" },
-  "non-threats": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", borderAccent: "border-gray-500", label: "Non-Threats", slug: "non-threats" },
-};
-
-function getCategoryConfig(category: string): { bg: string; text: string; border: string; borderAccent: string; label: string; slug: string } {
-  const normalized = normalizeCategoryName(category);
-  return CATEGORY_MAP[normalized] || CATEGORY_MAP["non-threats"];
-}
+import { getCategoryConfig } from "../../config/categories";
 
 function formatDisplayName(name: string) {
   return name.replace(/\.[^.]+$/i, "");

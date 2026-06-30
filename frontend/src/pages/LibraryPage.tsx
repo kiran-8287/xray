@@ -5,30 +5,10 @@ import type { Item, CategorizedItems } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import { generateCombinations } from "../lib/combinationGenerator";
 import { API_BASE_URL } from "../config/api";
-import { getCategoryConfig, normalizeCategoryName, LIBRARIES_UI, getLibrarySubcategories } from "../config/categories";
+import { getCategoryConfig, normalizeCategoryName, normalizeCategorizedItems, LIBRARIES_UI, getLibrarySubcategories } from "../config/categories";
 
 // Use centralized library definitions
 const LIBRARIES = LIBRARIES_UI;
-
-function normalizeCategorizedItems(categorized: any): any {
-  if (!categorized) return null;
-  const merged: any = {};
-  for (const [catKey, subcats] of Object.entries(categorized)) {
-    const normalized = normalizeCategoryName(catKey);
-    if (!merged[normalized]) {
-      merged[normalized] = {};
-    }
-    for (const [subKey, items] of Object.entries(subcats || {})) {
-      if (!merged[normalized][subKey]) {
-        merged[normalized][subKey] = [];
-      }
-      if (Array.isArray(items)) {
-        merged[normalized][subKey].push(...items);
-      }
-    }
-  }
-  return merged;
-}
 
 import SimpleLibrarySidebar from "../components/library/SimpleLibrarySidebar";
 import LibraryToolbar from "../components/library/LibraryToolbar";

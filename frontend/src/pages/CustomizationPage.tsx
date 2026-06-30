@@ -14,36 +14,12 @@ import { getRectCorners } from "../lib/geometry";
 import { loadMultipleImageDimensions } from "../lib/imageSizeLoader";
 import { computeObjectStats, type ObjectPixelStats } from "../lib/xrayRenderer";
 import { API_BASE_URL } from "../config/api";
-import { normalizeCategoryName, getCategoryConfig } from "../config/categories";
+import { normalizeCategoryName, getCategoryConfig, normalizeCategorizedItems } from "../config/categories";
 import ScannedBagsSidebar from "../components/customization/ScannedBagsSidebar";
 import WorkspaceToolbar from "../components/customization/WorkspaceToolbar";
 import CanvasArea from "../components/customization/CanvasArea";
 
-// Use centralized category normalization
-// mergeCategorizedItems function kept for compatibility
-
-function mergeCategorizedItems(categorized: any): any {
-  if (!categorized) return null;
-  const merged: any = {};
-  for (const [catKey, subcats] of Object.entries(categorized)) {
-    const normalized = normalizeCategoryName(catKey);
-    if (!merged[normalized]) {
-      merged[normalized] = {};
-    }
-    for (const [subKey, items] of Object.entries(subcats || {})) {
-      if (!merged[normalized][subKey]) {
-        merged[normalized][subKey] = [];
-      }
-      if (Array.isArray(items)) {
-        merged[normalized][subKey].push(...items);
-      }
-    }
-  }
-  return merged;
-}
-
-// Use centralized category config
-// getCategoryConfig function removed - using import from config
+// Use centralized category normalization and config
 
 function getStencilKind(category: string): string {
   const normalized = category.toLowerCase();
@@ -126,7 +102,7 @@ export default function CustomizationPage() {
       .then((res) => res.json())
       .then((data) => {
         if (data.ok) {
-          setCategorizedList(mergeCategorizedItems(data.categorized));
+          setCategorizedList(normalizeCategorizedItems(data.categorized));
         }
       })
       .catch((err) => console.error("Error loading scanned bags in workspace:", err));

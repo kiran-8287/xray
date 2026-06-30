@@ -38,11 +38,6 @@ function cleanForSerialization<T>(value: T): T {
   return out as T;
 }
 
-/** Return a lightweight identity key for an item — stable across saves. */
-function itemKey(item: Item): string {
-  return item.id + "|" + item.category + "|" + item.name;
-}
-
 export default function CollagePage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -487,56 +482,10 @@ export default function CollagePage() {
                 {combinations.length > 0
                   ? `Showing ${currentPage * ITEMS_PER_PAGE + 1}–${Math.min((currentPage + 1) * ITEMS_PER_PAGE, combinations.length)} of ${combinations.length} combinations`
                   : "0 combinations generated"}
-                {failures.length > 0 && (
-                  <span className="ml-2 text-rose-600 font-medium">
-                    · {failures.length} failure{failures.length !== 1 ? "s" : ""}
-                  </span>
-                )}
               </p>
             </div>
-            {failures.length > 0 && (
-              <button
-                onClick={() => setShowLogs(!showLogs)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${
-                  showLogs
-                    ? "bg-rose-50 border-rose-200 text-rose-700"
-                    : "bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100"
-                }`}
-              >
-                {showLogs ? <X size={14} /> : <AlertTriangle size={14} />}
-                {showLogs ? "Hide Logs" : `${failures.length} Issue${failures.length !== 1 ? "s" : ""}`}
-              </button>
-            )}
           </div>
 
-          {/* Logs Panel */}
-          {showLogs && failures.length > 0 && (
-            <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl shadow-card">
-              <div className="flex items-center gap-2 mb-3">
-                <AlertTriangle size={16} className="text-rose-600" />
-                <h3 className="text-sm font-semibold text-rose-800">Generation Issues</h3>
-                <span className="text-xs text-rose-500 ml-1">({failures.length} total)</span>
-              </div>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {failures.map((f, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 bg-white rounded-xl border border-rose-100 text-xs space-y-1"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-rose-800">
-                        {f.bagName} ← {f.threatName}
-                      </span>
-                      <span className="text-rose-500 font-mono">
-                        {f.actual}/{f.expected}
-                      </span>
-                    </div>
-                    <p className="text-rose-600 leading-relaxed">{f.reason}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Combination Grid */}
           {combinations.length > 0 && (
