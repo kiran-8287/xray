@@ -5,37 +5,45 @@ echo === Synthetic X-Ray Generation System - Bootstrap ===
 echo.
 
 REM Check if Docker is available (Compose V1 or V2)
+set DOCKER_COMPOSE_CMD=
 where docker >nul 2>nul
 if %errorlevel% == 0 (
     docker compose version >nul 2>nul
     if %errorlevel% == 0 (
         set DOCKER_COMPOSE_CMD=docker compose
-    ) else (
-        where docker-compose >nul 2>nul
-        if %errorlevel% == 0 (
-            set DOCKER_COMPOSE_CMD=docker-compose
-        )
     )
+)
 
-    if defined DOCKER_COMPOSE_CMD (
-        echo Docker found! Starting with Docker...
-        echo.
-        
-        REM Auto-fix BuildKit issue on Windows
-        powershell -ExecutionPolicy Bypass -File "%~dp0scripts\disable-buildkit.ps1"
-        
-        REM Disable BuildKit for this session as well
-        set DOCKER_BUILDKIT=0
-        
-        %DOCKER_COMPOSE_CMD% up -d --build
-        echo.
-        echo Success! The app is now running!
-        echo Frontend: http://localhost:5174
-        echo Backend: http://localhost:8080
-        echo.
-        echo To stop the app: %DOCKER_COMPOSE_CMD% down
-        goto :eof
+if not defined DOCKER_COMPOSE_CMD (
+    where docker-compose >nul 2>nul
+    if %errorlevel% == 0 (
+        set DOCKER_COMPOSE_CMD=docker-compose
     )
+)
+
+REM Check if Docker Compose command was found
+if defined DOCKER_COMPOSE_CMD (
+    echo Docker found! Starting with Docker...
+    echo.
+    
+    REM Auto-fix BuildKit issue on Windows
+    powershell -ExecutionPolicy Bypass -File "%~dp0scripts\disable-buildkit.ps1"
+    
+    REM Disable BuildKit for this session as well
+    set DOCKER_BUILDKIT=0
+    
+    echo.
+    echo Building and starting containers...
+    echo.
+    
+    %DOCKER_COMPOSE_CMD% up -d --build
+    echo.
+    echo Success! The app is now running!
+    echo Frontend: http://localhost:5174
+    echo Backend: http://localhost:8080
+    echo.
+    echo To stop the app: %DOCKER_COMPOSE_CMD% down
+    goto :eof
 )
 
 REM Check if npm is available

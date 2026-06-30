@@ -17,12 +17,12 @@ Thumbs.db
 dist
 build
 
-# Config files not needed in Docker
-eslint.config.js
-postcss.config.js
-tailwind.config.js
-tsconfig*.json
-vite.config.ts
+# Config files not needed in Docker runtime (but needed for build, so keep them)
+# eslint.config.js
+# postcss.config.js
+# tailwind.config.js
+# tsconfig*.json
+# vite.config.ts
 
 # Root-level docker files
 docker-compose*.yml

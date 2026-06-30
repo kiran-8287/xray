@@ -16,6 +16,10 @@ fi
 
 if [ -n "$DOCKER_COMPOSE_CMD" ]; then
     echo "Docker found! Starting with Docker..."
+    
+    # Disable BuildKit to avoid Windows/Linux compatibility issues
+    export DOCKER_BUILDKIT=0
+    
     $DOCKER_COMPOSE_CMD up -d --build
     echo ""
     echo "✅ Success! The app is now running!"
