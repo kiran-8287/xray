@@ -79,32 +79,3 @@ function findNextSequence(baseId: string, existingIds: string[]): number {
   return maxSequence + 1;
 }
 
-/**
- * Extract bag ID from a synthesized ID
- * @param synthesizedId - The synthesized ID (e.g., "SB00923-29062026530-00001")
- * @returns The original bag ID suffix (last 5 digits)
- */
-export function extractBagIdSuffix(synthesizedId: string): string {
-  const match = synthesizedId.match(/^SB(\d{5})-/);
-  return match ? match[1] : '';
-}
-
-/**
- * Extract timestamp from a synthesized ID
- * @param synthesizedId - The synthesized ID (e.g., "SB00923-29062026530-00001")
- * @returns Date string in DDMMYYYY format
- */
-export function extractDate(synthesizedId: string): string {
-  const match = synthesizedId.match(/^SB\d{5}-(\d{8})\d{4}-\d{5}$/);
-  return match ? match[1] : '';
-}
-
-/**
- * Extract time from a synthesized ID
- * @param synthesizedId - The synthesized ID (e.g., "SB00923-29062026530-00001")
- * @returns Time string in HHMM format (24-hour)
- */
-export function extractTime(synthesizedId: string): string {
-  const match = synthesizedId.match(/^SB\d{5}-\d{8}(\d{4})-\d{5}$/);
-  return match ? match[1] : '';
-}

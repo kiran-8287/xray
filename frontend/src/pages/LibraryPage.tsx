@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Image, AlertTriangle, CheckCircle2, X, XCircle, Trash2, Loader2, Settings2 } from "lucide-react";
+import { Image, AlertTriangle, CheckCircle2, X, XCircle, Trash2, Loader2 } from "lucide-react";
 import type { Item, CategorizedItems } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import { generateCombinations } from "../lib/combinationGenerator";
 import { API_BASE_URL } from "../config/api";
 import { getCategoryConfig, normalizeCategoryName, LIBRARIES_UI, getLibrarySubcategories } from "../config/categories";
 
-// Use centralized category normalization
-// mergeCategorizedItems function removed - using normalizeCategoryName from config
+// Use centralized library definitions
+const LIBRARIES = LIBRARIES_UI;
 
-function mergeCategorizedItems(categorized: any): any {
+function normalizeCategorizedItems(categorized: any): any {
   if (!categorized) return null;
   const merged: any = {};
   for (const [catKey, subcats] of Object.entries(categorized)) {
@@ -29,9 +29,6 @@ function mergeCategorizedItems(categorized: any): any {
   }
   return merged;
 }
-
-// Use centralized library definitions
-const LIBRARIES = LIBRARIES_UI;
 
 import SimpleLibrarySidebar from "../components/library/SimpleLibrarySidebar";
 import LibraryToolbar from "../components/library/LibraryToolbar";
@@ -137,7 +134,7 @@ export default function LibraryPage() {
       const customEvent = event as CustomEvent;
       const data = customEvent.detail;
       if (data) {
-        const merged = mergeCategorizedItems(data.categorized || data);
+        const merged = normalizeCategorizedItems(data.categorized || data);
         setCategorizedItems(merged);
         showNotification("success", "Library refreshed with new items!");
       }
@@ -158,7 +155,7 @@ export default function LibraryPage() {
       if (cachedData) {
         sessionStorage.removeItem("refreshedCategorizedItems");
         const data = JSON.parse(cachedData);
-        const merged = mergeCategorizedItems(data.categorized || data);
+        const merged = normalizeCategorizedItems(data.categorized || data);
         setCategorizedItems(merged);
         if (!Object.keys(merged).includes(activeCategory)) {
           setActiveCategory(Object.keys(merged)[0] || "bags");
@@ -170,7 +167,7 @@ export default function LibraryPage() {
       const res = await fetch(`${API_BASE_URL}/api/items/categorized`);
       const data = await res.json();
       if (data.ok) {
-        const merged = mergeCategorizedItems(data.categorized);
+        const merged = normalizeCategorizedItems(data.categorized);
         setCategorizedItems(merged);
         if (!Object.keys(merged).includes(activeCategory)) {
           setActiveCategory(Object.keys(merged)[0] || "bars");

@@ -76,15 +76,7 @@ async function deleteItem(id) {
   await writeJSONFile(ITEMS_FILE, filteredItems);
 }
 
-// Bags storage (now merged into items)
-async function getBags() {
-  const items = await getItems();
-  return items.filter(item => item.category === 'bags').map(item => ({
-    item_id: item.id,
-    valid_region_points: item.valid_region_points
-  }));
-}
-
+// Bag valid region storage (merged into items)
 async function getBagByItemId(itemId) {
   const item = await getItemById(itemId);
   if (!item || item.category !== 'bags') return null;
@@ -112,30 +104,7 @@ async function updateBag(itemId, bagData) {
   };
 }
 
-async function deleteBag(itemId) {
-  await updateItem(itemId, { valid_region_points: null });
-}
-
-// Threats storage (now merged into items)
-async function getThreats() {
-  const items = await getItems();
-  return items.filter(item => item.category === 'threats').map(item => ({
-    item_id: item.id,
-    threat_type: item.threat_type,
-    severity: item.severity
-  }));
-}
-
-async function getThreatByItemId(itemId) {
-  const item = await getItemById(itemId);
-  if (!item || item.category !== 'threats') return null;
-  return {
-    item_id: item.id,
-    threat_type: item.threat_type,
-    severity: item.severity
-  };
-}
-
+// Threat metadata storage (merged into items)
 async function createThreat(threatData) {
   const item = await getItemById(threatData.item_id);
   if (!item) return null;
@@ -150,40 +119,7 @@ async function createThreat(threatData) {
   };
 }
 
-async function updateThreat(itemId, threatData) {
-  await updateItem(itemId, { 
-    threat_type: threatData.threat_type,
-    severity: threatData.severity
-  });
-  return {
-    item_id: itemId,
-    threat_type: threatData.threat_type,
-    severity: threatData.severity
-  };
-}
-
-async function deleteThreat(itemId) {
-  await updateItem(itemId, { threat_type: null, severity: null });
-}
-
-// Non-threat items storage (now merged into items)
-async function getNonThreatItems() {
-  const items = await getItems();
-  return items.filter(item => item.category === 'non-threats').map(item => ({
-    item_id: item.id,
-    subcategory_slug: item.subcategory_slug
-  }));
-}
-
-async function getNonThreatItemByItemId(itemId) {
-  const item = await getItemById(itemId);
-  if (!item || item.category !== 'non-threats') return null;
-  return {
-    item_id: item.id,
-    subcategory_slug: item.subcategory_slug
-  };
-}
-
+// Non-threat subcategory storage (merged into items)
 async function createNonThreatItem(nonThreatData) {
   const item = await getItemById(nonThreatData.item_id);
   if (!item) return null;
@@ -194,20 +130,6 @@ async function createNonThreatItem(nonThreatData) {
     item_id: nonThreatData.item_id,
     subcategory_slug: nonThreatData.subcategory_slug
   };
-}
-
-async function updateNonThreatItem(itemId, nonThreatData) {
-  await updateItem(itemId, { 
-    subcategory_slug: nonThreatData.subcategory_slug
-  });
-  return {
-    item_id: itemId,
-    subcategory_slug: nonThreatData.subcategory_slug
-  };
-}
-
-async function deleteNonThreatItem(itemId) {
-  await updateItem(itemId, { subcategory_slug: null });
 }
 
 // Saved layouts storage
@@ -256,21 +178,11 @@ export {
   itemExists,
   updateItem,
   deleteItem,
-  getBags,
   getBagByItemId,
   createBag,
   updateBag,
-  deleteBag,
-  getThreats,
-  getThreatByItemId,
   createThreat,
-  updateThreat,
-  deleteThreat,
-  getNonThreatItems,
-  getNonThreatItemByItemId,
   createNonThreatItem,
-  updateNonThreatItem,
-  deleteNonThreatItem,
   getSavedLayouts,
   getSavedLayoutById,
   createSavedLayout,

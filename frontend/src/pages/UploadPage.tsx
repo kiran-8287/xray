@@ -4,7 +4,7 @@ import UploadDropZone from "../components/upload/UploadDropZone";
 import UploadFileQueue from "../components/upload/UploadFileQueue";
 import { useUploadContext } from "../context/UploadContext";
 import { API_BASE_URL } from "../config/api";
-import { LIBRARIES_UI, SUBCATEGORY_MAP, getLibrarySubcategories } from "../config/categories";
+import { LIBRARIES_UI, getLibrarySubcategories } from "../config/categories";
 
 // Use centralized library definitions
 const LIBRARIES = LIBRARIES_UI;

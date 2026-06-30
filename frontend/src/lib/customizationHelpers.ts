@@ -2,8 +2,6 @@ import { isPointInPolygon, getRectCorners, edgeIntersectsPolygon, getTransformed
 import type { Point } from "../types/geometry";
 import type { SceneObject } from "../types/customization";
 
-const MAX_PIXEL = 65535;
-
 export const getTransformedValidRegion = (
   bag: SceneObject,
   actualImageDimensions?: { width: number; height: number } | null
@@ -138,35 +136,4 @@ export const doObjectsOverlap = (obj1: SceneObject, obj2: SceneObject): boolean 
     obj1.transform.y + obj1.transform.height / 2 < obj2.transform.y - obj2.transform.height / 2 ||
     obj1.transform.y - obj1.transform.height / 2 > obj2.transform.y + obj2.transform.height / 2
   );
-};
-
-/**
- * @deprecated This function uses a simplified single-value-per-object approach
- * that is not accurate. Use computeObjectStats from xrayRenderer.ts instead,
- * which computes per-pixel statistics from the actual rendered composite.
- */
-export const calculatePixelValues = (objs: SceneObject[], threatOnly = false): SceneObject[] => {
-  return objs.map((obj) => {
-    let newPixelValue = obj.originalPixelValue;
-    
-    if (!threatOnly || obj.library === "threat") {
-      let overlappingPixel = null;
-      for (const other of objs) {
-        if (other.id !== obj.id && other.layer < obj.layer && doObjectsOverlap(obj, other)) {
-          overlappingPixel = other.currentPixelValue;
-          break;
-        }
-      }
-
-      if (overlappingPixel !== null) {
-        newPixelValue = Math.round((obj.originalPixelValue * overlappingPixel) / MAX_PIXEL);
-      }
-    }
-
-    return {
-      ...obj,
-      oldPixelValue: obj.currentPixelValue,
-      currentPixelValue: newPixelValue,
-    };
-  });
 };

@@ -26,10 +26,3 @@ export interface CategorizedItems {
   };
 }
 
-export interface UploadSession {
-  id: string;
-  folder_name: string;
-  uploaded_at: string;
-  item_count: number;
-  items: Item[];
-}
