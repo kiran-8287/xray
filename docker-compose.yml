@@ -26,6 +26,6 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    environment:
-      - VITE_API_URL=http://localhost:8080
+    env_file:
+      - ./frontend/.env.docker
     restart: unless-stopped

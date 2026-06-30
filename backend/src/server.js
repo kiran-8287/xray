@@ -5,8 +5,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import multer from "multer";
-import { generateDataset } from "./api/datasetGenerator.js";
-import { isObjectInsideContainer } from "./lib/geometry.js";
 import { generateValidRegion } from "./lib/autoValidRegion.js";
 import Jimp from "jimp";
 import WorkerPool from "./lib/workerPool.js";
@@ -49,21 +47,6 @@ await fs.mkdir(pixelDataRoot, { recursive: true });
 // Serve static files from data directory
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
 
-// Helper function to generate unique filename (no UUID, use actual filename)
-async function getUniqueFilename(originalName) {
-    const ext = path.extname(originalName);
-    const base = path.basename(originalName, ext);
-    let filename = originalName;
-    let counter = 1;
-    
-    // Check if file exists, if so append counter
-    while (await fs.stat(path.join(libraryImagesRoot, filename)).catch(() => null)) {
-        filename = `${base}_${counter}${ext}`;
-        counter++;
-    }
-    return filename;
-}
-
 // Multer setup for file uploads (use actual filenames, no UUID)
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -101,9 +84,6 @@ function parseFilename(filename) {
 // ------------------------------
 // API endpoints
 // ------------------------------
-app.get("/api/health", (_req, res) => {
-    res.json({ ok: true, service: "synthetic-xray-backend" });
-});
 
 // Helper functions for raw file processing
 function deriveItemId(filename) {
@@ -241,157 +221,6 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
     }
 });
 
-// Endpoint to get pixel data by item ID
-app.get("/api/item/:id/pixel-data", async (req, res) => {
-    try {
-        const item = await getItemById(req.params.id);
-        if (!item) {
-            return res.status(404).json({ ok: false, error: "Item not found" });
-        }
-        
-        // Look for pixel data file
-        const possibleFilenames = [
-            `${item.name}.json`,
-            `${item.id}.json`
-        ];
-        
-        for (const filename of possibleFilenames) {
-            const pixelDataPath = path.join(pixelDataRoot, filename);
-            try {
-                const data = await fs.readFile(pixelDataPath, "utf8");
-                return res.json({ ok: true, data: JSON.parse(data) });
-            } catch {
-                // Continue to next possible filename
-            }
-        }
-        
-        res.status(404).json({ ok: false, error: "Pixel data not found" });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ ok: false, error: String(error) });
-    }
-});
-
-app.post("/api/export", async (req, res) => {
-    try {
-        const payload = req.body ?? {};
-        const exportId = `synth-${safeNowStamp()}`;
-        const outDir = path.join(exportsRoot, exportId);
-        await fs.mkdir(outDir, { recursive: true });
-
-        const bagObj = payload.objects?.find(obj => obj.library === "bag");
-        const threatObj = payload.objects?.find(obj => obj.library === "threat");
-
-        let threatStatus = "clean";
-        let placementValidity = "valid";
-
-        if (threatObj) {
-            threatStatus = "threat_present";
-            if (bagObj) {
-                const isInside = isObjectInsideContainer(threatObj, bagObj);
-                placementValidity = isInside ? "valid" : "out_of_bounds";
-            } else {
-                placementValidity = "out_of_bounds";
-            }
-        }
-
-        const metadata = {
-            exportId,
-            createdAt: new Date().toISOString(),
-            prototype: payload.prototype ?? "synthetic-xray",
-            threat_status: threatStatus,
-            placement_validity: placementValidity,
-            
-            annotationSchema: {
-                type: payload.annotationSchema ?? "per-object-segmentation",
-                description: "Per-object annotations with bounding box/segmentation polygon, plus valid region for the bag",
-                levels: ["bag", "object"]
-            },
-
-            bag: bagObj ? {
-                object: bagObj,
-                validPlacementRegion: payload.validRegionPolygon ?? [],
-            } : null,
-
-            objects: (payload.objects ?? []).map(obj => ({
-                ...obj,
-                isThreat: obj.library === "threat",
-                segmentation: obj.segmentation ?? null,
-            })),
-
-            annotationCount: Array.isArray(payload.annotations) ? payload.annotations.length : 0,
-            active: payload.active ?? null,
-            annotations: payload.annotations ?? [],
-            validRegionPolygon: payload.validRegionPolygon ?? [],
-        };
-
-        await fs.writeFile(path.join(outDir, "metadata.json"), JSON.stringify(metadata, null, 2), "utf8");
-
-        const nonBagNonThreatCount = metadata.objects.filter(obj => obj.library !== "bag" && obj.library !== "threat").length;
-        
-        const summaryText = [
-            `Export ID: ${exportId}`,
-            `Created At: ${metadata.createdAt}`,
-            `Prototype: ${metadata.prototype}`,
-            `Annotation Schema: ${metadata.annotationSchema.type}`,
-            `Objects: ${metadata.objects.length} total`,
-            `  - Bag: ${bagObj ? bagObj.name : 'n/a'}`,
-            `  - Threat: ${threatObj ? threatObj.name : 'n/a'}`,
-            `  - Other objects: ${nonBagNonThreatCount}`,
-            `Valid Region: ${metadata.bag?.validPlacementRegion?.length > 0 ? 'Yes' : 'No'}`,
-            `Threat Status: ${metadata.threat_status}`,
-            `Placement Validity: ${metadata.placement_validity}`,
-        ].join("\n");
-        await fs.writeFile(path.join(outDir, "summary.txt"), summaryText, "utf8");
-
-        // Call generateDataset to render the single custom composite PNG and JSON label
-        const saveImages = payload.saveImages !== false;
-        await generateDataset(payload, exportId, outDir, saveImages);
-
-        res.json({
-            ok: true,
-            message: "Synthesis export saved to disk.",
-            exportId,
-            outputDir: outDir,
-            files: [
-                "metadata.json",
-                "summary.txt",
-                ...(saveImages ? ["images/" + exportId + ".png"] : []),
-                "labels/" + exportId + ".json",
-            ],
-        });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ ok: false, message: "Failed to save export.", error: String(error) });
-    }
-});
-
-// Batch dataset generation endpoint (from CollagePage)
-app.post("/api/dataset/generate", async (req, res) => {
-    try {
-        const payload = req.body ?? {};
-        const datasetId = `dataset-${safeNowStamp()}`;
-        // Save generated collages in data/collage_images/ folder
-        const outDir = path.join(collageImagesRoot, datasetId);
-        await fs.mkdir(outDir, { recursive: true });
-
-        const saveImages = payload.saveImages !== false;
-        const result = await generateDataset(payload, datasetId, outDir, saveImages);
-
-        res.json({
-            ok: true,
-            message: "Dataset generated successfully.",
-            datasetId,
-            outputDir: outDir,
-            files: result.files,
-            manifest: result.manifest
-        });
-    } catch (error) {
-        console.error("Dataset generation error:", error);
-        res.status(500).json({ ok: false, message: "Failed to generate dataset.", error: String(error) });
-    }
-});
-
 // Helper to normalize category name into exactly three main categories
 function normalizeCategory(cat) {
     const normalized = (cat || "").toLowerCase();
@@ -481,7 +310,6 @@ app.delete('/api/saved-layouts/:id', async (req, res) => {
 // Upload endpoint
 app.post("/api/upload", upload.array("images"), async (req, res) => {
     try {
-        const { folderName, description = "" } = req.body;
         const files = req.files || [];
         // Optional metadata: JSON string or object keyed by original filename
         let metadataArray = [];
@@ -672,8 +500,7 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
             ok: true, 
             message: errors.length > 0 ? "Some files processed, some had errors" : "Files uploaded successfully!", 
             itemsProcessed: processed.length,
-            errors,
-            duplicates: errors.map(err => err.filename)
+            errors
         });
     } catch (err) {
         console.error(err);
@@ -755,72 +582,6 @@ app.post("/api/auto-valid-region", async (req, res) => {
         });
     } catch (error) {
         console.error(`[auto-valid-region] Error:`, error);
-        res.status(500).json({ ok: false, error: String(error) });
-    }
-});
-
-// Auto-generate valid region from raw pixel data (for uploaded items)
-app.post("/api/items/:id/auto-valid-region", async (req, res) => {
-    try {
-        const item = await getItemById(req.params.id);
-        if (!item) {
-            return res.status(404).json({ ok: false, error: "Item not found" });
-        }
-        if (item.category !== "bags") {
-            return res.status(400).json({ ok: false, error: "Only bag items support valid region generation" });
-        }
-
-        // Find pixel data file
-        let pixelDataPath = null;
-        const possibleFilenames = [
-            item.pixel_data_path,
-            `${item.name}.json`,
-            `${item.id}.json`
-        ];
-
-        for (const filename of possibleFilenames) {
-            if (!filename) continue;
-            const testPath = path.join(pixelDataRoot, filename);
-            try {
-                await fs.access(testPath);
-                pixelDataPath = testPath;
-                break;
-            } catch {
-                // Continue to next possible filename
-            }
-        }
-
-        if (!pixelDataPath) {
-            return res.status(404).json({ ok: false, error: "Pixel data not found for this item. Raw file may not have been processed." });
-        }
-
-        console.log(`[auto-valid-region] Processing: ${item.id} from ${pixelDataPath}`);
-        
-        const result = await generateValidRegion(pixelDataPath);
-        
-        // Save the generated region to the bag
-        const { points, width, height, pixelCount } = result;
-        await updateBag(item.id, {
-            valid_region_points: {
-                points,
-                simplifiedPoints: points
-            }
-        });
-
-        console.log(`[auto-valid-region] Success: ${item.id} - ${points.length} points (${width}x${height}, ${pixelCount} pixels)`);
-
-        res.json({
-            ok: true,
-            message: `Valid region auto-generated with ${points.length} points`,
-            data: {
-                points,
-                width,
-                height,
-                pixelCount
-            }
-        });
-    } catch (error) {
-        console.error(`[auto-valid-region] Error for ${req.params.id}:`, error);
         res.status(500).json({ ok: false, error: String(error) });
     }
 });

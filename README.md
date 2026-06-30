@@ -3,7 +3,7 @@
   - **Important:** After installing, launch Docker Desktop and wait for it to show **"Docker Desktop is running"** (look for the whale icon in your system tray). Containers will not start without it.
 - **OR Node.js 18+:** [Install Node.js](https://nodejs.org/)
 
-> No admin/sudo privileges or build tools (Python, C++ compiler) required. All dependencies are pure JavaScript.
+> **Note:** The backend uses Python for raw file processing. Docker will automatically install Python3, numpy, and Pillow. For local Node.js development, ensure Python 3 is available if you plan to process raw .dump.pgm and .tip files.
 
 ---
 
