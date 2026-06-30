@@ -26,22 +26,21 @@ if defined DOCKER_COMPOSE_CMD (
     echo Docker found! Starting with Docker...
     echo.
     
-    REM Check and disable BuildKit if needed
-    echo Checking Docker BuildKit settings...
-    echo.
-    call "%~dp0scripts\check-buildkit.bat"
+    REM Try building with Docker (may fail on Windows due to BuildKit bug)
+    echo Building and starting containers...
+    %DOCKER_COMPOSE_CMD% up -d --build
     if %errorlevel% neq 0 (
         echo.
-        echo BuildKit issue detected. Please follow the instructions above.
-        pause
-        exit /b 1
+        echo ========================================
+        echo Docker build failed. This is likely due to
+        echo the Docker BuildKit bug on Windows.
+        echo.
+        echo Falling back to Node.js mode...
+        echo ========================================
+        echo.
+        goto :npm_install
     )
     
-    echo.
-    echo Building and starting containers...
-    echo.
-    
-    %DOCKER_COMPOSE_CMD% up -d --build
     echo.
     echo Success! The app is now running!
     echo Frontend: http://localhost:5174
@@ -50,6 +49,8 @@ if defined DOCKER_COMPOSE_CMD (
     echo To stop the app: %DOCKER_COMPOSE_CMD% down
     goto :eof
 )
+
+:npm_install
 
 REM Check if npm is available
 where npm >nul 2>nul

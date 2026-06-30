@@ -6,7 +6,7 @@ RUN apk add --no-cache curl python3 py3-pip py3-numpy py3-pillow && ln -sf /usr/
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm install --no-audit --no-fund
 
 COPY . .
 

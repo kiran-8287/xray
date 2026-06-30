@@ -3,8 +3,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-      args:
-        - DOCKER_BUILDKIT=0
     ports:
       - "8080:8080"
     volumes:
@@ -21,8 +19,6 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        - DOCKER_BUILDKIT=0
     ports:
       - "5174:5174"
     depends_on:

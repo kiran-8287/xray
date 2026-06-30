@@ -1,37 +1,14 @@
-# Dependencies
 node_modules
-npm-debug.log
-
-# Version control
 .git
-.gitignore
-.gitattributes
-
-# IDE / OS files
 .vscode
 .idea
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-
-# Build outputs
 dist
 build
 out
-
-# Root-level docker files
+*.md
+*.log
+.DS_Store
+Thumbs.db
 docker-compose*.yml
 Dockerfile
 .dockerignore
-
-# Docs
-*.md
-!LICENSE*
-
-# Misc
-.env.development
-.env.local
-.env.*.local
-*.log
-coverage
