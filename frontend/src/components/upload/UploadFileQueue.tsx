@@ -133,6 +133,9 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   
   // Auto-generate valid region state
   const [autoGeneratingIndices, setAutoGeneratingIndices] = useState<Set<number>>(new Set());
+  
+  // Mass auto-generate valid region state
+  const [massAutoGen, setMassAutoGen] = useState<{ total: number; completed: number; running: boolean } | null>(null);
 
   const massSubcategoryOptions = useMemo(() => {
     if (!massCategory) return [];
@@ -327,6 +330,90 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     }
   };
 
+  const handleMassAutoGenerateRegion = async () => {
+    // Determine which indices to process:
+    // - If items are selected (via checkboxes), use only those
+    // - Otherwise, use all bag items
+    let indicesToProcess: number[] = [];
+    if (selectedForMass.size > 0) {
+      indicesToProcess = [...selectedForMass].filter(idx => staged[idx]?.category === "bags");
+    } else {
+      indicesToProcess = staged
+        .map((s, idx) => ({ s, idx }))
+        .filter(({ s }) => s.category === "bags")
+        .map(({ idx }) => idx);
+    }
+    
+    if (indicesToProcess.length === 0) {
+      alert("No bag items found to auto-generate valid regions.");
+      return;
+    }
+    
+    setMassAutoGen({ total: indicesToProcess.length, completed: 0, running: true });
+    
+    let completedCount = 0;
+    const failedItems: number[] = [];
+    
+    for (const idx of indicesToProcess) {
+      setAutoGeneratingIndices(prev => new Set(prev).add(idx));
+      
+      const stagedItem = staged[idx];
+      try {
+        const pixelDataPath = `${stagedItem.itemId}.json`;
+        
+        const res = await fetch(`http://localhost:8080/api/auto-valid-region`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            itemId: stagedItem.itemId,
+            pixelDataPath: pixelDataPath
+          }),
+        });
+        const data = await res.json();
+        
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || "Failed to auto-generate valid region");
+        }
+        
+        // Update staged item with generated region using functional updater
+        // to avoid stale closure issues when processing multiple items
+        setStaged(prev => {
+          const copy = [...prev];
+          copy[idx] = {
+            ...copy[idx],
+            valid_region_points: {
+              points: data.data.points,
+              simplifiedPoints: data.data.points
+            }
+          };
+          return copy;
+        });
+        
+        completedCount++;
+        setMassAutoGen({ total: indicesToProcess.length, completed: completedCount, running: true });
+      } catch (err) {
+        console.error(`Failed to auto-generate valid region for item ${idx + 1}:`, err);
+        failedItems.push(idx);
+        completedCount++;
+        setMassAutoGen({ total: indicesToProcess.length, completed: completedCount, running: true });
+      } finally {
+        setAutoGeneratingIndices(prev => {
+          const next = new Set(prev);
+          next.delete(idx);
+          return next;
+        });
+      }
+    }
+    
+    setMassAutoGen({ total: indicesToProcess.length, completed: completedCount, running: false });
+    
+    if (failedItems.length > 0) {
+      alert(`Mass auto-generation complete. ${completedCount - failedItems.length} succeeded, ${failedItems.length} failed.`);
+    } else {
+      console.log(`Mass auto-generation complete: ${completedCount} items processed successfully.`);
+    }
+  };
+
   return (
     <div className="bg-panel rounded-2xl border border-border shadow-card overflow-hidden flex flex-col">
       <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-nav flex-shrink-0">
@@ -378,6 +465,25 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         >
           <CheckSquare size={14} />
           Apply to All
+        </button>
+        
+        <div className="w-px h-6 bg-border mx-1"></div>
+        
+        {/* Mass Auto Generate Valid Region */}
+        <button
+          onClick={handleMassAutoGenerateRegion}
+          disabled={massAutoGen?.running ?? false}
+          className="px-4 py-1.5 rounded-xl bg-amber-50 text-amber-700 text-xs font-semibold border border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-100 transition-colors flex items-center gap-1.5"
+          title="Auto-generate valid regions for all bag items (or selected ones)"
+        >
+          {massAutoGen?.running ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Sparkles size={14} />
+          )}
+          {massAutoGen?.running
+            ? `Generating ${massAutoGen.completed}/${massAutoGen.total}...`
+            : "Mass Auto Generate"}
         </button>
       </div>
 
