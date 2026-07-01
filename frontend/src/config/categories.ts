@@ -156,10 +156,55 @@ export const LIBRARIES: LibraryCategory[] = [
   },
 ];
 
-// Helper function to get subcategories for a library slug
+// Custom subcategories cache (loaded from backend)
+let customSubcategoriesCache: Record<string, { slug: string; name: string }[]> = {};
+
+// Initialize cache with empty arrays for all categories
+function initializeCache() {
+  if (Object.keys(customSubcategoriesCache).length === 0) {
+    for (const lib of LIBRARIES) {
+      customSubcategoriesCache[lib.slug] = [];
+    }
+  }
+}
+
+// Load custom subcategories from backend (call this on app startup)
+export async function loadCustomSubcategories(): Promise<void> {
+  initializeCache();
+  try {
+    const res = await fetch('/api/custom-subcategories');
+    if (res.ok) {
+      const data = await res.json();
+      for (const [cat, subs] of Object.entries(data.customSubcategories || {})) {
+        customSubcategoriesCache[cat] = (subs as any[]).map((sub) => ({
+          slug: sub.slug,
+          name: sub.name,
+        }));
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load custom subcategories:', err);
+  }
+}
+
+// Helper function to get subcategories for a library slug (including custom ones)
 export function getLibrarySubcategories(slug: string): { slug: string; name: string }[] {
   const lib = LIBRARIES.find((l) => l.slug === slug);
-  return lib ? lib.subcategories : [];
+  const hardcodedSubs = lib ? lib.subcategories : [];
+  const customSubs = customSubcategoriesCache[slug] || [];
+  return [...hardcodedSubs, ...customSubs];
+}
+
+// Clear custom subcategories cache (call after adding/removing custom subcategories)
+export function clearCustomSubcategoriesCache() {
+  customSubcategoriesCache = {};
+  initializeCache();
+}
+
+// Check if a subcategory is custom
+export function isCustomSubcategory(categorySlug: string, subcategorySlug: string): boolean {
+  const customSubs = customSubcategoriesCache[categorySlug] || [];
+  return customSubs.some(sub => sub.slug === subcategorySlug);
 }
 
 // Normalize category names to standard slugs

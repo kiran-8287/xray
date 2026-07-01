@@ -147,7 +147,29 @@ export default function ItemCard({
         <h5 className="font-semibold text-ink text-xs truncate" title={item.name}>
           {formatDisplayName(item.name)}
         </h5>
-        <div className="flex items-center justify-end gap-1">
+        
+        {/* Tags Display */}
+        {item.tags && item.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {item.tags.map((tagSlug) => {
+              const tagName = tagSlug
+                .split('-')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(' ');
+              return (
+                <span
+                  key={tagSlug}
+                  className="inline-flex items-center px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-medium"
+                  title={tagName}
+                >
+                  {tagName}
+                </span>
+              );
+            })}
+          </div>
+        )}
+        
+        <div className="flex items-center justify-end gap-1 mt-2">
           {item.category === "bags" && (
             <button
               onClick={(e) => {
