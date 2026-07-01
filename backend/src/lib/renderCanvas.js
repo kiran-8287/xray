@@ -2,23 +2,84 @@ import Jimp from 'jimp';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const libraryImagesRoot = path.resolve(__dirname, "../../data/library_images");
 const pixelDataRoot = path.resolve(__dirname, "../../data/pixel_data");
+const READ_NPZ_SCRIPT = path.join(__dirname, 'read_npz.py');
 
 async function loadPixelData(filepath) {
   try {
     const pixelDataPath = path.join(pixelDataRoot, filepath);
+    
+    // Check if it's an .npz file
+    if (filepath.endsWith('.npz')) {
+      return await loadPixelDataFromNpz(pixelDataPath);
+    }
+    
+    // Legacy JSON format support (for backward compatibility)
     const data = await fs.readFile(pixelDataPath, 'utf8');
     return JSON.parse(data);
   } catch (err) {
+    console.error(`Failed to load pixel data from ${filepath}:`, err);
     return null;
   }
 }
 
+async function loadPixelDataFromNpz(npzPath) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('python', [READ_NPZ_SCRIPT, '--npz-path', npzPath], {
+      cwd: __dirname,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    proc.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on('close', (code) => {
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      const lastLine = lines[lines.length - 1] || '';
+
+      if (code === 0 && lastLine) {
+        try {
+          const parsed = JSON.parse(lastLine);
+          if (parsed.status === 'error') {
+            reject(new Error(parsed.reason || 'Python script returned error'));
+          } else {
+            // Convert to the expected format for getPixelArray
+            resolve({
+              pixel_data: parsed.pixel_data,
+              width: parsed.width,
+              height: parsed.height
+            });
+          }
+        } catch {
+          reject(new Error(`Invalid JSON from Python: ${lastLine}`));
+        }
+      } else {
+        reject(new Error(stderr.trim() || lastLine || 'Python process failed'));
+      }
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to start Python process: ${err.message}`));
+    });
+  });
+}
+
 function getPixelArray(pixelData) {
-  // For dump files, use R or high
+  // For .npz format, pixel data is in pixel_data property
+  if (pixelData.pixel_data) return pixelData.pixel_data;
+  
+  // Legacy JSON format support
   if (pixelData.R) return pixelData.R;
   if (pixelData.high) return pixelData.high;
   if (pixelData.high_raw) return pixelData.high_raw;

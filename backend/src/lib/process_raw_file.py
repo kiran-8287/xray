@@ -83,20 +83,20 @@ def main():
         os.makedirs(library_images_dir, exist_ok=True)
         png_path = os.path.join(library_images_dir, f"{item_id}.png")
         Image.fromarray(img).save(png_path)
-        # --- Write pixel data JSON ---
+        # --- Write pixel data as .npz (compressed numpy archive) ---
         os.makedirs(pixel_data_dir, exist_ok=True)
-        pixel_filename = f"{item_id}.json"
+        pixel_filename = f"{item_id}.npz"
         pixel_path = os.path.join(pixel_data_dir, pixel_filename)
-        # Convert pixel array to nested list for JSON serialization
         # Use the original pixel_array (before rotation for dump, before rotation for tip we use the rotated version)
-        # For dump, pixel_array is the original high array
-        # For tip, the rotated img is our pixel data source
+        # For dump, pixel_array is the original high array (float64)
+        # For tip, the rotated img is our pixel data source (uint16)
         if file_type == "dump":
-            pixel_data_for_json = pixel_array.tolist()  # convert to json-serializable
+            # Convert float64 to uint16 for consistency
+            pixel_data_to_save = dumpread.to_uint16(pixel_array)
         else:
-            pixel_data_for_json = img.tolist()  # rotated version
-        with open(pixel_path, "w") as f:
-            json.dump(pixel_data_for_json, f)
+            pixel_data_to_save = img  # already uint16
+        # Save as compressed .npz file with key 'pixel_data'
+        np.savez_compressed(pixel_path, pixel_data=pixel_data_to_save)
         # --- Output success result as JSON to stdout ---
         result = {
             "status": "done",
