@@ -328,7 +328,7 @@ export default function UploadPage() {
             </div>
             <button
               onClick={() => setDuplicateWarning(null)}
-              className="p-1 rounded-lg hover:bg-amber-100 transition-colors text-amber-600"
+              className="p-1 rounded-lg text-amber-600"
             >
               <X size={16} />
             </button>
@@ -339,7 +339,7 @@ export default function UploadPage() {
           <button
             onClick={handleUpload}
             disabled={uploading || staged.length === 0}
-            className="w-full flex items-center justify-center gap-3 px-5 py-3.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky transition-all hover:opacity-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center gap-3 px-5 py-3.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {uploading ? (
               "Uploading..."
@@ -419,13 +419,13 @@ export default function UploadPage() {
             <div className="flex gap-2 justify-end pt-1">
               <button
                 onClick={() => setConfirmUpload(false)}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-surface border border-border text-ink hover:bg-nav transition-colors"
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-surface border border-border text-ink"
               >
                 Cancel
               </button>
               <button
                 onClick={doUpload}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-accent hover:opacity-95 text-white transition-colors"
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white"
               >
                 Upload
               </button>

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { 
   HelpCircle, X, ChevronRight, Upload, Grid, Settings, 
   Layers, BookOpen, Award, FileText, MousePointer, Keyboard,
-  PenTool, Square, Circle, ZoomIn, Save, FolderOpen, Image
+  PenTool, Square, Circle, ZoomIn, Save, FolderOpen
 } from "lucide-react";
 
 export default function HelpMenu() {
@@ -143,7 +143,7 @@ export default function HelpMenu() {
           <div className="grid grid-cols-2 gap-3 mt-4">
             <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
               <p className="text-xs font-semibold text-ink mb-1">Search & Toggle</p>
-              <p className="text-xs text-muted leading-relaxed">Quickly filter items within a category by typing keywords or toggle between grid and list views.</p>
+              <p className="text-xs text-muted leading-relaxed">Quickly filter items within a category by typing keywords to find specific items.</p>
             </div>
             <div className="bg-surface border border-border rounded-xl p-3 hover:border-accent/30 transition-colors">
               <p className="text-xs font-semibold text-ink mb-1">Valid Region Trigger</p>

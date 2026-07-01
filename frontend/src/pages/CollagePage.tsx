@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Loader2, CheckCircle2, XCircle, Grid3X3, ChevronLeft, ChevronRight, AlertTriangle, List, X, FolderOpen } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Grid3X3, ChevronLeft, ChevronRight, X, FolderOpen } from "lucide-react";
 import { IoMdPhotos } from "react-icons/io";
 import { API_BASE_URL } from "../config/api";
 import type { Item } from "../types/library";
@@ -9,34 +9,6 @@ import SyntheticPreview from "../components/collage/SyntheticPreview";
 import { getRectCorners, getTransformedPolygon } from "../lib/geometry";
 
 const ITEMS_PER_PAGE = 50;
-
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Recursively strip known unserialisable / unstable properties from objects
- *  destined for sessionStorage.  Defensive measure against ORM metadata
- *  (e.g. SQLAlchemy `_sa_*` keys) or custom class instances crept in via
- *  `item.validRegionData` (assigned straight from DB JSONB in
- *  backend/src/server.js:432) or any other ad-hoc augmentations. */
-function cleanForSerialization<T>(value: T): T {
-  if (value === null || value === undefined) return value;
-  if (typeof value !== "object") return value;
-
-  if (Array.isArray(value)) {
-    return value.map((item) => cleanForSerialization(item)) as unknown as T;
-  }
-
-  const out: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-    if (key.startsWith("_sa_")) continue;
-    if (typeof val === "function") continue;
-    if (key === "validRegionData") continue; // see note above
-    out[key] = cleanForSerialization(val);
-  }
-  return out as T;
-}
 
 export default function CollagePage() {
   const navigate = useNavigate();
@@ -146,7 +118,6 @@ export default function CollagePage() {
   const [failures, setFailures] = useState<FailureLog[]>([]);
 
   const [currentPage, setCurrentPage] = useState(0);
-  const [showLogs, setShowLogs] = useState(false);
 
   const [bulkSaveState, setBulkSaveState] = useState<{
     status: "idle" | "saving" | "success" | "error";
@@ -361,7 +332,6 @@ export default function CollagePage() {
       setSelectedThreats([]);
       setSelectedOthers([]);
       setCurrentPage(0);
-      setShowLogs(false);
       
       // Clear persisted storage
       try {
@@ -390,9 +360,6 @@ export default function CollagePage() {
     (currentPage + 1) * ITEMS_PER_PAGE
   );
 
-  const hasSelections = selectedBags.length > 0;
-  const hasFailures = failures.length > 0;
-
   return (
     <div className="max-w-6xl mx-auto py-8 px-6 animate-fade-in text-sm">
       {/* Header Row */}
@@ -404,7 +371,7 @@ export default function CollagePage() {
           <button
             onClick={handleBulkSave}
             disabled={bulkSaveState.status === "saving" || combinations.length === 0}
-            className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-500 shadow-btn hover:shadow-btn-hover hover:opacity-95 transition-all flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-500 shadow-btn flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             title="Bulk Save All Workspaces"
           >
             {bulkSaveState.status === "saving" ? (
@@ -442,7 +409,7 @@ export default function CollagePage() {
           {bulkSaveState.status !== "saving" && (
             <button
               onClick={() => setBulkSaveState({ status: "idle", message: "", savedCount: 0 })}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 transition-colors"
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-800"
             >
               Dismiss
             </button>
@@ -462,7 +429,7 @@ export default function CollagePage() {
           </p>
           <button
             onClick={() => navigate("/library")}
-            className="px-6 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover transition-all text-base inline-flex items-center gap-2 cursor-pointer"
+            className="px-6 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn text-base inline-flex items-center gap-2 cursor-pointer"
           >
             <IoMdPhotos />
             Go to Library
@@ -490,12 +457,12 @@ export default function CollagePage() {
           {/* Combination Grid */}
           {combinations.length > 0 && (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                 {paginatedCombinations.map((comb) => (
                   <button
                     key={comb.id}
                     onClick={() => handleOpenCombination(comb)}
-                    className="bg-panel rounded-2xl border border-border p-4 shadow-card hover:shadow-card-hover hover:border-accent/40 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer overflow-hidden group text-left w-full"
+                    className="bg-panel rounded-2xl border border-border p-4 shadow-card cursor-pointer overflow-hidden group text-left w-full"
                   >
                     <SyntheticPreview
                       objects={comb.objects}
@@ -513,7 +480,7 @@ export default function CollagePage() {
                   <button
                     onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
                     disabled={currentPage === 0}
-                    className="p-2 rounded-xl border border-border bg-panel hover:bg-surface disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                    className="p-2 rounded-xl border border-border bg-panel disabled:opacity-30 disabled:cursor-not-allowed"
                   >
                     <ChevronLeft size={16} className="text-muted" />
                   </button>
@@ -532,10 +499,10 @@ export default function CollagePage() {
                       <button
                         key={page}
                         onClick={() => setCurrentPage(page)}
-                        className={`min-w-[36px] h-9 rounded-xl text-sm font-medium transition-all ${
+                        className={`min-w-[36px] h-9 rounded-xl text-sm font-medium ${
                           page === currentPage
                             ? "bg-accent text-white shadow-btn"
-                            : "border border-border bg-panel text-muted hover:bg-surface hover:text-ink"
+                            : "border border-border bg-panel text-muted"
                         }`}
                       >
                         {page + 1}
@@ -546,7 +513,7 @@ export default function CollagePage() {
                   <button
                     onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
                     disabled={currentPage >= totalPages - 1}
-                    className="p-2 rounded-xl border border-border bg-panel hover:bg-surface disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                    className="p-2 rounded-xl border border-border bg-panel disabled:opacity-30 disabled:cursor-not-allowed"
                   >
                     <ChevronRight size={16} className="text-muted" />
                   </button>

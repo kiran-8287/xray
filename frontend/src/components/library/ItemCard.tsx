@@ -97,7 +97,7 @@ export default function ItemCard({
   return (
     <div
       onClick={onOpen}
-      className={`relative bg-panel rounded-xl border shadow-card cursor-pointer transition-all duration-150 overflow-hidden group hover:shadow-card-hover hover:border-accent/40 hover:-translate-y-0.5 ${
+      className={`relative bg-panel rounded-xl border shadow-card cursor-pointer transition-all duration-150 overflow-hidden group ${
         isSelected
           ? "border-accent ring-2 ring-accent/20 shadow-btn bg-accent/4"
           : "border-border"
@@ -114,7 +114,7 @@ export default function ItemCard({
           className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
             isSelected
               ? "bg-accent border-accent text-white scale-105"
-              : "bg-panel/90 border-border hover:border-accent/50"
+              : "bg-panel/90 border-border"
           }`}
         >
           {isSelected && <Check size={13} className="stroke-[3]" />}
@@ -122,7 +122,7 @@ export default function ItemCard({
       </div>
 
       {/* Image Area */}
-      <div className="relative aspect-square bg-surface flex items-center justify-center p-4 overflow-hidden group-hover:bg-accent/4 transition-colors">
+      <div className="relative aspect-square bg-surface flex items-center justify-center p-4 overflow-hidden">
         {item.category === "bags" && item.valid_region_points && item.valid_region_points.length > 0 ? (
           <ThumbnailWithRegion
             src={`http://localhost:8080/data/library_images/${item.filepath}`}
@@ -154,7 +154,7 @@ export default function ItemCard({
                 e.stopPropagation();
                 onEditRegion();
               }}
-              className="p-1 rounded-md bg-panel border border-border text-muted hover:border-accent/50 hover:text-accent shadow-card transition-all"
+              className="p-1 rounded-md bg-panel border border-border text-muted shadow-card"
               title="Edit valid region"
             >
               <Edit3 size={12} />
@@ -165,7 +165,7 @@ export default function ItemCard({
               e.stopPropagation();
               onDelete();
             }}
-            className="p-1 rounded-md bg-panel border border-border text-muted hover:border-red-500 hover:text-red-600 shadow-card transition-all"
+            className="p-1 rounded-md bg-panel border border-border text-muted shadow-card"
             title="Delete item"
           >
             <Trash2 size={12} />

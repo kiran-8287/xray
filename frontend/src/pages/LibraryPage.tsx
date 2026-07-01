@@ -13,7 +13,6 @@ const LIBRARIES = LIBRARIES_UI;
 import SimpleLibrarySidebar from "../components/library/SimpleLibrarySidebar";
 import LibraryToolbar from "../components/library/LibraryToolbar";
 import ItemCard from "../components/library/ItemCard";
-import ItemRow from "../components/library/ItemRow";
 import SelectionTray from "../components/library/SelectionTray";
 import ValidRegionEditor from "../components/upload/ValidRegionEditor";
 
@@ -35,7 +34,6 @@ export default function LibraryPage() {
   const [activeCategory, setActiveCategory] = useState<string>("bags");
   const [activeSubcategory, setActiveSubcategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog>(null);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
@@ -548,8 +546,6 @@ export default function LibraryPage() {
             subcategoryCount={Object.keys(subcategoriesData).length}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
-            viewMode={viewMode}
-            setViewMode={setViewMode}
           />
 
           <div className="flex-1 overflow-y-auto p-5">
@@ -563,7 +559,7 @@ export default function LibraryPage() {
                   {searchQuery ? "Try refining your search keyword." : "Upload scanned items to get started."}
                 </p>
               </div>
-            ) : viewMode === "grid" ? (
+            ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
                 {displayedItems.map((item) => (
                   <ItemCard
@@ -579,37 +575,6 @@ export default function LibraryPage() {
                     onDelete={() => handleDeleteItem(item.id)}
                   />
                 ))}
-              </div>
-            ) : (
-              <div className="bg-panel rounded-2xl border border-border shadow-card overflow-hidden">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="bg-nav border-b border-border text-left">
-                      <th className="w-12 px-5 py-3"></th>
-                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted">Preview</th>
-                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted">Name</th>
-                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted">Filename</th>
-                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted">Subcategory</th>
-                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {displayedItems.map((item) => (
-                      <ItemRow
-                        key={item.id}
-                        item={item}
-                        isSelected={selectedItems.has(item.id)}
-                        onSelect={() => toggleItemSelection(item.id)}
-                        onOpen={() => openItemDetail(item)}
-                        onEditRegion={() => {
-                          setEditingRegionItem(item);
-                          setIsValidRegionEditorOpen(true);
-                        }}
-                        onDelete={() => handleDeleteItem(item.id)}
-                      />
-                    ))}
-                  </tbody>
-                </table>
               </div>
             )}
           </div>
@@ -687,7 +652,7 @@ export default function LibraryPage() {
                 <button
                   type="button"
                   onClick={closeItemDetail}
-                  className="rounded-2xl border border-border bg-white px-4 py-2 text-sm font-medium text-ink hover:bg-surface"
+                  className="rounded-2xl border border-border bg-white px-4 py-2 text-sm font-medium text-ink"
                 >
                   Cancel
                 </button>
@@ -695,7 +660,7 @@ export default function LibraryPage() {
                   type="button"
                   onClick={handleSaveItemDetails}
                   disabled={isItemSaving}
-                  className="rounded-2xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-btn transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-2xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-btn disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isItemSaving ? "Saving..." : "Save details"}
                 </button>
@@ -716,7 +681,7 @@ export default function LibraryPage() {
             <span className="text-sm font-medium leading-snug flex-1">{n.message}</span>
             <button
               onClick={() => setNotifications((prev) => prev.filter((x) => x.id !== n.id))}
-              className="ml-1 opacity-60 hover:opacity-100 transition-opacity shrink-0"
+              className="ml-1 opacity-60 shrink-0"
             >
               <X size={14} />
             </button>
@@ -739,13 +704,13 @@ export default function LibraryPage() {
             <div className="flex gap-2 justify-end pt-1">
               <button
                 onClick={confirmDialog.onCancel}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-surface border border-border text-ink hover:bg-nav transition-colors"
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-surface border border-border text-ink"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDialog.onConfirm}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 hover:bg-red-700 text-white transition-colors"
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white"
               >
                 Delete
               </button>

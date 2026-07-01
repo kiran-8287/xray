@@ -461,7 +461,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         <button
           onClick={handleMassApplyToAll}
           disabled={!massCategory}
-          className="px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity flex items-center gap-1.5"
+          className="px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
         >
           <CheckSquare size={14} />
           Apply to All
@@ -473,7 +473,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         <button
           onClick={handleMassAutoGenerateRegion}
           disabled={massAutoGen?.running ?? false}
-          className="px-4 py-1.5 rounded-xl bg-amber-50 text-amber-700 text-xs font-semibold border border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-100 transition-colors flex items-center gap-1.5"
+          className="px-4 py-1.5 rounded-xl bg-amber-50 text-amber-700 text-xs font-semibold border border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
           title="Auto-generate valid regions for all bag items (or selected ones)"
         >
           {massAutoGen?.running ? (
@@ -518,7 +518,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
               const inlineSubOptions = getInlineSubcategoryOptions(s.category);
 
               return (
-                <tr key={idx} className="hover:bg-surface/50 transition-colors even:bg-surface/20">
+                <tr key={idx} className="even:bg-surface/20">
                   <td className="py-3 px-4 align-top">
                     <input
                       type="checkbox"
@@ -575,7 +575,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                           type="button"
                           onClick={() => handleAutoGenerateRegion(idx)}
                           disabled={autoGeneratingIndices.has(idx)}
-                          className="text-xs px-2 py-1.5 rounded-lg border border-border bg-surface hover:bg-amber-50 hover:border-amber-300 transition-colors flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="text-xs px-2 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                           title="Auto-generate valid region from pixel data"
                         >
                           {autoGeneratingIndices.has(idx) ? (
@@ -588,7 +588,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                         <button
                           type="button"
                           onClick={() => handleInlineValidRegion(idx)}
-                          className="text-xs px-2.5 py-1.5 rounded-lg border border-border bg-surface hover:bg-surface/80 transition-colors flex items-center gap-1"
+                          className="text-xs px-2.5 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1"
                         >
                           <Edit3 size={12} />
                           {s.valid_region_points ? "Edit" : "Set"}
@@ -601,7 +601,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   <td className="py-3 px-4 text-right align-top">
                     <button
                       onClick={() => removeIndex(idx)}
-                      className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 transition-colors"
+                      className="p-1.5 rounded-lg text-rose-500"
                       title="Remove"
                       disabled={uploading}
                     >
@@ -629,7 +629,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             setFiles(newFiles);
           }}
           disabled={selectedForMass.size === 0}
-          className="px-4 py-2 rounded-xl border border-border text-sm font-medium text-rose-600 hover:bg-rose-50 flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="px-4 py-2 rounded-xl border border-border text-sm font-medium text-rose-600 flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
         >
           <Trash2 size={15} /> Delete Selected ({selectedForMass.size})
         </button>
@@ -688,7 +688,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       <button
                         type="button"
                         onClick={() => setIsValidRegionEditorOpen(true)}
-                        className="text-xs px-2 py-1 rounded-xl border border-border bg-surface hover:bg-surface/80"
+                        className="text-xs px-2 py-1 rounded-xl border border-border bg-surface"
                       >
                         Edit valid region
                       </button>

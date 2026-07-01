@@ -98,16 +98,16 @@ export default function SimpleLibrarySidebar({
                     }
                   }}
                   className={`rounded-lg border px-3 py-1.5 text-[9px] font-bold uppercase tracking-tighter transition-all ${
-                    someSelected || allSelected
-                      ? 'border-accent bg-accent/10 text-accent hover:bg-accent/20 hover:border-accent/70'
-                      : 'border-border bg-surface text-muted hover:border-accent/50 hover:bg-accent/5 hover:text-accent'
+                    allSelected
+                      ? 'border-accent bg-accent/10 text-accent'
+                      : 'border-border bg-surface text-muted'
                   }`}
                 >
                   SELECT ALL
                 </button>
                 <button
                   onClick={() => onDeleteCategory(catKey)}
-                  className="rounded-lg border border-border bg-surface px-2 py-1.5 text-[9px] font-bold text-muted hover:border-red-500/50 hover:text-red-600 hover:bg-red-50 transition-all flex items-center justify-center"
+                  className="rounded-lg border border-border bg-surface px-2 py-1.5 text-[9px] font-bold text-muted"
                   title="Delete all items in this category"
                 >
                   <Trash2 size={11} />
@@ -157,16 +157,16 @@ export default function SimpleLibrarySidebar({
                             }
                           }}
                           className={`rounded-lg border px-3 py-1.5 text-[9px] font-bold uppercase tracking-tighter transition-all ${
-                            isSubSomeSelected || isSubAllSelected
-                              ? 'border-accent bg-accent/10 text-accent hover:bg-accent/20 hover:border-accent/70'
-                              : 'border-border bg-surface text-muted hover:border-accent/50 hover:bg-accent/5 hover:text-accent'
+                            isSubAllSelected
+                              ? 'border-accent bg-accent/10 text-accent'
+                              : 'border-border bg-surface text-muted'
                           }`}
                         >
                           SELECT ALL
                         </button>
                         <button
                           onClick={() => onDeleteSubcategory(catKey, subKey)}
-                          className="rounded-lg border border-border bg-surface px-2 py-1.5 text-[9px] font-bold text-muted hover:border-red-500/50 hover:text-red-600 hover:bg-red-50 transition-all flex items-center justify-center"
+                          className="rounded-lg border border-border bg-surface px-2 py-1.5 text-[9px] font-bold text-muted"
                           title={`Delete all items in ${subKey}`}
                         >
                           <Trash2 size={11} />

@@ -283,7 +283,7 @@ export default function SavedPage() {
                     setSelectedLayout(layout);
                   }
                 }}
-                className="rounded-3xl border border-border bg-panel shadow-sm overflow-hidden hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 min-w-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent/30"
+                className="rounded-3xl border border-border bg-panel shadow-sm overflow-hidden min-w-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent/30"
               >
                 {/* Image Preview Area */}
                 <div className="bg-surface p-4 flex items-center justify-center h-64 sm:h-72 overflow-hidden border-b border-border">
@@ -310,7 +310,7 @@ export default function SavedPage() {
                         event.stopPropagation();
                         handleDelete(layout.id);
                       }}
-                      className="text-rose-600 hover:text-rose-800 rounded-full p-2 transition-colors shrink-0"
+                      className="text-rose-600 rounded-full p-2 shrink-0"
                       title="Delete layout"
                     >
                       <Trash2 size={16} />
@@ -335,7 +335,7 @@ export default function SavedPage() {
                   </div>
                   <button
                     onClick={() => setSelectedLayout(null)}
-                    className="rounded-full border border-border bg-panel p-2 text-muted hover:text-ink"
+                    className="rounded-full border border-border bg-panel p-2 text-muted"
                     title="Close details"
                   >
                     <X size={16} />
