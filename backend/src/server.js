@@ -88,6 +88,23 @@ function parseFilename(filename) {
 // API endpoints
 // ------------------------------
 
+// Root endpoint - API info
+app.get("/", (_req, res) => {
+  res.json({
+    name: "Synthetic X-Ray Generation System API",
+    version: "1.0.0",
+    status: "running",
+    endpoints: {
+      health: "GET /api/items/categorized",
+      upload: "POST /api/upload",
+      processRaw: "POST /api/process-raw-files",
+      items: "GET /api/items/:id",
+      savedLayouts: "GET /api/saved-layouts",
+      customSubcategories: "GET /api/custom-subcategories"
+    }
+  });
+});
+
 // Helper functions for raw file processing
 function deriveItemId(filename) {
     const dotIndex = filename.indexOf(".");
