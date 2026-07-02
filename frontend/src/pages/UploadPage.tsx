@@ -208,6 +208,7 @@ export default function UploadPage() {
         category: s.category,
         subcategory: s.subcategory,
         valid_region_points: s.valid_region_points || null,
+        tags: s.tags && s.tags.length > 0 ? s.tags : [],
         ...(s.preProcessed && {
           preProcessed: true,
           preGeneratedFilepath: s.preGeneratedFilepath,
@@ -283,12 +284,12 @@ export default function UploadPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto py-10 px-6 animate-fade-in">
+    <div className="w-full py-6 px-6 animate-fade-in">
       <div className="border-l-4 border-accent pl-4 mb-8">
         <h2 className="text-3xl font-bold text-ink tracking-tight">Upload Images</h2>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-6 max-w-5xl mx-auto">
         <UploadDropZone onFilesSelected={handleFilesSelected} />
 
         {/* Processing indicator */}
@@ -335,7 +336,7 @@ export default function UploadPage() {
           </div>
         )}
 
-        <div className="bg-panel rounded-2xl border border-border p-8 shadow-card">
+        <div className="bg-panel rounded-2xl border border-border p-8 shadow-card max-w-5xl mx-auto">
           <button
             onClick={handleUpload}
             disabled={uploading || staged.length === 0}

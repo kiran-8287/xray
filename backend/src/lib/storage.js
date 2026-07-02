@@ -9,6 +9,7 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = path.resolve(__dirname, '../../data');
 const ITEMS_FILE = path.join(DATA_DIR, 'items.json');
 const SAVED_LAYOUTS_FILE = path.join(DATA_DIR, 'savedLayouts.json');
+const CUSTOM_SUBCATEGORIES_FILE = path.join(DATA_DIR, 'customSubcategories.json');
 
 async function ensureDataDir() {
   try {
@@ -171,6 +172,56 @@ async function deleteSavedLayout(id) {
   await writeJSONFile(SAVED_LAYOUTS_FILE, filteredLayouts);
 }
 
+// Custom subcategories storage
+async function getCustomSubcategories() {
+  await ensureDataDir();
+  return await readJSONFile(CUSTOM_SUBCATEGORIES_FILE, {
+    bags: [],
+    threats: [],
+    "non-threats": []
+  });
+}
+
+async function addCustomSubcategory(category, name) {
+  await ensureDataDir();
+  const customSubs = await getCustomSubcategories();
+  
+  // Generate slug from name
+  const slug = name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  
+  // Check if already exists in custom subcategories
+  const categorySubs = customSubs[category] || [];
+  const exists = categorySubs.some(sub => sub.slug === slug || sub.name.toLowerCase() === name.toLowerCase());
+  
+  if (exists) {
+    return { success: false, error: "Subcategory already exists" };
+  }
+  
+  const newSubcategory = {
+    slug,
+    name,
+    createdAt: new Date().toISOString()
+  };
+  
+  categorySubs.push(newSubcategory);
+  customSubs[category] = categorySubs;
+  await writeJSONFile(CUSTOM_SUBCATEGORIES_FILE, customSubs);
+  
+  return { success: true, subcategory: newSubcategory };
+}
+
+async function removeCustomSubcategory(category, slug) {
+  await ensureDataDir();
+  const customSubs = await getCustomSubcategories();
+  
+  if (customSubs[category]) {
+    customSubs[category] = customSubs[category].filter(sub => sub.slug !== slug);
+    await writeJSONFile(CUSTOM_SUBCATEGORIES_FILE, customSubs);
+  }
+  
+  return { success: true };
+}
+
 export {
   getItems,
   getItemById,
@@ -187,5 +238,8 @@ export {
   getSavedLayoutById,
   createSavedLayout,
   updateSavedLayout,
-  deleteSavedLayout
+  deleteSavedLayout,
+  getCustomSubcategories,
+  addCustomSubcategory,
+  removeCustomSubcategory
 };

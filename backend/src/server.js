@@ -24,7 +24,10 @@ import {
     getSavedLayoutById,
     createSavedLayout,
     updateSavedLayout,
-    deleteSavedLayout
+    deleteSavedLayout,
+    getCustomSubcategories,
+    addCustomSubcategory,
+    removeCustomSubcategory
 } from "./lib/storage.js";
 
 const app = express();
@@ -307,6 +310,47 @@ app.delete('/api/saved-layouts/:id', async (req, res) => {
     }
 });
 
+// Custom subcategories endpoints
+app.get('/api/custom-subcategories', async (req, res) => {
+    try {
+        const customSubs = await getCustomSubcategories();
+        res.json({ ok: true, customSubcategories: customSubs });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+app.post('/api/custom-subcategories', async (req, res) => {
+    try {
+        const { category, name } = req.body;
+        if (!category || !name) {
+            return res.status(400).json({ ok: false, error: 'Missing category or name' });
+        }
+        
+        const result = await addCustomSubcategory(category, name);
+        if (!result.success) {
+            return res.status(400).json({ ok: false, error: result.error });
+        }
+        
+        res.json({ ok: true, subcategory: result.subcategory });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+app.delete('/api/custom-subcategories/:category/:slug', async (req, res) => {
+    try {
+        const { category, slug } = req.params;
+        await removeCustomSubcategory(category, slug);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
 // Upload endpoint
 app.post("/api/upload", upload.array("images"), async (req, res) => {
     try {
@@ -369,6 +413,7 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
                 category = fileMeta.category;
             }
             if (fileMeta.subcategory) subcategory = fileMeta.subcategory;
+            const tags = fileMeta.tags || [];
             
             // Detect actual image dimensions from the saved file
             let width = 512;
@@ -394,7 +439,8 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
                 width,
                 height,
                 polygon_json: fileMeta.polygon_json || null,
-                mask_path: fileMeta.mask_path || null
+                mask_path: fileMeta.mask_path || null,
+                tags: tags.length > 0 ? tags : null
             });
 
             if (category === "bags") {
@@ -463,6 +509,7 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
                         width: m.width || 512,
                         height: m.height || 512,
                         pixel_data_path: m.pixelDataFilename || null,
+                        tags: m.tags && m.tags.length > 0 ? m.tags : null
                     });
 
                     // Create sub-table records based on category

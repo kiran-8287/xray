@@ -5,7 +5,8 @@ import type { Item, CategorizedItems } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import { generateCombinations } from "../lib/combinationGenerator";
 import { API_BASE_URL } from "../config/api";
-import { getCategoryConfig, normalizeCategoryName, normalizeCategorizedItems, LIBRARIES_UI, getLibrarySubcategories } from "../config/categories";
+import { getCategoryConfig, normalizeCategoryName, normalizeCategorizedItems, LIBRARIES_UI, getLibrarySubcategories, clearCustomSubcategoriesCache } from "../config/categories";
+import AddSubcategoryModal from "../components/common/AddSubcategoryModal";
 
 // Use centralized library definitions
 const LIBRARIES = LIBRARIES_UI;
@@ -41,6 +42,11 @@ export default function LibraryPage() {
   const [isItemSaving, setIsItemSaving] = useState(false);
   const [isValidRegionEditorOpen, setIsValidRegionEditorOpen] = useState(false);
   const [editingRegionItem, setEditingRegionItem] = useState<Item | null>(null);
+  
+  // Add subcategory modal state
+  const [isAddSubcategoryModalOpen, setIsAddSubcategoryModalOpen] = useState(false);
+  const [addingSubcategoryFor, setAddingSubcategoryFor] = useState<string>("");
+  
   const notifCounter = React.useRef(0);
 
   // K-combinations state
@@ -314,6 +320,29 @@ export default function LibraryPage() {
 
   const handleSubcategoryChange = (subcategoryValue: string) => {
     setEditDraft((prev) => ({ ...prev!, subcategory: subcategoryValue }));
+  };
+
+  const handleAddCustomSubcategory = async (name: string): Promise<void> => {
+    if (!addingSubcategoryFor) return;
+    
+    const res = await fetch('/api/custom-subcategories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category: addingSubcategoryFor, name }),
+    });
+    
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Failed to add subcategory');
+    }
+    
+    // Clear cache to reload subcategories
+    clearCustomSubcategoriesCache();
+  };
+
+  const openAddSubcategoryModal = (categorySlug: string) => {
+    setAddingSubcategoryFor(categorySlug);
+    setIsAddSubcategoryModalOpen(true);
   };
 
   const handleSaveItemDetails = async () => {
@@ -627,7 +656,13 @@ export default function LibraryPage() {
                     <span className="text-muted text-xs">Subcategory</span>
                     <select
                       value={editDraft.subcategory}
-                      onChange={(e) => handleSubcategoryChange(e.target.value)}
+                      onChange={(e) => {
+                        if (e.target.value === "__add_new__") {
+                          openAddSubcategoryModal(selectedCategory.slug);
+                        } else {
+                          handleSubcategoryChange(e.target.value);
+                        }
+                      }}
                       className="w-full rounded-2xl border border-border bg-white px-3 py-2 text-sm text-ink"
                     >
                       {subcategoryOptions.length > 0 ? (
@@ -636,6 +671,9 @@ export default function LibraryPage() {
                         ))
                       ) : (
                         <option value="General">General</option>
+                      )}
+                      {selectedCategory && (
+                        <option value="__add_new__" className="text-accent font-medium">+ Add new subcategory</option>
                       )}
                     </select>
                   </label>
@@ -734,6 +772,14 @@ export default function LibraryPage() {
           requireValidRegion={true}
         />
       )}
+
+      {/* Add Subcategory Modal */}
+      <AddSubcategoryModal
+        isOpen={isAddSubcategoryModalOpen}
+        onClose={() => setIsAddSubcategoryModalOpen(false)}
+        onAdd={handleAddCustomSubcategory}
+        categoryName={LIBRARIES.find(lib => lib.slug === addingSubcategoryFor)?.name || addingSubcategoryFor}
+      />
     </div>
   );
 }

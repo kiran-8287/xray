@@ -8,8 +8,13 @@ import LibraryPage from "./pages/LibraryPage";
 import SavedPage from "./pages/SavedPage";
 import HelpMenu from "./components/common/HelpMenu";
 import { UploadProvider } from "./context/UploadContext";
+import { loadCustomSubcategories } from "./config/categories";
+import { useEffect } from "react";
 
 export default function App() {
+  useEffect(() => {
+    loadCustomSubcategories();
+  }, []);
   const getNavLinkClass = ({ isActive }: { isActive: boolean }) => {
     const baseClass = "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150";
     return isActive

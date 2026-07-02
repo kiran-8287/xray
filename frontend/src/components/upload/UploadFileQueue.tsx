@@ -1,7 +1,8 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import ValidRegionEditor from "./ValidRegionEditor";
-import { Trash2, Edit3, CheckSquare, Sparkles, Loader2 } from "lucide-react";
-import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName } from "../../config/categories";
+import { Trash2, Edit3, CheckSquare, Sparkles, Loader2, X, Plus } from "lucide-react";
+import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName, clearCustomSubcategoriesCache } from "../../config/categories";
+import AddSubcategoryModal from "../common/AddSubcategoryModal";
 
 interface UploadFileQueueProps {
   files: File[];
@@ -115,6 +116,71 @@ function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; val
   );
 }
 
+// Custom scrollable dropdown component that shows max 8 items with scroll
+function ScrollableSelect({ value, options, onChange, disabled, placeholder, onAddNew, category }: {
+  value: string;
+  options: { slug: string; name: string }[];
+  onChange: (val: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  onAddNew?: () => void;
+  category?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        onClick={() => { if (!disabled) setOpen(!open); }}
+        className={`w-full p-1.5 border border-border rounded-lg text-xs bg-white cursor-pointer flex items-center justify-between gap-1 ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-accent'}`}
+      >
+        <span className={value ? 'text-ink' : 'text-muted'}>{value || placeholder || 'Select...'}</span>
+        <svg className={`w-3 h-3 text-muted transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </div>
+      {open && (
+        <div className="absolute top-full mt-0.5 left-0 right-0 z-50 bg-white border border-border rounded-lg shadow-xl">
+          <div className="max-h-[232px] overflow-y-auto">
+            <div
+              onClick={() => { onChange(''); setOpen(false); }}
+              className={`p-1.5 text-xs cursor-pointer hover:bg-surface ${!value ? 'bg-accent/10 text-accent' : ''}`}
+            >
+              None
+            </div>
+            {options.map((opt) => (
+              <div
+                key={opt.slug}
+                onClick={() => { onChange(opt.name); setOpen(false); }}
+                className={`p-1.5 text-xs cursor-pointer hover:bg-surface ${value === opt.name ? 'bg-accent/10 text-accent' : ''}`}
+              >
+                {opt.name}
+              </div>
+            ))}
+            {category && onAddNew && (
+              <div
+                onClick={() => { onAddNew(); setOpen(false); }}
+                className="p-1.5 text-xs cursor-pointer text-accent font-medium hover:bg-surface border-t border-border"
+              >
+                + Add new
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function UploadFileQueue({ files, staged, setStaged, setFiles, uploading, handleUpload, selectedForMass, onToggleSelect, onSelectAll }: UploadFileQueueProps) {
   console.log(`[UploadFileQueue] render called. files=${files.length}, staged=${staged.length}`);
   if (files.length === 0) {
@@ -136,6 +202,66 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   
   // Mass auto-generate valid region state
   const [massAutoGen, setMassAutoGen] = useState<{ total: number; completed: number; running: boolean } | null>(null);
+
+  // Add subcategory modal state
+  const [isAddSubcategoryModalOpen, setIsAddSubcategoryModalOpen] = useState(false);
+  const [addingSubcategoryFor, setAddingSubcategoryFor] = useState<string>("");
+
+  // Tag selection state for inline editing
+  const [activeTagRow, setActiveTagRow] = useState<number | null>(null);
+  const tagSelectorRef = useRef<HTMLDivElement>(null);
+
+  // Image preview modal state
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewFileName, setPreviewFileName] = useState<string>("");
+  const [previewIndex, setPreviewIndex] = useState<number>(-1);
+
+  // Close preview on ESC key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && previewImage) {
+        setPreviewImage(null);
+      }
+    };
+
+    if (previewImage) {
+      document.addEventListener('keydown', handleEscape);
+      return () => document.removeEventListener('keydown', handleEscape);
+    }
+  }, [previewImage]);
+
+  // Mass tag assignment state
+  const [showMassTagSelector, setShowMassTagSelector] = useState(false);
+  const [massSelectedTags, setMassSelectedTags] = useState<Set<string>>(new Set());
+  const massTagSelectorRef = useRef<HTMLDivElement>(null);
+
+  // Close mass tag selector when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (massTagSelectorRef.current && !massTagSelectorRef.current.contains(event.target as Node)) {
+        setShowMassTagSelector(false);
+      }
+    };
+
+    if (showMassTagSelector) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showMassTagSelector]);
+
+  // Close tag selector when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (tagSelectorRef.current && !tagSelectorRef.current.contains(event.target as Node)) {
+        setActiveTagRow(null);
+      }
+    };
+
+    if (activeTagRow !== null) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [activeTagRow]);
 
   const massSubcategoryOptions = useMemo(() => {
     if (!massCategory) return [];
@@ -287,8 +413,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     setAutoGeneratingIndices(prev => new Set(prev).add(idx));
     
     try {
-      // Use the itemId to find the pixel data file
-      const pixelDataPath = `${stagedItem.itemId}.json`;
+      // Use the itemId to find the pixel data file (now .npz format)
+      const pixelDataPath = `${stagedItem.itemId}.npz`;
       
       const res = await fetch(`http://localhost:8080/api/auto-valid-region`, {
         method: "POST",
@@ -359,7 +485,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
       
       const stagedItem = staged[idx];
       try {
-        const pixelDataPath = `${stagedItem.itemId}.json`;
+        const pixelDataPath = `${stagedItem.itemId}.npz`;
         
         const res = await fetch(`http://localhost:8080/api/auto-valid-region`, {
           method: "POST",
@@ -414,49 +540,62 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     }
   };
 
+  const handleAddCustomSubcategory = async (name: string): Promise<void> => {
+    if (!addingSubcategoryFor) return;
+    
+    const res = await fetch('/api/custom-subcategories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category: addingSubcategoryFor, name }),
+    });
+    
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Failed to add subcategory');
+    }
+    
+    // Clear cache to reload subcategories
+    clearCustomSubcategoriesCache();
+  };
+
+  const openAddSubcategoryModal = (categorySlug: string) => {
+    setAddingSubcategoryFor(categorySlug);
+    setIsAddSubcategoryModalOpen(true);
+  };
+
   return (
-    <div className="bg-panel rounded-2xl border border-border shadow-card overflow-hidden flex flex-col">
+    <div className="w-full max-w-5xl mx-auto flex flex-col">
       <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-nav flex-shrink-0">
         <span className="text-sm font-semibold text-ink">Staged Items</span>
         <span className="bg-surface text-muted text-xs font-mono px-2.5 py-0.5 rounded-full border border-border">{staged.length}</span>
       </div>
 
       {/* Mass Assign Row - Category/Subcategory apply to all */}
-      <div className="px-5 py-3 border-b border-border bg-surface/30 flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-muted whitespace-nowrap">Mass Assign :</span>
-        </div>
-        <div className="flex flex-col gap-1">
-          <select
-            className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
-            value={massCategory}
-            onChange={(e) => {
-              setMassCategory(e.target.value);
-              setMassSubcategory("");
-            }}
-          >
-            <option value="">Category</option>
-            {LIBRARIES.map((cat) => (
-              <option key={cat.slug} value={cat.slug}>{cat.name}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <select
-            className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
+      <div className="px-5 py-3 border-b border-border bg-surface/30 flex items-center gap-4 overflow-visible">
+        <span className="text-xs font-medium text-muted whitespace-nowrap">Mass Assign :</span>
+        <select
+          className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
+          value={massCategory}
+          onChange={(e) => {
+            setMassCategory(e.target.value);
+            setMassSubcategory("");
+          }}
+        >
+          <option value="">Category</option>
+          {LIBRARIES.map((cat) => (
+            <option key={cat.slug} value={cat.slug}>{cat.name}</option>
+          ))}
+        </select>
+        <div className="w-36">
+          <ScrollableSelect
             value={massSubcategory}
-            onChange={(e) => setMassSubcategory(e.target.value)}
+            options={massSubcategoryOptions}
+            onChange={(val) => setMassSubcategory(val)}
             disabled={!massCategory}
-          >
-            <option value="">Subcategory</option>
-            {massSubcategoryOptions.length > 0 ? (
-              massSubcategoryOptions.map((sub: any) => (
-                <option key={sub.slug} value={sub.name}>{sub.name}</option>
-              ))
-            ) : (
-              massCategory ? <option value="General">General</option> : null
-            )}
-          </select>
+            placeholder="Subcategory"
+            onAddNew={massCategory ? () => openAddSubcategoryModal(massCategory) : undefined}
+            category={massCategory}
+          />
         </div>
         <button
           onClick={handleMassApplyToAll}
@@ -467,8 +606,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
           Apply to All
         </button>
         
-        <div className="w-px h-6 bg-border mx-1"></div>
-        
+        <div className="flex-1" />
+
         {/* Mass Auto Generate Valid Region */}
         <button
           onClick={handleMassAutoGenerateRegion}
@@ -485,13 +624,129 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             ? `Generating ${massAutoGen.completed}/${massAutoGen.total}...`
             : "Mass Auto Generate"}
         </button>
+
+        {/* Mass Tag Assignment */}
+        <div className="relative">
+          <button
+            onClick={() => {
+              const hasBags = staged.some(s => s.category === "bags");
+              if (hasBags) {
+                setShowMassTagSelector(!showMassTagSelector);
+              }
+            }}
+            disabled={!staged.some(s => s.category === "bags")}
+            className="px-4 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+            title="Assign tags to all bag items (or selected ones)"
+          >
+            <Plus size={14} />
+            Mass Tags
+          </button>
+          
+          {showMassTagSelector && (
+            <div ref={massTagSelectorRef} className="absolute top-full mt-2 left-0 p-3 border border-border rounded-lg bg-white shadow-xl z-50 w-[400px]">
+              <div className="text-xs font-semibold text-ink mb-2">Assign Tags to Bag Items</div>
+              <div className="text-[10px] text-muted mb-2">Select tags to apply to all bag items (or selected items):</div>
+              <div className="space-y-1 max-h-64 overflow-y-auto">
+                {LIBRARIES.find(l => l.slug === "non-threats")?.subcategories.map((sub) => {
+                  const isSelected = massSelectedTags.has(sub.slug);
+                  return (
+                    <label
+                      key={sub.slug}
+                      className={`flex items-center gap-2 p-1.5 rounded cursor-pointer text-xs ${
+                        isSelected
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "hover:bg-surface"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          const newSet = new Set(massSelectedTags);
+                          if (e.target.checked) {
+                            newSet.add(sub.slug);
+                          } else {
+                            newSet.delete(sub.slug);
+                          }
+                          setMassSelectedTags(newSet);
+                        }}
+                        className="rounded border-gray-300"
+                      />
+                      <span>{sub.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Apply selected tags to all bag items (or selected ones)
+                    const tagsToApply = Array.from(massSelectedTags);
+                    if (tagsToApply.length === 0) {
+                      alert("Please select at least one tag");
+                      return;
+                    }
+
+                    // Determine which indices to update
+                    let indicesToUpdate: number[] = [];
+                    if (selectedForMass.size > 0) {
+                      // Apply to selected items only
+                      indicesToUpdate = [...selectedForMass].filter(idx => staged[idx]?.category === "bags");
+                    } else {
+                      // Apply to all bag items
+                      indicesToUpdate = staged
+                        .map((s, idx) => ({ s, idx }))
+                        .filter(({ s }) => s.category === "bags")
+                        .map(({ idx }) => idx);
+                    }
+
+                    if (indicesToUpdate.length === 0) {
+                      alert("No bag items found to apply tags.");
+                      return;
+                    }
+
+                    // Apply tags
+                    const copy = [...staged];
+                    indicesToUpdate.forEach(idx => {
+                      copy[idx] = {
+                        ...copy[idx],
+                        tags: [...tagsToApply]
+                      };
+                    });
+                    setStaged(copy);
+
+                    // Close selector and reset
+                    setShowMassTagSelector(false);
+                    setMassSelectedTags(new Set());
+                    
+                    console.log(`Applied ${tagsToApply.length} tags to ${indicesToUpdate.length} bag items`);
+                  }}
+                  className="flex-1 px-3 py-1.5 bg-accent text-white text-xs rounded-lg hover:bg-accent/90"
+                >
+                  Apply to {selectedForMass.size > 0 ? `Selected (${selectedForMass.size})` : "All Bags"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMassTagSelector(false);
+                    setMassSelectedTags(new Set());
+                  }}
+                  className="px-3 py-1.5 border border-border text-xs rounded-lg hover:bg-surface"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-max divide-y divide-border">
+      <div className="overflow-x-auto overflow-y-visible">
+        <table className="w-full divide-y divide-border">
           <thead className="bg-surface/50">
             <tr className="text-xs font-semibold text-muted uppercase tracking-wider">
-              <th className="text-left py-3 px-4 w-10">
+              <th className="text-left py-3 px-3 w-12">
                 <input
                   type="checkbox"
                   checked={selectedForMass.size === staged.length && staged.length > 0}
@@ -499,13 +754,10 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   className="rounded border-gray-300"
                 />
               </th>
-              <th className="text-left py-3 px-4 w-10">#</th>
-              <th className="text-left py-3 px-4 w-28">Image</th>
-              <th className="text-left py-3 px-4">Category</th>
-              <th className="text-left py-3 px-4">Subcategory</th>
-              
-              <th className="text-left py-3 px-4">Valid Region</th>
-              <th className="text-right py-3 px-4">Actions</th>
+              <th className="text-left py-3 px-3 w-12 text-center">#</th>
+              <th className="text-left py-3 px-3 w-32">Image</th>
+              <th className="text-left py-3 px-3">Category / Subcategory / Valid Region</th>
+              <th className="text-right py-3 px-3 w-20">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -519,7 +771,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
               return (
                 <tr key={idx} className="even:bg-surface/20">
-                  <td className="py-3 px-4 align-top">
+                  <td className="py-3 px-3 align-top">
                     <input
                       type="checkbox"
                       checked={selectedForMass.has(idx)}
@@ -527,78 +779,185 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       className="rounded border-gray-300"
                     />
                   </td>
-                  <td className="py-3 px-4 align-top text-sm font-mono text-muted">
+                  <td className="py-3 px-3 align-top text-sm font-mono text-muted text-center">
                     {idx + 1}
                   </td>
-                  <td className="py-3 px-4 align-top">
-                    <ThumbnailWithRegion
-                      src={preview}
-                      validRegionPoints={s.valid_region_points}
-                      alt={file.name}
-                    />
-                  </td>
-                  <td className="py-3 px-4 align-top">
-                  <select
-                      className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
-                      value={s.category || ""}
-                      onChange={(e) => handleInlineCategoryChange(idx, e.target.value)}
-                      disabled={uploading}
+                  <td className="py-3 px-3 align-top">
+                    <button
+                      onClick={() => {
+                        setPreviewImage(preview);
+                        setPreviewFileName(file.name);
+                        setPreviewIndex(idx);
+                      }}
+                      className="cursor-pointer hover:opacity-80 transition-opacity"
+                      title="Click to enlarge"
                     >
-                      <option value="">NONE</option>
-                      {categoryOptions.map((cat) => (
-                        <option key={cat.slug} value={cat.slug}>{cat.name}</option>
-                      ))}
-                    </select>
+                      <ThumbnailWithRegion
+                        src={preview}
+                        validRegionPoints={s.valid_region_points}
+                        alt={file.name}
+                      />
+                    </button>
                   </td>
-                  <td className="py-3 px-4 align-top">
-                  <select
-                      className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
-                      value={s.subcategory || ""}
-                      onChange={(e) => handleInlineSubcategoryChange(idx, e.target.value)}
-                      disabled={uploading || !s.category}
-                    >
-                      <option value="">NONE</option>
-                      {inlineSubOptions.length > 0 ? (
-                        inlineSubOptions.map((sub) => (
-                          <option key={sub.slug} value={sub.name}>{sub.name}</option>
-                        ))
-                      ) : (
-                        s.category ? <option value="General">General</option> : null
-                      )}
-                    </select>
-                  </td>
-
-                  <td className="py-3 px-4 align-top">
-                    {isBags ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleAutoGenerateRegion(idx)}
-                          disabled={autoGeneratingIndices.has(idx)}
-                          className="text-xs px-2 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
-                          title="Auto-generate valid region from pixel data"
+                  <td className="py-3 px-3 align-top">
+                    <div className="space-y-2">
+                      {/* First line: Category, Subcategory, Auto, Set buttons */}
+                      <div className="flex items-center justify-between gap-4">
+                        <select
+                          className="w-32 p-1.5 border border-border rounded-lg text-xs bg-white"
+                          value={s.category || ""}
+                          onChange={(e) => handleInlineCategoryChange(idx, e.target.value)}
+                          disabled={uploading}
                         >
-                          {autoGeneratingIndices.has(idx) ? (
-                            <Loader2 size={12} className="animate-spin" />
-                          ) : (
-                            <Sparkles size={12} />
-                          )}
-                          Auto
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleInlineValidRegion(idx)}
-                          className="text-xs px-2.5 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1"
-                        >
-                          <Edit3 size={12} />
-                          {s.valid_region_points ? "Edit" : "Set"}
-                        </button>
+                          <option value="">NONE</option>
+                          {categoryOptions.map((cat) => (
+                            <option key={cat.slug} value={cat.slug}>{cat.name}</option>
+                          ))}
+                        </select>
+                        <div className="w-40">
+                          <ScrollableSelect
+                            value={s.subcategory || ""}
+                            options={inlineSubOptions}
+                            onChange={(val) => handleInlineSubcategoryChange(idx, val)}
+                            disabled={uploading || !s.category}
+                            placeholder="NONE"
+                            onAddNew={s.category ? () => openAddSubcategoryModal(s.category) : undefined}
+                            category={s.category}
+                          />
+                        </div>
+                        {isBags ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleAutoGenerateRegion(idx)}
+                              disabled={autoGeneratingIndices.has(idx)}
+                              className="text-xs px-3 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                              title="Auto-generate valid region from pixel data"
+                            >
+                              {autoGeneratingIndices.has(idx) ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <Sparkles size={12} />
+                              )}
+                              Auto
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleInlineValidRegion(idx)}
+                              className="text-xs px-3 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1.5"
+                            >
+                              <Edit3 size={12} />
+                              {s.valid_region_points ? "Edit" : "Set"}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted/50">—</span>
+                        )}
                       </div>
-                    ) : (
-                      <span className="text-xs text-muted/50">—</span>
-                    )}
+                      
+                      {/* Tags Section - Below the first line */}
+                      {isBags && (
+                        <div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveTagRow(activeTagRow === idx ? null : idx);
+                            }}
+                            className="text-[11px] px-2 py-1 rounded border border-border bg-surface hover:bg-emerald-50 hover:border-emerald-300 flex items-center gap-1"
+                          >
+                            {s.tags && s.tags.length > 0 ? (
+                              <>
+                                <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded-full font-medium">
+                                  {s.tags.length}
+                                </span>
+                                <span className="text-emerald-700">Tags</span>
+                              </>
+                            ) : (
+                              <span>+ Tags</span>
+                            )}
+                          </button>
+                          
+                          {activeTagRow === idx && (
+                            <div ref={tagSelectorRef} className="mt-1 p-2 border border-border rounded-lg bg-white shadow-lg z-20 relative" style={{ maxHeight: "220px", overflowY: "auto" }}>
+                              <div className="text-[10px] text-muted mb-1.5 font-medium sticky top-0 bg-white pb-1 z-10">Select non-threat items:</div>
+                              <div className="space-y-0.5">
+                                {LIBRARIES.find(l => l.slug === "non-threats")?.subcategories.map((sub) => {
+                                  const isSelected = s.tags?.includes(sub.slug);
+                                  return (
+                                    <label
+                                      key={sub.slug}
+                                      className={`flex items-center gap-1.5 p-1 rounded cursor-pointer text-[11px] ${
+                                        isSelected
+                                          ? "bg-emerald-50 text-emerald-700"
+                                          : "hover:bg-surface"
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={(e) => {
+                                          const copy = [...staged];
+                                          const currentTags = copy[idx].tags || [];
+                                          const newTags = e.target.checked
+                                            ? [...currentTags, sub.slug]
+                                            : currentTags.filter((t: string) => t !== sub.slug);
+                                          copy[idx] = { ...copy[idx], tags: newTags };
+                                          setStaged(copy);
+                                        }}
+                                        className="rounded border-gray-300"
+                                      />
+                                      <span>{sub.name}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setActiveTagRow(null)}
+                                className="mt-2 w-full px-2 py-1 bg-accent text-white text-[11px] rounded-lg hover:bg-accent/90"
+                              >
+                                Done
+                              </button>
+                            </div>
+                          )}
+                          
+                          {s.tags && s.tags.length > 0 && (
+                            <div className="flex flex-wrap gap-0.5 mt-1">
+                              {s.tags.slice(0, 3).map((tagSlug: string) => {
+                                const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                return (
+                                  <span
+                                    key={tagSlug}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-medium"
+                                    title={tagName}
+                                  >
+                                    {tagName}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const copy = [...staged];
+                                        const newTags = copy[idx].tags?.filter((t: string) => t !== tagSlug) || [];
+                                        copy[idx] = { ...copy[idx], tags: newTags };
+                                        setStaged(copy);
+                                      }}
+                                      className="hover:text-rose-600 transition-colors"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  </span>
+                                );
+                              })}
+                              {s.tags.length > 3 && (
+                                <span className="text-[10px] text-muted">+{s.tags.length - 3}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </td>
-                  <td className="py-3 px-4 text-right align-top">
+                  <td className="py-3 px-3 text-right align-top">
                     <button
                       onClick={() => removeIndex(idx)}
                       className="p-1.5 rounded-lg text-rose-500"
@@ -669,7 +1028,13 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                 <select
                   className="w-full p-2 border border-border rounded mt-1"
                   value={editDraft.subcategory || ""}
-                  onChange={(e) => handleSubcategoryChange(e.target.value)}
+                  onChange={(e) => {
+                    if (e.target.value === "__add_new__") {
+                      openAddSubcategoryModal(selectedCategory?.slug || "");
+                    } else {
+                      handleSubcategoryChange(e.target.value);
+                    }
+                  }}
                 >
                   <option value="">NONE</option>
                   {subcategoryOptions.length > 0 ? (
@@ -679,10 +1044,13 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   ) : (
                     editDraft.category ? <option value="General">General</option> : null
                   )}
+                  {selectedCategory && (
+                    <option value="__add_new__" className="text-accent font-medium">+ Add new subcategory</option>
+                  )}
                 </select>
 
                 {selectedCategory?.slug === "bags" ? (
-                  <div className="mt-3">
+                  <div className="mt-3 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <label className="text-xs text-muted">Valid Region</label>
                       <button
@@ -738,6 +1106,177 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
           onAutoGenerate={editDraft.category === "bags" ? () => handleAutoGenerateRegion(editingIndex!) : undefined}
           isAutoGenerating={editingIndex != null ? autoGeneratingIndices.has(editingIndex) : false}
         />
+      )}
+
+      {/* Add Subcategory Modal */}
+      <AddSubcategoryModal
+        isOpen={isAddSubcategoryModalOpen}
+        onClose={() => setIsAddSubcategoryModalOpen(false)}
+        onAdd={handleAddCustomSubcategory}
+        categoryName={LIBRARIES.find(lib => lib.slug === addingSubcategoryFor)?.name || addingSubcategoryFor}
+      />
+
+      {/* Image Preview Modal */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setPreviewImage(null)}
+        >
+          {/* Close button - positioned fixed to stay in top-right corner */}
+          <button
+            onClick={() => setPreviewImage(null)}
+            className="fixed top-4 right-4 z-[110] p-2 bg-black/80 hover:bg-black rounded-full text-white transition-colors shadow-lg"
+            title="Close preview"
+          >
+            <X size={24} />
+          </button>
+          
+          <div className="relative flex items-center gap-20 max-w-7xl max-h-[90vh] p-4">
+            
+            {/* Navigation buttons */}
+            {previewIndex > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const prevIdx = previewIndex - 1;
+                  const prevItem = staged[prevIdx];
+                  const prevPreview = prevItem.preProcessed
+                    ? `http://localhost:8080/data/library_images/${prevItem.preGeneratedFilepath}`
+                    : URL.createObjectURL(prevItem.file as File);
+                  setPreviewImage(prevPreview);
+                  setPreviewFileName((prevItem.file as File).name);
+                  setPreviewIndex(prevIdx);
+                }}
+                className="absolute -left-10 top-1/2 -translate-y-1/2 z-10 p-3 bg-black/70 hover:bg-black/90 rounded-full text-white transition-colors"
+                title="Previous image"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            )}
+            
+            {previewIndex < staged.length - 1 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextIdx = previewIndex + 1;
+                  const nextItem = staged[nextIdx];
+                  const nextPreview = nextItem.preProcessed
+                    ? `http://localhost:8080/data/library_images/${nextItem.preGeneratedFilepath}`
+                    : URL.createObjectURL(nextItem.file as File);
+                  setPreviewImage(nextPreview);
+                  setPreviewFileName((nextItem.file as File).name);
+                  setPreviewIndex(nextIdx);
+                }}
+                className="absolute left-[calc(50%+6px)] top-1/2 -translate-y-1/2 z-10 p-3 bg-black/70 hover:bg-black/90 rounded-full text-white transition-colors"
+                title="Next image"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            )}
+            
+            {/* Image on the left */}
+            <img
+              src={previewImage}
+              alt={previewFileName}
+              className="max-w-[50%] max-h-[75vh] object-contain rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            
+            {/* Tags panel on the right */}
+            <div className="w-64 bg-white rounded-lg shadow-2xl p-4 max-h-[75vh] overflow-y-auto">
+              <div className="text-sm font-semibold text-ink mb-1">Tags</div>
+              <div className="text-xs text-muted mb-3">Select non-threat items:</div>
+              
+              {/* Find the current staged item index to get/set tags */}
+              {(() => {
+                const currentIdx = staged.findIndex(s => {
+                  const file = s.file as File;
+                  const preview = s.preProcessed
+                    ? `http://localhost:8080/data/library_images/${s.preGeneratedFilepath}`
+                    : URL.createObjectURL(file);
+                  return preview === previewImage;
+                });
+                
+                if (currentIdx === -1) return null;
+                
+                const currentTags = staged[currentIdx].tags || [];
+                
+                return (
+                  <>
+                    <div className="space-y-1">
+                      {LIBRARIES.find(l => l.slug === "non-threats")?.subcategories.map((sub) => {
+                        const isSelected = currentTags.includes(sub.slug);
+                        return (
+                          <label
+                            key={sub.slug}
+                            className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm ${
+                              isSelected
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "hover:bg-surface"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                const copy = [...staged];
+                                const newTags = e.target.checked
+                                  ? [...currentTags, sub.slug]
+                                  : currentTags.filter((t: string) => t !== sub.slug);
+                                copy[currentIdx] = { ...copy[currentIdx], tags: newTags };
+                                setStaged(copy);
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="rounded border-gray-300"
+                            />
+                            <span>{sub.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    
+                    {currentTags.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-border">
+                        <div className="text-xs font-medium text-muted mb-2">Selected Tags:</div>
+                        <div className="flex flex-wrap gap-1">
+                          {currentTags.map((tagSlug: string) => {
+                            const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                            return (
+                              <span
+                                key={tagSlug}
+                                className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs font-medium"
+                              >
+                                {tagName}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const copy = [...staged];
+                                    const newTags = currentTags.filter((t: string) => t !== tagSlug);
+                                    copy[currentIdx] = { ...copy[currentIdx], tags: newTags };
+                                    setStaged(copy);
+                                  }}
+                                  className="hover:text-rose-600 transition-colors"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

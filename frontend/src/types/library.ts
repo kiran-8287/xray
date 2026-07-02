@@ -17,6 +17,8 @@ export interface Item {
   height?: number;
   /** Normalized polygon outline as [{x, y}] where values are in -0.5..0.5 range */
   polygon_json?: Point[] | string;
+  /** Tags from non-threat list associated with this item (for bags) */
+  tags?: string[];
 }
 
 

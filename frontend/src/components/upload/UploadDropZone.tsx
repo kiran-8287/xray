@@ -37,7 +37,7 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onClick={() => document.getElementById("fileInput")?.click()}
-      className={`bg-panel border-2 border-dashed rounded-2xl p-14 text-center cursor-pointer shadow-card transition-all duration-200 group ${
+      className={`max-w-5xl mx-auto bg-panel border-2 border-dashed rounded-2xl p-14 text-center cursor-pointer shadow-card transition-all duration-200 group ${
         isDragOver
           ? "border-accent-sky bg-accent-sky/5 scale-[1.01]"
           : "border-border hover:border-accent hover:bg-accent/4 hover:shadow-card-hover"

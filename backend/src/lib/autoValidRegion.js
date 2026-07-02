@@ -13,8 +13,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const READ_NPZ_SCRIPT = path.join(__dirname, 'read_npz.py');
 
 // ---------------------------------------------------------------------------
 // Union-Find (Disjoint Set) for connected component labeling
@@ -436,28 +438,73 @@ function unpadContour(contour) {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: Load pixel data from .npz via Python subprocess
+// ---------------------------------------------------------------------------
+
+/**
+ * Spawn a Python subprocess to read .npz file and return pixel data as JSON
+ * @param {string} npzPath - Absolute path to the .npz file
+ * @returns {Promise<{width: number, height: number, pixel_data: Array}>}
+ */
+async function loadPixelDataFromNpz(npzPath) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('python', [READ_NPZ_SCRIPT, '--npz-path', npzPath], {
+      cwd: __dirname,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    proc.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on('close', (code) => {
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      const lastLine = lines[lines.length - 1] || '';
+
+      if (code === 0 && lastLine) {
+        try {
+          const parsed = JSON.parse(lastLine);
+          if (parsed.status === 'error') {
+            reject(new Error(parsed.reason || 'Python script returned error'));
+          } else {
+            resolve(parsed);
+          }
+        } catch {
+          reject(new Error(`Invalid JSON from Python: ${lastLine}`));
+        }
+      } else {
+        reject(new Error(stderr.trim() || lastLine || 'Python process failed'));
+      }
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to start Python process: ${err.message}`));
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
 /**
  * Auto-generate a valid region polygon from raw pixel data.
  *
- * @param {string} pixelDataPath - Absolute path to the pixel data JSON file
+ * @param {string} pixelDataPath - Absolute path to the pixel data .npz file
  * @returns {Promise<{points: Array<{x:number,y:number}>, width: number, height: number, pixelCount: number}>}
  */
 export async function generateValidRegion(pixelDataPath) {
-  // ── 1. Load pixel data ────────────────────────────────────────────────────
-  const raw          = await fs.readFile(pixelDataPath, 'utf8');
-  const pixelArray2D = JSON.parse(raw);
-
-  if (!Array.isArray(pixelArray2D) || pixelArray2D.length === 0)
-    throw new Error('Pixel data is empty or not an array');
-
-  const height = pixelArray2D.length;
-  const width  = Array.isArray(pixelArray2D[0]) ? pixelArray2D[0].length : 0;
-  if (width === 0) throw new Error('Pixel data has zero width');
-
-  console.log(`[autoValidRegion] Loaded ${width}x${height} (${(raw.length/1024/1024).toFixed(1)} MB)`);
+  // ── 1. Load pixel data from .npz using Python helper script ───────────────
+  const pixelData = await loadPixelDataFromNpz(pixelDataPath);
+  const { width, height, pixel_data: pixelArray2D } = pixelData;
+  
+  console.log(`[autoValidRegion] Loaded ${width}x${height}`);
 
   // ── 2. Binary mask ────────────────────────────────────────────────────────
   // Threshold: < 65400 is bag material (65400–65535 treated as background

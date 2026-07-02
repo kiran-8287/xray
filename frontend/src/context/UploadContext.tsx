@@ -5,6 +5,7 @@ export interface StagedItem {
   category: string;
   subcategory: string;
   valid_region_points?: any | null;
+  tags?: string[];
 
   // Pipeline fields for pre-processed raw-file items
   preProcessed?: boolean;
