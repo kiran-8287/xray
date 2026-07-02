@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Loader2, CheckCircle2, XCircle, Grid3X3, ChevronLeft, ChevronRight, X, FolderOpen } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Grid3X3, ChevronLeft, ChevronRight, X, FolderOpen, Download, Edit3 } from "lucide-react";
 import { IoMdPhotos } from "react-icons/io";
 import { API_BASE_URL } from "../config/api";
 import type { Item } from "../types/library";
@@ -125,6 +125,18 @@ export default function CollagePage() {
     savedCount: number;
   }>({ status: "idle", message: "", savedCount: 0 });
 
+  // Bulk save confirmation modal state
+  const [showBulkSaveModal, setShowBulkSaveModal] = useState(false);
+
+  // Preview modal state
+  const [selectedCombination, setSelectedCombination] = useState<CombinatorialResult | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [saveImageState, setSaveImageState] = useState<{
+    status: "idle" | "saving" | "success" | "error";
+    message: string;
+    imageUrl: string | null;
+  }>({ status: "idle", message: "", imageUrl: null });
+
   // Whenever new data arrives via location state, persist it
   useEffect(() => {
     if (!locationState || !locationState.selectedBags || locationState.selectedBags.length === 0) {
@@ -184,7 +196,56 @@ export default function CollagePage() {
     navigate(`/customize?${queryParams.toString()}`);
   };
 
-  const handleBulkSave = async () => {
+  const handleOpenPreviewModal = (comb: CombinatorialResult) => {
+    setSelectedCombination(comb);
+    setShowModal(true);
+    setSaveImageState({ status: "idle", message: "", imageUrl: null });
+  };
+
+  const handleCloseModal = () => {
+    setShowModal(false);
+    setSelectedCombination(null);
+    setSaveImageState({ status: "idle", message: "", imageUrl: null });
+  };
+
+  const handleSaveImage = async () => {
+    if (!selectedCombination) return;
+
+    setSaveImageState({ status: "saving", message: "Rendering image...", imageUrl: null });
+
+    try {
+      // Save using the synthesized combination ID as the filename
+      const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objects: selectedCombination.objects,
+          name: selectedCombination.id,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to render image");
+      }
+
+      const data = await response.json();
+      setSaveImageState({
+        status: "success",
+        message: "Image saved successfully!",
+        imageUrl: data.url,
+      });
+    } catch (err) {
+      console.error("Error saving image:", err);
+      setSaveImageState({
+        status: "error",
+        message: "Failed to save image. Make sure backend is running.",
+        imageUrl: null,
+      });
+    }
+  };
+
+  const handleBulkSave = async (saveImages: boolean = false) => {
+    setShowBulkSaveModal(false);
     setBulkSaveState({ status: "saving", message: "Saving all workspaces...", savedCount: 0 });
     let savedCount = 0;
     let failedCount = 0;
@@ -309,14 +370,31 @@ export default function CollagePage() {
 
         if (response.ok) {
           savedCount++;
-          setBulkSaveState(prev => ({
-            ...prev,
-            message: `Saving workspaces... (${savedCount}/${combinations.length})`,
-            savedCount
-          }));
         } else {
           failedCount++;
         }
+
+        // Also save the rendered image if requested
+        if (saveImages && response.ok) {
+          try {
+            await fetch(`${API_BASE_URL}/api/render-and-save-collage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                objects: comb.objects,
+                name: comb.id,
+              }),
+            });
+          } catch (err) {
+            console.error(`Error saving image for ${comb.id}:`, err);
+          }
+        }
+
+        setBulkSaveState(prev => ({
+          ...prev,
+          message: `Saving workspaces... (${savedCount}/${combinations.length})`,
+          savedCount
+        }));
       }
       
       setBulkSaveState({
@@ -369,7 +447,7 @@ export default function CollagePage() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={handleBulkSave}
+            onClick={() => setShowBulkSaveModal(true)}
             disabled={bulkSaveState.status === "saving" || combinations.length === 0}
             className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-500 shadow-btn flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             title="Bulk Save All Workspaces"
@@ -380,6 +458,45 @@ export default function CollagePage() {
               <FolderOpen size={15} />
             )}
           </button>
+
+          {/* Bulk Save Confirmation Modal */}
+          {showBulkSaveModal && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+              <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowBulkSaveModal(false)} />
+              <div className="relative z-[10000] w-full max-w-md bg-white rounded-2xl shadow-lg border border-border p-6">
+                <h3 className="text-base font-semibold text-ink mb-2">Bulk Save Options</h3>
+                <p className="text-sm text-muted mb-5">
+                  Choose how you want to save {combinations.length} combination{combinations.length !== 1 ? "s" : ""}:
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => handleBulkSave(true)}
+                    className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-500 text-white font-semibold text-sm hover:shadow-btn-hover transition-all cursor-pointer text-left"
+                  >
+                    <span className="block text-base mb-0.5">Save Annotations + Images</span>
+                    <span className="block text-xs opacity-90 font-normal">
+                      Save workspace annotations to savedLayouts.json and render PNG images to collage_images folder
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => handleBulkSave(false)}
+                    className="w-full px-4 py-3 rounded-xl bg-panel border border-border text-ink font-semibold text-sm hover:bg-surface transition-all cursor-pointer text-left"
+                  >
+                    <span className="block text-base mb-0.5">Save Annotations Only</span>
+                    <span className="block text-xs text-muted font-normal">
+                      Save workspace annotations to savedLayouts.json only (no images)
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setShowBulkSaveModal(false)}
+                    className="w-full px-4 py-2.5 rounded-xl text-muted font-semibold text-sm hover:text-ink transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -461,14 +578,15 @@ export default function CollagePage() {
                 {paginatedCombinations.map((comb) => (
                   <button
                     key={comb.id}
-                    onClick={() => handleOpenCombination(comb)}
+                    onClick={() => handleOpenPreviewModal(comb)}
                     className="bg-panel rounded-2xl border border-border p-4 shadow-card cursor-pointer overflow-hidden group text-left w-full"
                   >
                     <SyntheticPreview
                       objects={comb.objects}
-                      bagName={comb.bag.name}
-                      threatName={comb.threat?.name}
-                      othersCount={comb.others.length}
+                      combinationId={comb.id}
+                      bagId={comb.bag.id}
+                      threatId={comb.threat?.id}
+                      otherIds={comb.others.map(o => o.id)}
                     />
                   </button>
                 ))}
@@ -522,6 +640,108 @@ export default function CollagePage() {
             </>
           )}
         </>
+      )}
+
+      {/* Preview Modal */}
+      {showModal && selectedCombination && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleCloseModal} />
+          <div className="relative z-[10000] w-full max-w-3xl bg-white rounded-2xl shadow-lg border border-border overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-panel">
+              <h3 className="text-base font-semibold text-accent-sky font-mono truncate pr-4">
+              </h3>
+              <button
+                onClick={handleCloseModal}
+                className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-ink transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex flex-col md:flex-row">
+              {/* Left: Image Preview */}
+              <div className="flex-1 p-6 flex items-center justify-center bg-surface">
+              <div className="w-full max-w-md">
+                <SyntheticPreview
+                  objects={selectedCombination.objects}
+                  combinationId={selectedCombination.id}
+                  bagId={selectedCombination.bag.id}
+                  threatId={selectedCombination.threat?.id}
+                  otherIds={selectedCombination.others.map(o => o.id)}
+                />
+              </div>
+              </div>
+
+              {/* Right: Action Buttons */}
+              <div className="w-full md:w-64 p-6 border-t md:border-t-0 md:border-l border-border flex flex-col gap-4 justify-center">
+                {/* Save Image Button */}
+                <button
+                  onClick={handleSaveImage}
+                  disabled={saveImageState.status === "saving"}
+                  className={`w-full px-5 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm transition-all cursor-pointer ${
+                    saveImageState.status === "success"
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : saveImageState.status === "error"
+                      ? "bg-rose-50 text-rose-700 border border-rose-200"
+                      : "bg-gradient-to-r from-blue-600 to-indigo-500 text-white shadow-btn hover:shadow-btn-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                  }`}
+                >
+                  {saveImageState.status === "saving" ? (
+                    <>
+                      <Loader2 className="animate-spin" size={16} />
+                      Saving...
+                    </>
+                  ) : saveImageState.status === "success" ? (
+                    <>
+                      <CheckCircle2 size={16} />
+                      Saved!
+                    </>
+                  ) : saveImageState.status === "error" ? (
+                    <>
+                      <XCircle size={16} />
+                      Failed
+                    </>
+                  ) : (
+                    <>
+                      <Download size={16} />
+                      Save Image
+                    </>
+                  )}
+                </button>
+
+                {/* Save status message */}
+                {saveImageState.status !== "idle" && saveImageState.status !== "saving" && (
+                  <p className={`text-xs text-center font-medium ${
+                    saveImageState.status === "success" ? "text-emerald-600" : "text-rose-600"
+                  }`}>
+                    {saveImageState.message}
+                  </p>
+                )}
+
+                {/* Divider */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-border" />
+                  <span className="text-xs text-muted font-medium">OR</span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+
+                {/* Customize Button */}
+                <button
+                  onClick={() => {
+                    handleCloseModal();
+                    handleOpenCombination(selectedCombination);
+                  }}
+                  className="w-full px-5 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm bg-gradient-to-r from-accent to-accent-sky text-white shadow-btn hover:shadow-btn-hover transition-all cursor-pointer"
+                >
+                  <Edit3 size={16} />
+                  Customize
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

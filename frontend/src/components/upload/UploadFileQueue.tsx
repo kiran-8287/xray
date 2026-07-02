@@ -1186,95 +1186,100 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
               onClick={(e) => e.stopPropagation()}
             />
             
-            {/* Tags panel on the right */}
-            <div className="w-64 bg-white rounded-lg shadow-2xl p-4 max-h-[75vh] overflow-y-auto">
-              <div className="text-sm font-semibold text-ink mb-1">Tags</div>
-              <div className="text-xs text-muted mb-3">Select non-threat items:</div>
+            {/* Tags panel on the right - only for bags */}
+            {(() => {
+              const currentIdx = staged.findIndex(s => {
+                const file = s.file as File;
+                const itemPreview = s.preProcessed
+                  ? `http://localhost:8080/data/library_images/${s.preGeneratedFilepath}`
+                  : URL.createObjectURL(file);
+                return itemPreview === previewImage;
+              });
               
-              {/* Find the current staged item index to get/set tags */}
-              {(() => {
-                const currentIdx = staged.findIndex(s => {
-                  const file = s.file as File;
-                  const preview = s.preProcessed
-                    ? `http://localhost:8080/data/library_images/${s.preGeneratedFilepath}`
-                    : URL.createObjectURL(file);
-                  return preview === previewImage;
-                });
-                
-                if (currentIdx === -1) return null;
-                
-                const currentTags = staged[currentIdx].tags || [];
-                
-                return (
-                  <>
-                    <div className="space-y-1">
-                      {LIBRARIES.find(l => l.slug === "non-threats")?.subcategories.map((sub) => {
-                        const isSelected = currentTags.includes(sub.slug);
-                        return (
-                          <label
-                            key={sub.slug}
-                            className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm ${
-                              isSelected
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "hover:bg-surface"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                const copy = [...staged];
-                                const newTags = e.target.checked
-                                  ? [...currentTags, sub.slug]
-                                  : currentTags.filter((t: string) => t !== sub.slug);
-                                copy[currentIdx] = { ...copy[currentIdx], tags: newTags };
-                                setStaged(copy);
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              className="rounded border-gray-300"
-                            />
-                            <span>{sub.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
+              const isBags = currentIdx !== -1 && staged[currentIdx]?.category === "bags";
+              
+              if (!isBags) return null;
+              
+              return (
+                <div className="w-64 bg-white rounded-lg shadow-2xl p-4 max-h-[75vh] overflow-y-auto">
+                  <div className="text-sm font-semibold text-ink mb-1">Tags</div>
+                  <div className="text-xs text-muted mb-3">Select non-threat items:</div>
+                  
+                  {(() => {
+                    const currentTags = staged[currentIdx].tags || [];
                     
-                    {currentTags.length > 0 && (
-                      <div className="mt-3 pt-3 border-t border-border">
-                        <div className="text-xs font-medium text-muted mb-2">Selected Tags:</div>
-                        <div className="flex flex-wrap gap-1">
-                          {currentTags.map((tagSlug: string) => {
-                            const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                    return (
+                      <>
+                        <div className="space-y-1">
+                          {LIBRARIES.find(l => l.slug === "non-threats")?.subcategories.map((sub) => {
+                            const isSelected = currentTags.includes(sub.slug);
                             return (
-                              <span
-                                key={tagSlug}
-                                className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs font-medium"
+                              <label
+                                key={sub.slug}
+                                className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm ${
+                                  isSelected
+                                    ? "bg-emerald-50 text-emerald-700"
+                                    : "hover:bg-surface"
+                                }`}
                               >
-                                {tagName}
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
                                     e.stopPropagation();
                                     const copy = [...staged];
-                                    const newTags = currentTags.filter((t: string) => t !== tagSlug);
+                                    const newTags = e.target.checked
+                                      ? [...currentTags, sub.slug]
+                                      : currentTags.filter((t: string) => t !== sub.slug);
                                     copy[currentIdx] = { ...copy[currentIdx], tags: newTags };
                                     setStaged(copy);
                                   }}
-                                  className="hover:text-rose-600 transition-colors"
-                                >
-                                  <X size={12} />
-                                </button>
-                              </span>
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="rounded border-gray-300"
+                                />
+                                <span>{sub.name}</span>
+                              </label>
                             );
                           })}
                         </div>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
+                        
+                        {currentTags.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-border">
+                            <div className="text-xs font-medium text-muted mb-2">Selected Tags:</div>
+                            <div className="flex flex-wrap gap-1">
+                              {currentTags.map((tagSlug: string) => {
+                                const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                return (
+                                  <span
+                                    key={tagSlug}
+                                    className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs font-medium"
+                                  >
+                                    {tagName}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const copy = [...staged];
+                                        const newTags = currentTags.filter((t: string) => t !== tagSlug);
+                                        copy[currentIdx] = { ...copy[currentIdx], tags: newTags };
+                                        setStaged(copy);
+                                      }}
+                                      className="hover:text-rose-600 transition-colors"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

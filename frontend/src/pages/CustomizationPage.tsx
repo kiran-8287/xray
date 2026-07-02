@@ -679,10 +679,14 @@ export default function CustomizationPage() {
         createdAt: new Date().toISOString(),
       };
 
+      // Use the synthesized SB{YYMMDD}-{ABCDE} ID from the precomputed param
+      const precomputedId = searchParams.get("precomputed") || "";
+
       const response = await fetch(`${API_BASE_URL}/api/saved-layouts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          id: precomputedId || undefined, // Pass the synthesized ID so backend uses it
           name: annotation,
           filepath: null,
           layout_json,
@@ -708,7 +712,6 @@ export default function CustomizationPage() {
       
       // Also update the collage combinations in sessionStorage
       // This ensures when user navigates back, the collage page shows updated data
-      const precomputedId = searchParams.get("precomputed") || "";
       if (precomputedId) {
         try {
           const collageCombosKey = "collageCombinations";

@@ -86,6 +86,38 @@ function getPixelArray(pixelData) {
   return null;
 }
 
+/**
+ * Load a PNG image and extract its grayscale pixel data as a 2D array.
+ * Each pixel value is mapped from 0-255 to the 0-65535 range.
+ */
+async function loadPngAsPixelArray(filepath) {
+  try {
+    const fullPath = path.join(libraryImagesRoot, filepath);
+    const image = await Jimp.read(fullPath);
+    const width = image.bitmap.width;
+    const height = image.bitmap.height;
+    
+    // Build a 2D array of pixel values (0–65535 range)
+    const data = [];
+    for (let y = 0; y < height; y++) {
+      const row = [];
+      for (let x = 0; x < width; x++) {
+        const pixel = Jimp.intToRGBA(image.getPixelColor(x, y));
+        // Convert grayscale: average RGB channels, then map 0-255 → 0-65535
+        const gray = Math.round((pixel.r + pixel.g + pixel.b) / 3);
+        const val = Math.round((gray / 255) * 65535);
+        row.push(val);
+      }
+      data.push(row);
+    }
+    
+    return { data, width, height };
+  } catch (err) {
+    console.error(`Failed to load PNG as pixel array: ${filepath}`, err);
+    return null;
+  }
+}
+
 function applyAffineTransform(
   srcData, 
   srcWidth, 
@@ -165,15 +197,14 @@ export async function renderSceneAsync(objects, width = 800, height = 600) {
   for (const obj of sorted) {
     if (!obj.id) continue;
     
-    // Try to load pixel data first
-    const pixelDataFilename = obj.pixel_data_path || null;
-    let pixelData = null;
     let srcArray = null;
     let srcWidth = 0;
     let srcHeight = 0;
     
+    // Try pixel data first (from raw .dump.pgm / .tip processing)
+    const pixelDataFilename = obj.pixel_data_path || null;
     if (pixelDataFilename) {
-      pixelData = await loadPixelData(pixelDataFilename);
+      const pixelData = await loadPixelData(pixelDataFilename);
       if (pixelData) {
         srcArray = getPixelArray(pixelData);
         if (srcArray) {
@@ -183,10 +214,19 @@ export async function renderSceneAsync(objects, width = 800, height = 600) {
       }
     }
     
-    // If no pixel data, use fallback method (PNG image)
+    // Fallback: load from PNG image (for library items uploaded as regular images)
+    if (!srcArray && obj.filepath) {
+      const pngResult = await loadPngAsPixelArray(obj.filepath);
+      if (pngResult) {
+        srcArray = pngResult.data;
+        srcWidth = pngResult.width;
+        srcHeight = pngResult.height;
+      }
+    }
+    
+    // If still no data, skip this object
     if (!srcArray) {
-      console.warn(`⚠️  No pixel data found for ${obj.name || obj.id}, using fallback PNG rendering`);
-      // ... (keep existing fallback logic if needed, but we can skip for now)
+      console.warn(`⚠️  No pixel data or image found for ${obj.name || obj.id}, skipping`);
       continue;
     }
     
@@ -241,4 +281,3 @@ export async function renderSceneAsync(objects, width = 800, height = 600) {
   
   return await image.getBufferAsync(Jimp.MIME_PNG);
 }
-
