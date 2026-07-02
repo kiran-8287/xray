@@ -15,7 +15,8 @@ import {
   Grid,
   AlertTriangle,
   Sparkles,
-  Loader2
+  Loader2,
+  Eraser
 } from 'lucide-react';
 import type { Point } from '../../types/geometry';
 import { isPointInPolygon } from '../../lib/geometry';
@@ -53,7 +54,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [polygons, setPolygons] = useState<Polygon[]>([]);
   const [selectedPolygonId, setSelectedPolygonId] = useState<string | null>(null);
-  const [currentTool, setCurrentTool] = useState<'select' | 'polygon'>('select');
+  const [currentTool, setCurrentTool] = useState<'select' | 'polygon' | 'erase'>('select');
   const [isDrawing, setIsDrawing] = useState(false);
   const [tempPolygon, setTempPolygon] = useState<Point[]>([]);
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
@@ -61,6 +62,8 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragPolygonStart, setDragPolygonStart] = useState<Polygon | null>(null);
   const [activeVertexIndex, setActiveVertexIndex] = useState<number | null>(null);
+  const [isErasing, setIsErasing] = useState(false);
+  const [eraseBrushRadius, setEraseBrushRadius] = useState(20);
   const [showHelp, setShowHelp] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -166,9 +169,18 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   const finishPolygon = () => {
     console.log('finishPolygon called with tempPolygon:', tempPolygon);
     if (tempPolygon.length >= 3) {
+      // Check if last point snaps to an existing vertex (for merging)
+      const lastPos = tempPolygon[tempPolygon.length - 1];
+      const nearby = findNearbyVertex(lastPos);
+      let finalPoints = [...tempPolygon];
+      if (nearby) {
+        // Snap last point to the existing vertex
+        finalPoints[finalPoints.length - 1] = { ...nearby.point };
+      }
+      
       const newPolygon: Polygon = {
         id: createId(),
-        points: [...tempPolygon]
+        points: finalPoints
       };
       console.log('finishPolygon adding newPolygon:', newPolygon);
       updatePolygonsAndHistory([...polygons, newPolygon]);
@@ -178,6 +190,24 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
     } else {
       showToast('warning', 'Polygon needs at least 3 points');
     }
+  };
+
+  const mergeAllPolygons = () => {
+    if (polygons.length < 2) {
+      showToast('warning', 'Need at least 2 polygons to merge');
+      return;
+    }
+    
+    // Combine all polygon points into one polygon
+    const allPoints = polygons.flatMap(p => p.points);
+    const mergedPolygon: Polygon = {
+      id: createId(),
+      points: allPoints
+    };
+    
+    updatePolygonsAndHistory([mergedPolygon]);
+    setSelectedPolygonId(mergedPolygon.id);
+    showToast('success', `Merged ${polygons.length} polygons into one`);
   };
 
   const deleteSelectedPolygon = () => {
@@ -193,16 +223,80 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
     setSelectedPolygonId(null);
   };
 
+  const eraseVerticesAtPosition = (pos: Point) => {
+    if (polygons.length === 0) return;
+    
+    // Find polygon to erase from (selected one first, then any)
+    let targetPolygon = polygons.find(p => p.id === selectedPolygonId);
+    if (!targetPolygon) {
+      // Find polygon under cursor
+      targetPolygon = [...polygons].reverse().find(polygon => {
+        return isPointInPolygon(pos, polygon.points);
+      });
+    }
+    
+    if (!targetPolygon) return;
+    
+    // Find vertices within erase radius
+    const verticesToErase: number[] = [];
+    targetPolygon.points.forEach((point, index) => {
+      const dx = pos.x - point.x;
+      const dy = pos.y - point.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance <= eraseBrushRadius) {
+        verticesToErase.push(index);
+      }
+    });
+    
+    if (verticesToErase.length === 0) return;
+    
+    // Remove vertices (in reverse order to maintain indices)
+    const newPoints = targetPolygon.points.filter((_, index) => !verticesToErase.includes(index));
+    
+    // If less than 3 points remain, remove the entire polygon
+    if (newPoints.length < 3) {
+      const newPolygons = polygons.filter(p => p.id !== targetPolygon.id);
+      updatePolygonsAndHistory(newPolygons);
+      if (selectedPolygonId === targetPolygon.id) {
+        setSelectedPolygonId(null);
+      }
+      showToast('info', 'Polygon removed (too few points)');
+    } else {
+      // Update polygon with remaining points
+      const newPolygons = polygons.map(p => 
+        p.id === targetPolygon.id ? { ...p, points: newPoints } : p
+      );
+      updatePolygonsAndHistory(newPolygons);
+      showToast('success', `Erased ${verticesToErase.length} point${verticesToErase.length > 1 ? 's' : ''}`);
+    }
+  };
+
+  // Find a vertex from any polygon (except excluded) that is close to given position
+  const findNearbyVertex = (pos: Point, excludePolygonId?: string) => {
+    for (const poly of polygons) {
+      if (poly.id === excludePolygonId) continue;
+      for (let i = 0; i < poly.points.length; i++) {
+        const dx = pos.x - poly.points[i].x;
+        const dy = pos.y - poly.points[i].y;
+        if (Math.sqrt(dx*dx + dy*dy) <= 12) {
+          return { polygonId: poly.id, vertexIndex: i, point: poly.points[i] };
+        }
+      }
+    }
+    return null;
+  };
+
   const handleSave = async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     
     console.log('handleSave: polygons:', polygons, 'tempPolygon:', tempPolygon, 'isDrawing:', isDrawing);
     
-    // If there are polygons, combine them (or just take the first one for now)
+    // Combine ALL polygon points into one polygon for saving
     let pointsToSave: Point[] = [];
     if (polygons.length > 0) {
-      pointsToSave = polygons[0].points;
+      // Merge all polygon points together into one combined polygon
+      pointsToSave = polygons.flatMap(p => p.points);
     } else if (tempPolygon.length >= 3) {
       // If user was still drawing, save the temp polygon
       pointsToSave = tempPolygon;
@@ -244,8 +338,21 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
     }
 
     if (currentTool === 'polygon') {
-      setTempPolygon(prev => [...prev, pos]);
+      // Check if clicking near an existing polygon's vertex (for merging)
+      const nearby = findNearbyVertex(pos);
+      if (nearby) {
+        // Snap to the existing vertex position
+        setTempPolygon(prev => [...prev, { ...nearby.point }]);
+      } else {
+        setTempPolygon(prev => [...prev, pos]);
+      }
       setIsDrawing(true);
+      return;
+    }
+
+    if (currentTool === 'erase') {
+      setIsErasing(true);
+      eraseVerticesAtPosition(pos);
       return;
     }
 
@@ -315,6 +422,11 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
     const pos = getMousePos(e);
     setCursorPos(pos);
     setLiveMousePos(pos);
+
+    // Continuous erasing while dragging in erase mode
+    if (isErasing && currentTool === 'erase') {
+      eraseVerticesAtPosition(pos);
+    }
 
     if (isDragging && dragPolygonStart && dragStart) {
       const dx = pos.x - dragStart.x;
@@ -405,6 +517,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
     switch(e.key.toLowerCase()) {
       case 'v': return setCurrentTool('select');
       case 'p': return setCurrentTool('polygon');
+      case 'e': return setCurrentTool('erase');
       case 'g': return setGridSnap(!gridSnap);
     }
     
@@ -567,6 +680,24 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
       }
     });
     
+    // Draw erase brush cursor
+    if (currentTool === 'erase' && liveMousePos) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(liveMousePos.x, liveMousePos.y, eraseBrushRadius, 0, 2 * Math.PI);
+      ctx.strokeStyle = 'rgba(220, 38, 38, 0.6)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 3]);
+      ctx.stroke();
+      
+      // Draw inner circle
+      ctx.beginPath();
+      ctx.arc(liveMousePos.x, liveMousePos.y, 2, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(220, 38, 38, 0.8)';
+      ctx.fill();
+      ctx.restore();
+    }
+    
     // Draw temp polygon
     if (currentTool === 'polygon' && tempPolygon.length > 0 && liveMousePos) {
       ctx.save();
@@ -690,6 +821,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
                 <ul className="text-xs text-[#64748B] space-y-1">
                   <li>• <strong>Select (V)</strong>: Move polygons or drag vertices</li>
                   <li>• <strong>Polygon (P)</strong>: Click points, press Enter to finish</li>
+                  <li>• <strong>Erase (E)</strong>: Click/drag to remove vertices within brush radius</li>
                   <li>• <strong>Pan Workspace</strong>: Middle click and drag OR hold Spacebar + drag</li>
                   <li>• <strong>Zoom to Cursor</strong>: Ctrl + scroll wheel</li>
                   <li>• <strong>Undo / Redo</strong>: Ctrl+Z / Ctrl+Y</li>
@@ -720,6 +852,13 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
               title="Polygon (P)"
             >
               <Edit3 size={18} />
+            </button>
+            <button
+              onClick={() => setCurrentTool('erase')}
+              className={`p-2 rounded-lg transition-all border-none cursor-pointer ${currentTool === 'erase' ? 'bg-[#EFF4FF] text-[#2563EB] font-semibold border border-[#B8C8F0]' : 'text-[#64748B] hover:text-[#0F172A] hover:bg-white'}`}
+              title="Erase (E)"
+            >
+              <Eraser size={18} />
             </button>
           </div>
           
@@ -774,6 +913,17 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
               <Redo2 size={16} />
             </button>
           </div>
+          
+          {/* Merge Button */}
+          {polygons.length >= 2 && (
+            <button
+              onClick={mergeAllPolygons}
+              className="px-3 py-1.5 bg-[#EFF4FF] text-[#2563EB] rounded-xl text-xs font-semibold border border-[#B8C8F0] hover:bg-[#EFF4FF] transition-all cursor-pointer"
+              title="Merge all polygons into one"
+            >
+              Merge {polygons.length} Polygons
+            </button>
+          )}
           
           {/* Actions */}
           <div className="flex items-center gap-2 ml-auto">
