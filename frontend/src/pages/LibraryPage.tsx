@@ -665,15 +665,15 @@ export default function LibraryPage() {
                       }}
                       className="w-full rounded-2xl border border-border bg-white px-3 py-2 text-sm text-ink"
                     >
+                      {selectedCategory && (
+                        <option value="__add_new__" className="text-accent font-medium">+ Add new subcategory</option>
+                      )}
                       {subcategoryOptions.length > 0 ? (
                         subcategoryOptions.map((sub) => (
                           <option key={sub.slug} value={sub.name}>{sub.name}</option>
                         ))
                       ) : (
                         <option value="General">General</option>
-                      )}
-                      {selectedCategory && (
-                        <option value="__add_new__" className="text-accent font-medium">+ Add new subcategory</option>
                       )}
                     </select>
                   </label>

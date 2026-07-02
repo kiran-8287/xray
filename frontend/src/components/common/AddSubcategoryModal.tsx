@@ -89,12 +89,6 @@ export default function AddSubcategoryModal({ isOpen, onClose, onAdd, categoryNa
                 <p className="mt-1.5 text-xs text-rose-600">{error}</p>
               )}
             </div>
-
-            <div className="bg-surface/50 border border-border rounded-lg p-3">
-              <p className="text-xs text-muted leading-relaxed">
-                <span className="font-medium text-ink">Tip:</span> The subcategory will be automatically converted to a URL-friendly format (lowercase, hyphens instead of spaces).
-              </p>
-            </div>
           </div>
 
           <div className="flex gap-2 justify-end mt-5">
