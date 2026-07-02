@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import ValidRegionEditor from "./ValidRegionEditor";
-import { Trash2, Edit3, CheckSquare, Sparkles, Loader2, X } from "lucide-react";
+import { Trash2, Edit3, CheckSquare, Sparkles, Loader2, X, Plus } from "lucide-react";
 import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName, clearCustomSubcategoriesCache } from "../../config/categories";
 import AddSubcategoryModal from "../common/AddSubcategoryModal";
 
@@ -210,6 +210,25 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   // Tag selection state for inline editing
   const [activeTagRow, setActiveTagRow] = useState<number | null>(null);
   const tagSelectorRef = useRef<HTMLDivElement>(null);
+
+  // Image preview modal state
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewFileName, setPreviewFileName] = useState<string>("");
+  const [previewIndex, setPreviewIndex] = useState<number>(-1);
+
+  // Close preview on ESC key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && previewImage) {
+        setPreviewImage(null);
+      }
+    };
+
+    if (previewImage) {
+      document.addEventListener('keydown', handleEscape);
+      return () => document.removeEventListener('keydown', handleEscape);
+    }
+  }, [previewImage]);
 
   // Mass tag assignment state
   const [showMassTagSelector, setShowMassTagSelector] = useState(false);
@@ -619,7 +638,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             className="px-4 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
             title="Assign tags to all bag items (or selected ones)"
           >
-            <X size={14} />
+            <Plus size={14} />
             Mass Tags
           </button>
           
@@ -764,11 +783,21 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                     {idx + 1}
                   </td>
                   <td className="py-3 px-3 align-top">
-                    <ThumbnailWithRegion
-                      src={preview}
-                      validRegionPoints={s.valid_region_points}
-                      alt={file.name}
-                    />
+                    <button
+                      onClick={() => {
+                        setPreviewImage(preview);
+                        setPreviewFileName(file.name);
+                        setPreviewIndex(idx);
+                      }}
+                      className="cursor-pointer hover:opacity-80 transition-opacity"
+                      title="Click to enlarge"
+                    >
+                      <ThumbnailWithRegion
+                        src={preview}
+                        validRegionPoints={s.valid_region_points}
+                        alt={file.name}
+                      />
+                    </button>
                   </td>
                   <td className="py-3 px-3 align-top">
                     <div className="space-y-2">
@@ -899,10 +928,23 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                                 return (
                                   <span
                                     key={tagSlug}
-                                    className="inline-flex items-center px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-medium"
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-medium"
                                     title={tagName}
                                   >
                                     {tagName}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const copy = [...staged];
+                                        const newTags = copy[idx].tags?.filter((t: string) => t !== tagSlug) || [];
+                                        copy[idx] = { ...copy[idx], tags: newTags };
+                                        setStaged(copy);
+                                      }}
+                                      className="hover:text-rose-600 transition-colors"
+                                    >
+                                      <X size={10} />
+                                    </button>
                                   </span>
                                 );
                               })}
@@ -1073,6 +1115,169 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         onAdd={handleAddCustomSubcategory}
         categoryName={LIBRARIES.find(lib => lib.slug === addingSubcategoryFor)?.name || addingSubcategoryFor}
       />
+
+      {/* Image Preview Modal */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setPreviewImage(null)}
+        >
+          {/* Close button - positioned fixed to stay in top-right corner */}
+          <button
+            onClick={() => setPreviewImage(null)}
+            className="fixed top-4 right-4 z-[110] p-2 bg-black/80 hover:bg-black rounded-full text-white transition-colors shadow-lg"
+            title="Close preview"
+          >
+            <X size={24} />
+          </button>
+          
+          <div className="relative flex items-center gap-20 max-w-7xl max-h-[90vh] p-4">
+            
+            {/* Navigation buttons */}
+            {previewIndex > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const prevIdx = previewIndex - 1;
+                  const prevItem = staged[prevIdx];
+                  const prevPreview = prevItem.preProcessed
+                    ? `http://localhost:8080/data/library_images/${prevItem.preGeneratedFilepath}`
+                    : URL.createObjectURL(prevItem.file as File);
+                  setPreviewImage(prevPreview);
+                  setPreviewFileName((prevItem.file as File).name);
+                  setPreviewIndex(prevIdx);
+                }}
+                className="absolute -left-10 top-1/2 -translate-y-1/2 z-10 p-3 bg-black/70 hover:bg-black/90 rounded-full text-white transition-colors"
+                title="Previous image"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            )}
+            
+            {previewIndex < staged.length - 1 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextIdx = previewIndex + 1;
+                  const nextItem = staged[nextIdx];
+                  const nextPreview = nextItem.preProcessed
+                    ? `http://localhost:8080/data/library_images/${nextItem.preGeneratedFilepath}`
+                    : URL.createObjectURL(nextItem.file as File);
+                  setPreviewImage(nextPreview);
+                  setPreviewFileName((nextItem.file as File).name);
+                  setPreviewIndex(nextIdx);
+                }}
+                className="absolute left-[calc(50%+6px)] top-1/2 -translate-y-1/2 z-10 p-3 bg-black/70 hover:bg-black/90 rounded-full text-white transition-colors"
+                title="Next image"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            )}
+            
+            {/* Image on the left */}
+            <img
+              src={previewImage}
+              alt={previewFileName}
+              className="max-w-[50%] max-h-[75vh] object-contain rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            
+            {/* Tags panel on the right */}
+            <div className="w-64 bg-white rounded-lg shadow-2xl p-4 max-h-[75vh] overflow-y-auto">
+              <div className="text-sm font-semibold text-ink mb-1">Tags</div>
+              <div className="text-xs text-muted mb-3">Select non-threat items:</div>
+              
+              {/* Find the current staged item index to get/set tags */}
+              {(() => {
+                const currentIdx = staged.findIndex(s => {
+                  const file = s.file as File;
+                  const preview = s.preProcessed
+                    ? `http://localhost:8080/data/library_images/${s.preGeneratedFilepath}`
+                    : URL.createObjectURL(file);
+                  return preview === previewImage;
+                });
+                
+                if (currentIdx === -1) return null;
+                
+                const currentTags = staged[currentIdx].tags || [];
+                
+                return (
+                  <>
+                    <div className="space-y-1">
+                      {LIBRARIES.find(l => l.slug === "non-threats")?.subcategories.map((sub) => {
+                        const isSelected = currentTags.includes(sub.slug);
+                        return (
+                          <label
+                            key={sub.slug}
+                            className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm ${
+                              isSelected
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "hover:bg-surface"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                const copy = [...staged];
+                                const newTags = e.target.checked
+                                  ? [...currentTags, sub.slug]
+                                  : currentTags.filter((t: string) => t !== sub.slug);
+                                copy[currentIdx] = { ...copy[currentIdx], tags: newTags };
+                                setStaged(copy);
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="rounded border-gray-300"
+                            />
+                            <span>{sub.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    
+                    {currentTags.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-border">
+                        <div className="text-xs font-medium text-muted mb-2">Selected Tags:</div>
+                        <div className="flex flex-wrap gap-1">
+                          {currentTags.map((tagSlug: string) => {
+                            const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                            return (
+                              <span
+                                key={tagSlug}
+                                className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs font-medium"
+                              >
+                                {tagName}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const copy = [...staged];
+                                    const newTags = currentTags.filter((t: string) => t !== tagSlug);
+                                    copy[currentIdx] = { ...copy[currentIdx], tags: newTags };
+                                    setStaged(copy);
+                                  }}
+                                  className="hover:text-rose-600 transition-colors"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
