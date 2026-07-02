@@ -1,4 +1,5 @@
 // Category configuration - Single source of truth for all category/subcategory data
+import API_BASE_URL from './api';
 export interface LibraryCategory {
   slug: string;
   name: string;
@@ -172,7 +173,7 @@ function initializeCache() {
 export async function loadCustomSubcategories(): Promise<void> {
   initializeCache();
   try {
-    const res = await fetch('/api/custom-subcategories');
+    const res = await fetch(`${API_BASE_URL}/api/custom-subcategories`);
     if (res.ok) {
       const data = await res.json();
       for (const [cat, subs] of Object.entries(data.customSubcategories || {})) {
