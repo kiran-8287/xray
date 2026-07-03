@@ -311,18 +311,14 @@ export default function CollagePage() {
             name: obj.name,
             library: obj.library,
             filepath: obj.filepath,
-            // Original center coordinates (absolute)
-            center: { x: obj.transform.x, y: obj.transform.y },
-            // Center coordinates relative to bag's top-left
-            relativeCenter,
-            // Original dimensions
+            // Center coordinates relative to bag's top-left (ONLY store these)
+            center: relativeCenter,
+            // Dimensions
             size: { width: obj.transform.width, height: obj.transform.height },
             // Rotation
             rotation: obj.transform.rotation,
-            // 4 corner coordinates (absolute)
-            corners,
-            // 4 corner coordinates (relative to bag's top-left)
-            relativeCorners,
+            // 4 corner coordinates relative to bag's top-left (ONLY store these)
+            corners: relativeCorners,
             originalPixelValue: obj.originalPixelValue,
             currentPixelValue: obj.currentPixelValue,
             oldPixelValue: obj.oldPixelValue,

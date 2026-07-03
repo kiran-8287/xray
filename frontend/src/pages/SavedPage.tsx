@@ -46,11 +46,12 @@ const BAG_SUBCATEGORIES = getLibrarySubcategories("bags");
 // Threat subcategories for filter multi-select
 const THREAT_SUBCATEGORIES = getLibrarySubcategories("threats");
 
-function SavedLayoutPreview({ objects }: { objects: LayoutObject[] }) {
+function SavedLayoutPreview({ objects, bagOrigin }: { objects: LayoutObject[]; bagOrigin?: { x: number; y: number } }) {
   const previewRef = useRef<HTMLDivElement>(null);
   const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
 
   // Convert saved layout format (center/size/rotation) to transform format
+  // Coordinates are relative to bag's top-left corner, so we add bagOrigin offset
   const sortedObjects = [...objects]
     .map((obj) => {
       if (obj.transform) return obj;
@@ -59,8 +60,8 @@ function SavedLayoutPreview({ objects }: { objects: LayoutObject[] }) {
         return {
           ...obj,
           transform: {
-            x: obj.center.x,
-            y: obj.center.y,
+            x: (bagOrigin?.x || 0) + obj.center.x,
+            y: (bagOrigin?.y || 0) + obj.center.y,
             width: obj.size.width,
             height: obj.size.height,
             rotation: obj.rotation || 0,
@@ -542,42 +543,29 @@ export default function SavedPage() {
                    {/* Left: Preview */}
                    <div className="min-h-0 border-b border-border bg-surface p-4 lg:border-b-0 lg:border-r">
                      <div className="h-full rounded-2xl overflow-hidden border border-border bg-white">
-                       <SavedLayoutPreview objects={getObjects(selectedLayout)} />
+                       <SavedLayoutPreview 
+                         objects={getObjects(selectedLayout)} 
+                         bagOrigin={selectedLayout.layout_json?.bagOrigin}
+                       />
                      </div>
                    </div>
 
                    {/* Right: Annotation Details */}
                    <div className="min-h-0 overflow-y-auto p-5">
                      <div className="space-y-4">
-                       <div>
-                         <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Annotation</h3>
-                         <div className="rounded-2xl border border-border bg-white p-3">
-                           <p className="text-sm text-ink">{selectedLayout.layout_json?.name || "—"}</p>
-                         </div>
-                       </div>
-
-                       {selectedLayout.layout_json?.bag && (
-                         <div>
-                           <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Bag</h3>
-                           <div className="rounded-2xl border border-border bg-white p-3">
-                             <p className="text-sm font-mono text-accent-sky">{selectedLayout.layout_json.bag.name}</p>
-                             <p className="text-xs text-muted mt-1">ID: {selectedLayout.layout_json.bag.id}</p>
-                           </div>
-                         </div>
-                       )}
-
                        {selectedLayout.layout_json?.objects?.length > 0 && (
                          <div>
                            <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Objects in Layout</h3>
                            <div className="space-y-2">
                              {selectedLayout.layout_json.objects.map((obj: any, idx: number) => {
-                               const transform = obj.transform || (obj.center && obj.size ? {
+                               // Use center (now relative to bag origin) and size
+                               const transform = obj.center && obj.size ? {
                                  x: obj.center.x,
                                  y: obj.center.y,
                                  width: obj.size.width,
                                  height: obj.size.height,
                                  rotation: obj.rotation || 0
-                               } : null);
+                               } : null;
                                
                                return (
                                  <div key={idx} className="rounded-xl border border-border bg-white p-2.5">
@@ -591,7 +579,6 @@ export default function SavedPage() {
                                        {obj.library}
                                      </span>
                                    </div>
-                                   <p className="text-[10px] font-mono text-muted mb-1.5">ID: {obj.id}</p>
                                    {transform && (
                                      <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono">
                                        <div className="bg-surface rounded px-1.5 py-1">
