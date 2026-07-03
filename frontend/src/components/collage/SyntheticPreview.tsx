@@ -7,9 +7,10 @@ const IMAGE_BASE_URL = "http://localhost:8080/data/library_images/";
 
 interface SyntheticPreviewProps {
   objects: SceneObject[];
-  bagName: string;
-  threatName?: string;
-  othersCount: number;
+  combinationId: string;
+  bagId: string;
+  threatId?: string;
+  otherIds: string[];
 }
 
 /**
@@ -18,7 +19,7 @@ interface SyntheticPreviewProps {
  * multiply blending at reduced opacity. Uses DOM positioning (not canvas)
  * to match the CanvasArea rendering exactly.
  */
-export default function SyntheticPreview({ objects, bagName, threatName, othersCount }: SyntheticPreviewProps) {
+export default function SyntheticPreview({ objects, combinationId, bagId, threatId, otherIds }: SyntheticPreviewProps) {
   const [allLoaded, setAllLoaded] = useState(false);
   const loadedRef = useRef(new Set<string>());
 
@@ -35,7 +36,7 @@ export default function SyntheticPreview({ objects, bagName, threatName, othersC
   // Scale factor to fit 800x600 into preview
   // We want it to fill nicely in the card
   return (
-    <div className="bg-panel rounded-2xl border border-border overflow-hidden shadow-card transition-colors duration-200 hover:border-accent/40 hover:bg-accent/5">
+    <div className="bg-panel rounded-2xl border border-border overflow-hidden shadow-card">
       <div className="bg-surface p-2 flex items-center justify-center h-40 overflow-hidden relative">
         {/* Container at 4:3 aspect ratio scaled to fit */}
         <div className="relative w-full h-full flex items-center justify-center">
@@ -104,20 +105,18 @@ export default function SyntheticPreview({ objects, bagName, threatName, othersC
       <div className="px-4 pb-4 pt-2">
         <div className="flex items-center justify-between gap-3 mb-2">
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-ink truncate" title={bagName}>{bagName}</p>
-            <p className="text-xs text-muted mt-0.5">
-              {othersCount} other item{othersCount !== 1 ? "s" : ""}
-              {threatName && <span className="ml-1.5 text-rose-500">· 1 threat</span>}
-            </p>
+            <p className="text-sm font-semibold text-accent-sky font-mono truncate" title={combinationId}>{combinationId}</p>
           </div>
         </div>
-        {threatName && (
-          <div className="flex items-center gap-1.5">
-            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200 truncate max-w-full">
-              {threatName}
-            </span>
-          </div>
-        )}
+        <div className="space-y-1">
+          <p className="text-[10px] font-mono text-muted truncate" title={bagId}>Bag: {bagId}</p>
+          {threatId && (
+            <p className="text-[10px] font-mono text-rose-600 truncate" title={threatId}>Threat: {threatId}</p>
+          )}
+          {otherIds.length > 0 && (
+            <p className="text-[10px] font-mono text-muted truncate" title={otherIds.join(", ")}>Others: {otherIds.join(", ")}</p>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -148,8 +148,8 @@ export default function ItemCard({
           {formatDisplayName(item.name)}
         </h5>
         
-        {/* Tags Display */}
-        {item.tags && item.tags.length > 0 && (
+        {/* Tags Display - only for bags */}
+        {item.category === "bags" && item.tags && item.tags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {item.tags.map((tagSlug) => {
               const tagName = tagSlug

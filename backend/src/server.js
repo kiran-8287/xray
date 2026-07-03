@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { generateValidRegion } from "./lib/autoValidRegion.js";
+import { renderSceneAsync } from "./lib/renderCanvas.js";
 import Jimp from "jimp";
 import WorkerPool from "./lib/workerPool.js";
 import {
@@ -288,6 +289,88 @@ app.get('/api/saved-layouts', async (_req, res) => {
     try {
         const layouts = await getSavedLayouts();
         res.json({ ok: true, layouts });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Filtered/paginated saved layouts endpoint
+app.get('/api/saved-layouts/filtered', async (req, res) => {
+    try {
+      const page = Math.max(1, parseInt(req.query.page) || 1);
+      const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+      
+      // New filter parameters
+      const bagIds = req.query.bagIds ? String(req.query.bagIds).split(',').map(s => s.trim()).filter(Boolean) : [];
+      const objectIds = req.query.objectIds ? String(req.query.objectIds).split(',').map(s => s.trim()).filter(Boolean) : [];
+      const dateFrom = req.query.dateFrom ? String(req.query.dateFrom) : '';
+      const dateTo = req.query.dateTo ? String(req.query.dateTo) : '';
+      
+      // Legacy filters (kept for backward compatibility)
+      const bagType = req.query.bagType ? String(req.query.bagType).toLowerCase() : '';
+      const threatTypes = req.query.threatTypes ? String(req.query.threatTypes).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+
+      const allLayouts = await getSavedLayouts();
+
+      // Filter layouts based on criteria (OR logic)
+      const filtered = allLayouts.filter((layout) => {
+        try {
+          const objects = layout.layout_json?.objects || [];
+          if (!objects.length) return false;
+
+          // Extract bag and non-bag objects
+          const bagObjs = objects.filter(o => (o.library || '').toLowerCase().includes('bag'));
+          const nonBagObjs = objects.filter(o => !(o.library || '').toLowerCase().includes('bag'));
+          
+          // Get IDs from objects
+          const layoutBagIds = bagObjs.map(o => o.id);
+          const layoutObjectIds = nonBagObjs.map(o => o.id);
+
+          // Date range filter (AND condition)
+          if (dateFrom || dateTo) {
+            const layoutDate = new Date(layout.created_at);
+            if (dateFrom && layoutDate < new Date(dateFrom)) return false;
+            if (dateTo && layoutDate > new Date(dateTo + 'T23:59:59')) return false;
+          }
+
+          // Build OR conditions for bags and objects
+          const bagMatch = bagIds.length === 0 || bagIds.some(bid => layoutBagIds.includes(bid));
+          const objectMatch = objectIds.length === 0 || objectIds.some(oid => layoutObjectIds.includes(oid));
+          
+          // OR logic: match if ANY of the selected bags OR ANY of the selected objects are present
+          const matchesSelection = bagMatch || objectMatch;
+          
+          // Legacy filters (AND logic for backward compatibility)
+          const legacyBagMatch = !bagType || bagObjs.some(b => (b.name || '').toLowerCase().includes(bagType));
+          const legacyThreatMatch = !threatTypes.length || nonBagObjs.some(o => {
+            const name = (o.name || '').toLowerCase();
+            return threatTypes.some(tt => name.includes(tt));
+          });
+
+          // Combine: new filters (OR) AND legacy filters (AND)
+          return matchesSelection && legacyBagMatch && legacyThreatMatch;
+        } catch {
+          return false;
+        }
+      });
+
+        const total = filtered.length;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        const safePage = Math.min(page, totalPages);
+        const start = (safePage - 1) * limit;
+        const pagedLayouts = filtered.slice(start, start + limit);
+
+        res.json({
+            ok: true,
+            layouts: pagedLayouts,
+            pagination: {
+                page: safePage,
+                limit,
+                total,
+                totalPages,
+            }
+        });
     } catch (err) {
         console.error(err);
         res.status(500).json({ ok: false, error: String(err) });
@@ -699,6 +782,43 @@ app.get("/api/items/:id", async (req, res) => {
     console.error(err);
     res.status(500).json({ ok: false, error: String(err) });
   }
+});
+
+// Render and save a collage combination as a PNG image
+app.post("/api/render-and-save-collage", async (req, res) => {
+    try {
+        const { objects, name } = req.body;
+        if (!objects || !Array.isArray(objects) || objects.length === 0) {
+            return res.status(400).json({ ok: false, error: "Missing or invalid objects array" });
+        }
+        if (!name) {
+            return res.status(400).json({ ok: false, error: "Missing name" });
+        }
+
+        // Sanitize the filename - use the synthesized ID directly (already unique)
+        const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+        const filename = `${safeName}.png`;
+        const outputPath = path.join(collageImagesRoot, filename);
+
+        console.log(`[render-and-save-collage] Rendering scene "${name}" → ${filename}`);
+
+        // Render the scene to a PNG buffer
+        const pngBuffer = await renderSceneAsync(objects, 800, 600);
+
+        // Write to disk
+        await fs.writeFile(outputPath, pngBuffer);
+
+        console.log(`[render-and-save-collage] Saved: ${filename} (${pngBuffer.length} bytes)`);
+
+        res.json({
+            ok: true,
+            filename,
+            url: `/data/collage_images/${filename}`,
+        });
+    } catch (err) {
+        console.error("[render-and-save-collage] Error:", err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
 });
 
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;

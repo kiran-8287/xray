@@ -151,6 +151,14 @@ function ScrollableSelect({ value, options, onChange, disabled, placeholder, onA
       {open && (
         <div className="absolute top-full mt-0.5 left-0 right-0 z-50 bg-white border border-border rounded-lg shadow-xl">
           <div className="max-h-[232px] overflow-y-auto">
+            {category && onAddNew && (
+              <div
+                onClick={() => { onAddNew(); setOpen(false); }}
+                className="p-1.5 text-xs cursor-pointer text-accent font-medium hover:bg-surface border-b border-border"
+              >
+                + Add new
+              </div>
+            )}
             <div
               onClick={() => { onChange(''); setOpen(false); }}
               className={`p-1.5 text-xs cursor-pointer hover:bg-surface ${!value ? 'bg-accent/10 text-accent' : ''}`}
@@ -166,14 +174,6 @@ function ScrollableSelect({ value, options, onChange, disabled, placeholder, onA
                 {opt.name}
               </div>
             ))}
-            {category && onAddNew && (
-              <div
-                onClick={() => { onAddNew(); setOpen(false); }}
-                className="p-1.5 text-xs cursor-pointer text-accent font-medium hover:bg-surface border-t border-border"
-              >
-                + Add new
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -564,7 +564,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   };
 
   return (
-    <div className="w-full max-w-5xl mx-auto flex flex-col">
+    <div className="w-full max-w-4xl mx-auto flex flex-col">
       <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-nav flex-shrink-0">
         <span className="text-sm font-semibold text-ink">Staged Items</span>
         <span className="bg-surface text-muted text-xs font-mono px-2.5 py-0.5 rounded-full border border-border">{staged.length}</span>
@@ -756,7 +756,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
               </th>
               <th className="text-left py-3 px-3 w-12 text-center">#</th>
               <th className="text-left py-3 px-3 w-32">Image</th>
-              <th className="text-left py-3 px-3">Category / Subcategory / Valid Region</th>
+              <th className="text-left py-3 px-3">Category</th>
+              <th className="text-left py-3 px-3">Subcategory</th>
               <th className="text-right py-3 px-3 w-20">Actions</th>
             </tr>
           </thead>
@@ -801,61 +802,19 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   </td>
                   <td className="py-3 px-3 align-top">
                     <div className="space-y-2">
-                      {/* First line: Category, Subcategory, Auto, Set buttons */}
-                      <div className="flex items-center justify-between gap-4">
-                        <select
-                          className="w-32 p-1.5 border border-border rounded-lg text-xs bg-white"
-                          value={s.category || ""}
-                          onChange={(e) => handleInlineCategoryChange(idx, e.target.value)}
-                          disabled={uploading}
-                        >
-                          <option value="">NONE</option>
-                          {categoryOptions.map((cat) => (
-                            <option key={cat.slug} value={cat.slug}>{cat.name}</option>
-                          ))}
-                        </select>
-                        <div className="w-40">
-                          <ScrollableSelect
-                            value={s.subcategory || ""}
-                            options={inlineSubOptions}
-                            onChange={(val) => handleInlineSubcategoryChange(idx, val)}
-                            disabled={uploading || !s.category}
-                            placeholder="NONE"
-                            onAddNew={s.category ? () => openAddSubcategoryModal(s.category) : undefined}
-                            category={s.category}
-                          />
-                        </div>
-                        {isBags ? (
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleAutoGenerateRegion(idx)}
-                              disabled={autoGeneratingIndices.has(idx)}
-                              className="text-xs px-3 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-                              title="Auto-generate valid region from pixel data"
-                            >
-                              {autoGeneratingIndices.has(idx) ? (
-                                <Loader2 size={12} className="animate-spin" />
-                              ) : (
-                                <Sparkles size={12} />
-                              )}
-                              Auto
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleInlineValidRegion(idx)}
-                              className="text-xs px-3 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1.5"
-                            >
-                              <Edit3 size={12} />
-                              {s.valid_region_points ? "Edit" : "Set"}
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted/50">—</span>
-                        )}
-                      </div>
+                      <select
+                        className="w-32 p-1.5 border border-border rounded-lg text-xs bg-white"
+                        value={s.category || ""}
+                        onChange={(e) => handleInlineCategoryChange(idx, e.target.value)}
+                        disabled={uploading}
+                      >
+                        <option value="">NONE</option>
+                        {categoryOptions.map((cat) => (
+                          <option key={cat.slug} value={cat.slug}>{cat.name}</option>
+                        ))}
+                      </select>
                       
-                      {/* Tags Section - Below the first line */}
+                      {/* Tags Section - Below the category dropdown */}
                       {isBags && (
                         <div>
                           <button
@@ -957,7 +916,48 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       )}
                     </div>
                   </td>
-                  <td className="py-3 px-3 text-right align-top">
+                  <td className="py-3 px-3 align-top">
+                    <ScrollableSelect
+                      value={s.subcategory || ""}
+                      options={inlineSubOptions}
+                      onChange={(val) => handleInlineSubcategoryChange(idx, val)}
+                      disabled={uploading || !s.category}
+                      placeholder="NONE"
+                      onAddNew={s.category ? () => openAddSubcategoryModal(s.category) : undefined}
+                      category={s.category}
+                    />
+                  </td>
+                  <td className="py-3 px-3 align-top">
+                    {isBags ? (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleAutoGenerateRegion(idx)}
+                          disabled={autoGeneratingIndices.has(idx)}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Auto-generate valid region from pixel data"
+                        >
+                          {autoGeneratingIndices.has(idx) ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <Sparkles size={12} />
+                          )}
+                          Auto
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleInlineValidRegion(idx)}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1.5"
+                        >
+                          <Edit3 size={12} />
+                          {s.valid_region_points ? "Edit" : "Set"}
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted/50">—</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-3 align-top">
                     <button
                       onClick={() => removeIndex(idx)}
                       className="p-1.5 rounded-lg text-rose-500"
@@ -1186,95 +1186,100 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
               onClick={(e) => e.stopPropagation()}
             />
             
-            {/* Tags panel on the right */}
-            <div className="w-64 bg-white rounded-lg shadow-2xl p-4 max-h-[75vh] overflow-y-auto">
-              <div className="text-sm font-semibold text-ink mb-1">Tags</div>
-              <div className="text-xs text-muted mb-3">Select non-threat items:</div>
+            {/* Tags panel on the right - only for bags */}
+            {(() => {
+              const currentIdx = staged.findIndex(s => {
+                const file = s.file as File;
+                const itemPreview = s.preProcessed
+                  ? `http://localhost:8080/data/library_images/${s.preGeneratedFilepath}`
+                  : URL.createObjectURL(file);
+                return itemPreview === previewImage;
+              });
               
-              {/* Find the current staged item index to get/set tags */}
-              {(() => {
-                const currentIdx = staged.findIndex(s => {
-                  const file = s.file as File;
-                  const preview = s.preProcessed
-                    ? `http://localhost:8080/data/library_images/${s.preGeneratedFilepath}`
-                    : URL.createObjectURL(file);
-                  return preview === previewImage;
-                });
-                
-                if (currentIdx === -1) return null;
-                
-                const currentTags = staged[currentIdx].tags || [];
-                
-                return (
-                  <>
-                    <div className="space-y-1">
-                      {LIBRARIES.find(l => l.slug === "non-threats")?.subcategories.map((sub) => {
-                        const isSelected = currentTags.includes(sub.slug);
-                        return (
-                          <label
-                            key={sub.slug}
-                            className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm ${
-                              isSelected
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "hover:bg-surface"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                const copy = [...staged];
-                                const newTags = e.target.checked
-                                  ? [...currentTags, sub.slug]
-                                  : currentTags.filter((t: string) => t !== sub.slug);
-                                copy[currentIdx] = { ...copy[currentIdx], tags: newTags };
-                                setStaged(copy);
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              className="rounded border-gray-300"
-                            />
-                            <span>{sub.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
+              const isBags = currentIdx !== -1 && staged[currentIdx]?.category === "bags";
+              
+              if (!isBags) return null;
+              
+              return (
+                <div className="w-64 bg-white rounded-lg shadow-2xl p-4 max-h-[75vh] overflow-y-auto">
+                  <div className="text-sm font-semibold text-ink mb-1">Tags</div>
+                  <div className="text-xs text-muted mb-3">Select non-threat items:</div>
+                  
+                  {(() => {
+                    const currentTags = staged[currentIdx].tags || [];
                     
-                    {currentTags.length > 0 && (
-                      <div className="mt-3 pt-3 border-t border-border">
-                        <div className="text-xs font-medium text-muted mb-2">Selected Tags:</div>
-                        <div className="flex flex-wrap gap-1">
-                          {currentTags.map((tagSlug: string) => {
-                            const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                    return (
+                      <>
+                        <div className="space-y-1">
+                          {LIBRARIES.find(l => l.slug === "non-threats")?.subcategories.map((sub) => {
+                            const isSelected = currentTags.includes(sub.slug);
                             return (
-                              <span
-                                key={tagSlug}
-                                className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs font-medium"
+                              <label
+                                key={sub.slug}
+                                className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm ${
+                                  isSelected
+                                    ? "bg-emerald-50 text-emerald-700"
+                                    : "hover:bg-surface"
+                                }`}
                               >
-                                {tagName}
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
                                     e.stopPropagation();
                                     const copy = [...staged];
-                                    const newTags = currentTags.filter((t: string) => t !== tagSlug);
+                                    const newTags = e.target.checked
+                                      ? [...currentTags, sub.slug]
+                                      : currentTags.filter((t: string) => t !== sub.slug);
                                     copy[currentIdx] = { ...copy[currentIdx], tags: newTags };
                                     setStaged(copy);
                                   }}
-                                  className="hover:text-rose-600 transition-colors"
-                                >
-                                  <X size={12} />
-                                </button>
-                              </span>
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="rounded border-gray-300"
+                                />
+                                <span>{sub.name}</span>
+                              </label>
                             );
                           })}
                         </div>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
+                        
+                        {currentTags.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-border">
+                            <div className="text-xs font-medium text-muted mb-2">Selected Tags:</div>
+                            <div className="flex flex-wrap gap-1">
+                              {currentTags.map((tagSlug: string) => {
+                                const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                return (
+                                  <span
+                                    key={tagSlug}
+                                    className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs font-medium"
+                                  >
+                                    {tagName}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const copy = [...staged];
+                                        const newTags = currentTags.filter((t: string) => t !== tagSlug);
+                                        copy[currentIdx] = { ...copy[currentIdx], tags: newTags };
+                                        setStaged(copy);
+                                      }}
+                                      className="hover:text-rose-600 transition-colors"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

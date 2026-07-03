@@ -1,5 +1,6 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Trash2, FolderOpen, Grid3X3, X } from "lucide-react";
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
+import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check } from "lucide-react";
+import { getLibrarySubcategories } from "../config/categories";
 
 interface SavedLayout {
   id: string;
@@ -22,19 +23,110 @@ interface LayoutObject {
     height: number;
     rotation: number;
   };
+  // Saved layout format (from layout_json.objects)
+  center?: { x: number; y: number };
+  size?: { width: number; height: number };
+  rotation?: number;
 }
 
-const CANVAS_W = 800;
-const CANVAS_H = 600;
-const IMAGE_BASE_URL = "http://localhost:8080/data/library_images/";
+interface PaginationInfo {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
 
-function SavedLayoutPreview({ objects }: { objects: LayoutObject[] }) {
+const IMAGE_BASE_URL = "http://localhost:8080/data/library_images/";
+const API_BASE = "http://localhost:8080";
+
+// Bag subcategories for filter dropdown
+const BAG_SUBCATEGORIES = getLibrarySubcategories("bags");
+// Threat subcategories for filter multi-select
+const THREAT_SUBCATEGORIES = getLibrarySubcategories("threats");
+
+function SavedLayoutPreview({ objects, bagOrigin }: { objects: LayoutObject[]; bagOrigin?: { x: number; y: number } }) {
   const previewRef = useRef<HTMLDivElement>(null);
   const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
 
+  // Convert saved layout format (center/size/rotation) to transform format
+  // Coordinates are relative to bag's top-left corner, so we add bagOrigin offset
   const sortedObjects = [...objects]
-    .filter((obj) => obj.transform)
+    .map((obj) => {
+      if (obj.transform) return obj;
+      // Convert from saved format to transform format
+      if (obj.center && obj.size) {
+        return {
+          ...obj,
+          transform: {
+            x: (bagOrigin?.x || 0) + obj.center.x,
+            y: (bagOrigin?.y || 0) + obj.center.y,
+            width: obj.size.width,
+            height: obj.size.height,
+            rotation: obj.rotation || 0,
+          },
+        };
+      }
+      return null;
+    })
+    .filter((obj): obj is LayoutObject => obj !== null)
     .sort((a, b) => (a.layer ?? 0) - (b.layer ?? 0));
+
+  // Calculate dynamic canvas size based on objects (especially the bag)
+  const canvasSize = React.useMemo(() => {
+    if (sortedObjects.length === 0) {
+      return { width: 800, height: 600 };
+    }
+
+    // Find the bag object to use as base
+    const bagObj = sortedObjects.find(obj => 
+      (obj.library || "").toLowerCase().includes("bag")
+    );
+
+    if (bagObj && bagObj.transform) {
+      // Use bag dimensions as canvas size
+      const bagWidth = bagObj.transform.width;
+      const bagHeight = bagObj.transform.height;
+      
+      // Find bounding box of all objects
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      
+      sortedObjects.forEach(obj => {
+        if (!obj.transform) return;
+        const halfW = obj.transform.width / 2;
+        const halfH = obj.transform.height / 2;
+        const cos = Math.cos((obj.transform.rotation * Math.PI) / 180);
+        const sin = Math.sin((obj.transform.rotation * Math.PI) / 180);
+        
+        // Get four corners of the rotated rectangle
+        const corners = [
+          { x: -halfW, y: -halfH },
+          { x: halfW, y: -halfH },
+          { x: halfW, y: halfH },
+          { x: -halfW, y: halfH },
+        ].map(corner => ({
+          x: obj.transform!.x + corner.x * cos - corner.y * sin,
+          y: obj.transform!.y + corner.x * sin + corner.y * cos,
+        }));
+        
+        corners.forEach(corner => {
+          minX = Math.min(minX, corner.x);
+          minY = Math.min(minY, corner.y);
+          maxX = Math.max(maxX, corner.x);
+          maxY = Math.max(maxY, corner.y);
+        });
+      });
+      
+      // Add some padding
+      const padding = 20;
+      const width = Math.max(bagWidth, maxX - minX + padding * 2);
+      const height = Math.max(bagHeight, maxY - minY + padding * 2);
+      
+      return { width, height };
+    }
+
+    // Fallback if no bag found
+    return { width: 800, height: 600 };
+  }, [sortedObjects]);
 
   useLayoutEffect(() => {
     const node = previewRef.current;
@@ -53,8 +145,12 @@ function SavedLayoutPreview({ objects }: { objects: LayoutObject[] }) {
     return () => observer.disconnect();
   }, []);
 
+  // Calculate scale to fit canvas in preview while maintaining aspect ratio
   const scale = previewSize.width > 0 && previewSize.height > 0
-    ? Math.min(previewSize.width / CANVAS_W, previewSize.height / CANVAS_H)
+    ? Math.min(
+        previewSize.width / canvasSize.width,
+        previewSize.height / canvasSize.height
+      )
     : 1;
 
   return (
@@ -66,8 +162,8 @@ function SavedLayoutPreview({ objects }: { objects: LayoutObject[] }) {
           top: "50%",
           transformOrigin: "center",
           transform: `translate(-50%, -50%) scale(${scale})`,
-          width: CANVAS_W,
-          height: CANVAS_H,
+          width: canvasSize.width,
+          height: canvasSize.height,
         }}
       >
         {sortedObjects.map((obj) => {
@@ -110,92 +206,239 @@ function SavedLayoutPreview({ objects }: { objects: LayoutObject[] }) {
   );
 }
 
+// Custom dropdown component
+function FilterDropdown({ label, value, options, onChange, placeholder }: {
+  label: string;
+  value: string;
+  options: { slug: string; name: string }[];
+  onChange: (val: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedName = value ? options.find(o => o.slug === value)?.name || value : '';
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="block text-[10px] uppercase tracking-wider text-muted mb-1">{label}</label>
+      <div
+        onClick={() => setOpen(!open)}
+        className={`w-full p-2 border border-border rounded-lg text-xs bg-white cursor-pointer flex items-center justify-between gap-2 hover:border-accent ${value ? 'text-ink' : 'text-muted'}`}
+      >
+        <span className="truncate">{selectedName || placeholder || 'All'}</span>
+        <ChevronDown size={14} className={`text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+      </div>
+      {open && (
+        <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-border rounded-lg shadow-xl max-h-60 overflow-y-auto">
+          <div
+            onClick={() => { onChange(''); setOpen(false); }}
+            className={`p-2 text-xs cursor-pointer hover:bg-surface ${!value ? 'bg-accent/10 text-accent font-medium' : ''}`}
+          >
+            All
+          </div>
+          {options.map((opt) => (
+            <div
+              key={opt.slug}
+              onClick={() => { onChange(opt.slug); setOpen(false); }}
+              className={`p-2 text-xs cursor-pointer hover:bg-surface ${value === opt.slug ? 'bg-accent/10 text-accent font-medium' : ''}`}
+            >
+              {opt.name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Multi-select dropdown component
+function MultiSelectDropdown({ selected, options, onChange, placeholder }: {
+  selected: string[];
+  options: { id: string; name: string }[];
+  onChange: (vals: string[]) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggle = (id: string) => {
+    if (id === 'ALL') {
+      // Toggle all items
+      if (selected.length === options.length) {
+        onChange([]);
+      } else {
+        onChange(options.map(o => o.id));
+      }
+    } else {
+      if (selected.includes(id)) {
+        onChange(selected.filter(s => s !== id));
+      } else {
+        onChange([...selected, id]);
+      }
+    }
+  };
+
+  const isAllSelected = selected.length === options.length && options.length > 0;
+  const displayText = selected.length === 0
+    ? (placeholder || 'None selected')
+    : isAllSelected
+    ? 'All selected'
+    : `${selected.length} selected`;
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        onClick={() => setOpen(!open)}
+        className={`w-full px-3 py-2 border border-border rounded-lg text-sm bg-white cursor-pointer flex items-center justify-between gap-2 hover:border-accent transition-colors ${selected.length > 0 ? 'text-ink' : 'text-muted'}`}
+      >
+        <span className="truncate">{displayText}</span>
+        <ChevronDown size={16} className={`text-muted transition-transform shrink-0 ${open ? 'rotate-180' : ''}`} />
+      </div>
+      
+      {open && (
+        <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-border rounded-lg shadow-xl max-h-64 overflow-y-auto">
+          {options.length === 0 ? (
+            <div className="p-3 text-xs text-muted text-center">No options available</div>
+          ) : (
+            <>
+              {/* ALL option at top */}
+              <div
+                onClick={() => toggle('ALL')}
+                className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
+                  isAllSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
+                }`}
+              >
+                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                  isAllSelected ? 'bg-accent border-accent' : 'border-gray-300'
+                }`}>
+                  {isAllSelected && <Check size={12} className="text-white" />}
+                </div>
+                <span className="truncate font-medium">All Items</span>
+              </div>
+              
+              <div className="border-t border-border my-1" />
+              
+              {options.map((opt) => {
+                const isSelected = selected.includes(opt.id);
+                return (
+                  <div
+                    key={opt.id}
+                    onClick={() => toggle(opt.id)}
+                    className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
+                      isSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                      isSelected ? 'bg-accent border-accent' : 'border-gray-300'
+                    }`}>
+                      {isSelected && <Check size={12} className="text-white" />}
+                    </div>
+                    <span className="truncate">{opt.name}</span>
+                  </div>
+                );
+              })}
+            </>
+          )}
+          {selected.length > 0 && (
+            <div className="sticky bottom-0 border-t border-border bg-white p-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); onChange([]); }}
+                className="w-full px-2 py-1.5 text-xs text-muted hover:text-ink text-center font-medium"
+              >
+                Clear all selections
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SavedPage() {
   const [layouts, setLayouts] = useState<SavedLayout[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
   const [selectedLayout, setSelectedLayout] = useState<SavedLayout | null>(null);
-  const [libraryItemIds, setLibraryItemIds] = useState<Set<string>>(new Set());
-  const pageSize = 20;
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setSelectedLayout(null);
+  // Advanced filter state
+  const [filterType, setFilterType] = useState<'date' | 'bags'>('date');
+  const [selectedBagIds, setSelectedBagIds] = useState<string[]>([]);
+  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Available items for filter dropdowns (extracted from all layouts)
+  const [availableBags, setAvailableBags] = useState<{id: string, name: string}[]>([]);
+  const [availableObjects, setAvailableObjects] = useState<{id: string, name: string, library: string}[]>([]);
+
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationInfo | null>(null);
+  const pageSize = 50;
+
+  // Load layouts with filters
+  const loadLayouts = useCallback(async (pageNum: number) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      params.set('page', String(pageNum));
+      params.set('limit', String(pageSize));
+      
+      // New filter parameters
+      if (selectedBagIds.length > 0) params.set('bagIds', selectedBagIds.join(','));
+      if (selectedObjectIds.length > 0) params.set('objectIds', selectedObjectIds.join(','));
+      if (dateFrom) params.set('dateFrom', dateFrom);
+      if (dateTo) params.set('dateTo', dateTo);
+
+      const res = await fetch(`${API_BASE}/api/saved-layouts/filtered?${params}`);
+      const data = await res.json();
+      if (data.ok) {
+        setLayouts(data.layouts);
+        setPagination(data.pagination);
+      } else {
+        setError(data.error || "Failed to load layouts");
       }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-  // Fetch library items to validate layouts
-  useEffect(() => {
-    const fetchLibraryItems = async () => {
-      try {
-        const res = await fetch("http://localhost:8080/api/items/categorized");
-        const data = await res.json();
-        if (data.ok) {
-          const ids = new Set<string>();
-          const extractIds = (categorized: any) => {
-            if (!categorized) return;
-            for (const items of Object.values(categorized)) {
-              if (Array.isArray(items)) {
-                items.forEach((item: any) => ids.add(item.id));
-              }
-            }
-          };
-          extractIds(data.categorized);
-          setLibraryItemIds(ids);
-        }
-      } catch (err) {
-        console.error("Failed to fetch library items:", err);
-      }
-    };
-    fetchLibraryItems();
-  }, []);
-
-  // Load layouts and filter out those with missing library items
-  useEffect(() => {
-    fetch("http://localhost:8080/api/saved-layouts")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.ok) {
-          // Filter layouts:
-          // - Always keep layouts with synthesized IDs (bulk-saved from collage page)
-          // - For other layouts, only keep if all referenced items exist in library
-          const validLayouts = data.layouts.filter((layout: SavedLayout) => {
-            try {
-              // Check if the layout record itself has a synthesized ID (starts with SB)
-              const hasSynthesizedId = layout.id && typeof layout.id === 'string' && layout.id.startsWith('SB');
-              // If it has a synthesized ID, it's a bulk-saved combo - always keep it
-              if (hasSynthesizedId) return true;
-              // If library items are still loading, skip non-synthesized layouts
-              if (libraryItemIds.size === 0) return false;
-              // Otherwise, check if all referenced items exist in library
-              const objects = layout.layout_json?.objects || [];
-              return objects.every((obj: any) => libraryItemIds.has(obj.id));
-            } catch {
-              return false;
-            }
-          });
-          setLayouts(validLayouts);
-        } else {
-          setError(data.error || "Failed to load layouts");
-        }
-      })
-      .catch((err) => setError(String(err)))
-      .finally(() => setLoading(false));
-  }, [libraryItemIds]);
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this saved layout?")) return;
-    const response = await fetch(`http://localhost:8080/api/saved-layouts/${id}`, { method: "DELETE" });
-    if (response.ok) {
-      setLayouts(layouts.filter((layout) => layout.id !== id));
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [selectedBagIds, selectedObjectIds, dateFrom, dateTo]);
+
+  // Load on mount and when filters change
+  useEffect(() => {
+    setPage(1);
+    loadLayouts(1);
+  }, [loadLayouts]);
+
+  // Load on page change
+  useEffect(() => {
+    if (page > 1) loadLayouts(page);
+  }, [page]);
 
   const getObjects = (layout: SavedLayout): LayoutObject[] => {
     try {
@@ -205,8 +448,6 @@ export default function SavedPage() {
     }
   };
 
-  const getImageUrl = (filepath: string): string => `${IMAGE_BASE_URL}${filepath}`;
-
   const getCategoryBadge = (library: string): { bg: string; text: string; border: string } => {
     const lower = (library || "").toLowerCase();
     if (lower === "bag" || lower === "bags") return { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" };
@@ -214,9 +455,52 @@ export default function SavedPage() {
     return { bg: "bg-gray-50", text: "text-gray-600", border: "border-gray-200" };
   };
 
-  const totalPages = Math.max(1, Math.ceil(layouts.length / pageSize));
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  const pagedLayouts = layouts.slice((safeCurrentPage - 1) * pageSize, safeCurrentPage * pageSize);
+  // Extract available bags and objects from layouts for filter dropdowns
+  useEffect(() => {
+    if (layouts.length === 0) return;
+    
+    const bagsMap = new Map<string, string>();
+    const objectsMap = new Map<string, {name: string, library: string}>();
+    
+    layouts.forEach(layout => {
+      const objects = layout.layout_json?.objects || [];
+      objects.forEach((obj: any) => {
+        if (obj.library?.toLowerCase().includes('bag')) {
+          bagsMap.set(obj.id, obj.name || obj.id);
+        } else {
+          objectsMap.set(obj.id, { name: obj.name || obj.id, library: obj.library || 'other' });
+        }
+      });
+    });
+    
+    setAvailableBags(Array.from(bagsMap.entries()).map(([id, name]) => ({ id, name })));
+    setAvailableObjects(Array.from(objectsMap.entries()).map(([id, data]) => ({ id, ...data })));
+  }, [layouts]);
+
+  const handleApplyFilters = () => {
+    setPage(1);
+    loadLayouts(1);
+  };
+
+  const handleClearFilters = () => {
+    setSelectedBagIds([]);
+    setSelectedObjectIds([]);
+    setDateFrom("");
+    setDateTo("");
+    setPage(1);
+    loadLayouts(1);
+  };
+
+  // Close detail on Escape
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectedLayout(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   return (
     <div className="p-6">
@@ -227,8 +511,128 @@ export default function SavedPage() {
         </div>
         <div className="inline-flex items-center gap-2 rounded-xl border border-border bg-panel px-4 py-3 text-sm text-muted">
           <FolderOpen size={18} />
-          {layouts.length} layouts
+          {pagination ? `${pagination.total} layouts` : '...'}
         </div>
+      </div>
+
+      {/* Filter Bar */}
+      <div className="mb-6 rounded-2xl border border-border bg-panel p-4 shadow-sm">
+        {/* Filter Type Selector */}
+        <div className="flex items-center gap-3 mb-4">
+          <span className="text-sm font-semibold text-ink">Filter by:</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setFilterType('date')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                filterType === 'date'
+                  ? 'bg-accent text-white'
+                  : 'bg-surface text-muted hover:text-ink border border-border'
+              }`}
+            >
+              Date
+            </button>
+            <button
+              onClick={() => setFilterType('bags')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                filterType === 'bags'
+                  ? 'bg-accent text-white'
+                  : 'bg-surface text-muted hover:text-ink border border-border'
+              }`}
+            >
+              Bags & Objects
+            </button>
+          </div>
+        </div>
+
+        {/* Date Filter */}
+        {filterType === 'date' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">From Date</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm text-ink focus:outline-none focus:border-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">To Date</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm text-ink focus:outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+            {(dateFrom || dateTo) && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleApplyFilters}
+                  className="px-5 py-2 rounded-xl bg-accent text-white text-sm font-semibold flex items-center gap-2 hover:bg-accent/90"
+                >
+                  <Search size={16} />
+                  Apply Date Filter
+                </button>
+                <button
+                  onClick={() => { setDateFrom(''); setDateTo(''); }}
+                  className="px-4 py-2 rounded-xl border border-border text-sm text-muted hover:text-ink"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Bags & Objects Filter */}
+        {filterType === 'bags' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Bag Multi-Select Dropdown */}
+              <div>
+                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Select Bags</label>
+                <MultiSelectDropdown
+                  selected={selectedBagIds}
+                  options={availableBags.map(b => ({ id: b.id, name: b.name }))}
+                  onChange={setSelectedBagIds}
+                  placeholder="Choose bags..."
+                />
+              </div>
+
+              {/* Object Multi-Select Dropdown */}
+              <div>
+                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Select Objects</label>
+                <MultiSelectDropdown
+                  selected={selectedObjectIds}
+                  options={availableObjects.map(o => ({ id: o.id, name: `${o.name} (${o.library})` }))}
+                  onChange={setSelectedObjectIds}
+                  placeholder="Choose objects..."
+                />
+              </div>
+            </div>
+
+            {(selectedBagIds.length > 0 || selectedObjectIds.length > 0) && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleApplyFilters}
+                  className="px-5 py-2 rounded-xl bg-accent text-white text-sm font-semibold flex items-center gap-2 hover:bg-accent/90"
+                >
+                  <Search size={16} />
+                  Apply Filter
+                </button>
+                <button
+                  onClick={() => { setSelectedBagIds([]); setSelectedObjectIds([]); }}
+                  className="px-4 py-2 rounded-xl border border-border text-sm text-muted hover:text-ink"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -236,98 +640,105 @@ export default function SavedPage() {
       ) : error ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-800">{error}</div>
       ) : layouts.length === 0 ? (
-        <div className="rounded-2xl border border-border bg-white p-6 text-sm text-muted">No saved layouts yet.</div>
+        <div className="rounded-2xl border border-border bg-white p-6 text-sm text-muted">
+          {pagination && pagination.total > 0
+            ? "No layouts match the current filters."
+            : "No saved layouts yet."}
+        </div>
       ) : (
         <>
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <p className="text-sm text-muted">
-              Showing {((safeCurrentPage - 1) * pageSize) + 1}-{Math.min(safeCurrentPage * pageSize, layouts.length)} of {layouts.length}
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-                disabled={safeCurrentPage === 1}
-                className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Prev
-              </button>
-              <span className="text-sm text-muted">
-                Page {safeCurrentPage} / {totalPages}
-              </span>
-              <button
-                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-                disabled={safeCurrentPage === totalPages}
-                className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Next
-              </button>
+          {/* Pagination Header */}
+          {pagination && (
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <p className="text-sm text-muted">
+                Showing {((pagination.page - 1) * pagination.limit) + 1}-{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={pagination.page <= 1}
+                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <span className="text-sm text-muted">
+                  Page {pagination.page} / {pagination.totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                  disabled={pagination.page >= pagination.totalPages}
+                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* List View Table */}
+          <div className="rounded-2xl border border-border bg-panel overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full divide-y divide-border">
+                <thead className="bg-surface/50">
+                  <tr className="text-xs font-semibold text-muted uppercase tracking-wider">
+                    <th className="text-left py-3 px-4 w-12">#</th>
+                    <th className="text-left py-3 px-4">ID</th>
+                    <th className="text-left py-3 px-4">Bag</th>
+                    <th className="text-left py-3 px-4">Threats</th>
+                    <th className="text-center py-3 px-4">Objects</th>
+                    <th className="text-right py-3 px-4">Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {layouts.map((layout, idx) => {
+                    const objects = getObjects(layout);
+                    const bagObj = objects.find(o => (o.library || "").toLowerCase().includes("bag"));
+                    const threatObjs = objects.filter(o => (o.library || "").toLowerCase().includes("threat"));
+                    const bagName = bagObj?.name || "—";
+                    const threatNames = threatObjs.map(t => t.name).filter(Boolean).join(", ") || "—";
+
+                    return (
+                      <tr
+                        key={layout.id}
+                        onClick={() => setSelectedLayout(layout)}
+                        className="cursor-pointer hover:bg-surface/50 transition-colors even:bg-surface/20"
+                      >
+                        <td className="py-3 px-4 text-sm font-mono text-muted">
+                          {((pagination?.page || 1) - 1) * pageSize + idx + 1}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="text-sm font-mono text-accent-sky font-medium">{layout.id}</span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="text-sm text-ink">{bagName}</span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="text-sm text-rose-700">{threatNames}</span>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-surface text-xs font-semibold text-muted border border-border">
+                            {objects.length}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <span className="text-xs text-muted">{new Date(layout.created_at).toLocaleDateString()}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-          {pagedLayouts.map((layout) => {
-            const objects = getObjects(layout);
-            const bagCount = objects.filter((o: LayoutObject) => (o.library || "").toLowerCase().includes("bag")).length;
-            const threatCount = objects.filter((o: LayoutObject) => (o.library || "").toLowerCase().includes("threat")).length;
-            const otherCount = Math.max(0, objects.length - bagCount - threatCount);
-
-            return (
-              <div
-                key={layout.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelectedLayout(layout)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setSelectedLayout(layout);
-                  }
-                }}
-                className="rounded-3xl border border-border bg-panel shadow-sm overflow-hidden min-w-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent/30"
-              >
-                {/* Image Preview Area */}
-                <div className="bg-surface p-4 flex items-center justify-center h-64 sm:h-72 overflow-hidden border-b border-border">
-                  <div className="w-full h-full rounded-2xl overflow-hidden border border-border bg-white">
-                    <SavedLayoutPreview objects={objects} />
-                  </div>
-                </div>
-
-                {/* Info Section */}
-                <div className="p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <h2 className="text-base font-semibold text-ink truncate" title={layout.id}>{layout.id}</h2>
-                      <p className="mt-1 text-xs text-muted">Saved {new Date(layout.created_at).toLocaleString()}</p>
-                      <p className="mt-1 text-[10px] font-mono text-accent-sky bg-accent/5 px-1.5 py-0.5 rounded border border-accent/20 inline-block">
-                        ID: {layout.id}
-                      </p>
-                      <p className="mt-2 text-xs text-muted">
-                        {objects.length} objects · {bagCount} bag{bagCount !== 1 ? "s" : ""} · {threatCount} threat{threatCount !== 1 ? "s" : ""} · {otherCount} other
-                      </p>
-                    </div>
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleDelete(layout.id);
-                      }}
-                      className="text-rose-600 rounded-full p-2 shrink-0"
-                      title="Delete layout"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          </div>
-
+          {/* Detail Panel */}
           {selectedLayout && (
             <div className="fixed inset-0 z-50 bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSelectedLayout(null)}>
               <div
                 className="w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl border border-border bg-panel shadow-2xl flex flex-col"
                 onClick={(event) => event.stopPropagation()}
               >
+                {/* Header */}
                 <div className="flex items-center justify-between gap-4 border-b border-border bg-nav px-5 py-4">
                   <div className="min-w-0">
                     <h2 className="truncate text-lg font-semibold text-ink">{selectedLayout.id}</h2>
@@ -335,69 +746,80 @@ export default function SavedPage() {
                   </div>
                   <button
                     onClick={() => setSelectedLayout(null)}
-                    className="rounded-full border border-border bg-panel p-2 text-muted"
+                    className="rounded-full border border-border bg-panel p-2 text-muted hover:text-ink"
                     title="Close details"
                   >
                     <X size={16} />
                   </button>
                 </div>
 
-                <div className="grid flex-1 gap-0 overflow-hidden lg:grid-cols-[1.2fr_0.8fr]">
-                  <div className="min-h-0 border-b border-border bg-surface p-4 lg:border-b-0 lg:border-r">
-                    <div className="h-full rounded-2xl overflow-hidden border border-border bg-white">
-                      <SavedLayoutPreview objects={getObjects(selectedLayout)} />
-                    </div>
-                  </div>
+                 <div className="grid flex-1 gap-0 overflow-hidden lg:grid-cols-[1.2fr_0.8fr]">
+                   {/* Left: Preview */}
+                   <div className="min-h-0 border-b border-border bg-surface p-4 lg:border-b-0 lg:border-r">
+                     <div className="h-full rounded-2xl overflow-hidden border border-border bg-white">
+                       <SavedLayoutPreview 
+                         objects={getObjects(selectedLayout)} 
+                         bagOrigin={selectedLayout.layout_json?.bagOrigin}
+                       />
+                     </div>
+                   </div>
 
-                  <div className="min-h-0 overflow-y-auto p-5 space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-2xl border border-border bg-white p-3">
-                        <p className="text-[10px] uppercase tracking-wider text-muted">Objects</p>
-                        <p className="mt-1 text-sm font-semibold text-ink">{getObjects(selectedLayout).length}</p>
-                      </div>
-                      <div className="rounded-2xl border border-border bg-white p-3">
-                        <p className="text-[10px] uppercase tracking-wider text-muted">Created</p>
-                        <p className="mt-1 text-sm font-semibold text-ink">{new Date(selectedLayout.created_at).toLocaleDateString()}</p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      {getObjects(selectedLayout).map((obj: LayoutObject) => {
-                        const transform = obj.transform;
-                        const isBag = (obj.library || "").toLowerCase().includes("bag");
-                        const isThreat = (obj.library || "").toLowerCase().includes("threat");
-                        const badge = getCategoryBadge(obj.library);
-
-                        return (
-                          <div key={obj.id} className="rounded-2xl border border-border bg-white p-3">
-                            <div className="flex items-start gap-3">
-                              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-border bg-surface">
-                                <img src={getImageUrl(obj.filepath)} alt={obj.name} className="h-full w-full object-contain" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="truncate text-sm font-semibold text-ink">{obj.name || "Unnamed object"}</p>
-                                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badge.bg} ${badge.text} ${badge.border}`}>
-                                    {isBag ? "Bag" : isThreat ? "Threat" : obj.library || "Other"}
-                                  </span>
-                                </div>
-                                {transform && (
-                                  <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted">
-                                    <span>X: {Math.round(transform.x)}</span>
-                                    <span>Y: {Math.round(transform.y)}</span>
-                                    <span>W: {Math.round(transform.width)}</span>
-                                    <span>H: {Math.round(transform.height)}</span>
-                                    <span>Rot: {Math.round(transform.rotation)}°</span>
-                                    <span>Layer: {obj.layer ?? 0}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                   {/* Right: Annotation Details */}
+                   <div className="min-h-0 overflow-y-auto p-5">
+                     <div className="space-y-4">
+                       {selectedLayout.layout_json?.objects?.length > 0 && (
+                         <div>
+                           <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Objects in Layout</h3>
+                           <div className="space-y-2">
+                             {selectedLayout.layout_json.objects.map((obj: any, idx: number) => {
+                               // Use center (now relative to bag origin) and size
+                               const transform = obj.center && obj.size ? {
+                                 x: obj.center.x,
+                                 y: obj.center.y,
+                                 width: obj.size.width,
+                                 height: obj.size.height,
+                                 rotation: obj.rotation || 0
+                               } : null;
+                               
+                               return (
+                                 <div key={idx} className="rounded-xl border border-border bg-white p-2.5">
+                                   <div className="flex items-center justify-between mb-1.5">
+                                     <span className="text-xs font-semibold text-ink">{obj.name}</span>
+                                     <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                                       obj.library === "bag" ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                       obj.library === "threat" ? "bg-rose-50 text-rose-700 border-rose-200" :
+                                       "bg-gray-50 text-gray-600 border-gray-200"
+                                     }`}>
+                                       {obj.library}
+                                     </span>
+                                   </div>
+                                   {transform && (
+                                     <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono">
+                                       <div className="bg-surface rounded px-1.5 py-1">
+                                         <span className="text-muted">X:</span> <span className="text-ink">{Math.round(transform.x)}</span>
+                                       </div>
+                                       <div className="bg-surface rounded px-1.5 py-1">
+                                         <span className="text-muted">Y:</span> <span className="text-ink">{Math.round(transform.y)}</span>
+                                       </div>
+                                       <div className="bg-surface rounded px-1.5 py-1">
+                                         <span className="text-muted">W:</span> <span className="text-ink">{Math.round(transform.width)}</span>
+                                       </div>
+                                       <div className="bg-surface rounded px-1.5 py-1">
+                                         <span className="text-muted">H:</span> <span className="text-ink">{Math.round(transform.height)}</span>
+                                       </div>
+                                       <div className="bg-surface rounded px-1.5 py-1 col-span-2">
+                                         <span className="text-muted">Rot:</span> <span className="text-ink">{Math.round(transform.rotation)}°</span>
+                                       </div>
+                                     </div>
+                                   )}
+                                 </div>
+                               );
+                             })}
+                           </div>
+                         </div>
+                       )}
+                     </div>
+                   </div>
                 </div>
               </div>
             </div>
