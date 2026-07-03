@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
-import { FolderOpen, Grid3X3, X, ChevronDown, Search } from "lucide-react";
+import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check } from "lucide-react";
 import { getLibrarySubcategories } from "../config/categories";
 
 interface SavedLayout {
@@ -36,8 +36,6 @@ interface PaginationInfo {
   totalPages: number;
 }
 
-const CANVAS_W = 800;
-const CANVAS_H = 600;
 const IMAGE_BASE_URL = "http://localhost:8080/data/library_images/";
 const API_BASE = "http://localhost:8080";
 
@@ -73,6 +71,63 @@ function SavedLayoutPreview({ objects, bagOrigin }: { objects: LayoutObject[]; b
     .filter((obj): obj is LayoutObject => obj !== null)
     .sort((a, b) => (a.layer ?? 0) - (b.layer ?? 0));
 
+  // Calculate dynamic canvas size based on objects (especially the bag)
+  const canvasSize = React.useMemo(() => {
+    if (sortedObjects.length === 0) {
+      return { width: 800, height: 600 };
+    }
+
+    // Find the bag object to use as base
+    const bagObj = sortedObjects.find(obj => 
+      (obj.library || "").toLowerCase().includes("bag")
+    );
+
+    if (bagObj && bagObj.transform) {
+      // Use bag dimensions as canvas size
+      const bagWidth = bagObj.transform.width;
+      const bagHeight = bagObj.transform.height;
+      
+      // Find bounding box of all objects
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      
+      sortedObjects.forEach(obj => {
+        if (!obj.transform) return;
+        const halfW = obj.transform.width / 2;
+        const halfH = obj.transform.height / 2;
+        const cos = Math.cos((obj.transform.rotation * Math.PI) / 180);
+        const sin = Math.sin((obj.transform.rotation * Math.PI) / 180);
+        
+        // Get four corners of the rotated rectangle
+        const corners = [
+          { x: -halfW, y: -halfH },
+          { x: halfW, y: -halfH },
+          { x: halfW, y: halfH },
+          { x: -halfW, y: halfH },
+        ].map(corner => ({
+          x: obj.transform!.x + corner.x * cos - corner.y * sin,
+          y: obj.transform!.y + corner.x * sin + corner.y * cos,
+        }));
+        
+        corners.forEach(corner => {
+          minX = Math.min(minX, corner.x);
+          minY = Math.min(minY, corner.y);
+          maxX = Math.max(maxX, corner.x);
+          maxY = Math.max(maxY, corner.y);
+        });
+      });
+      
+      // Add some padding
+      const padding = 20;
+      const width = Math.max(bagWidth, maxX - minX + padding * 2);
+      const height = Math.max(bagHeight, maxY - minY + padding * 2);
+      
+      return { width, height };
+    }
+
+    // Fallback if no bag found
+    return { width: 800, height: 600 };
+  }, [sortedObjects]);
+
   useLayoutEffect(() => {
     const node = previewRef.current;
     if (!node) return;
@@ -90,8 +145,12 @@ function SavedLayoutPreview({ objects, bagOrigin }: { objects: LayoutObject[]; b
     return () => observer.disconnect();
   }, []);
 
+  // Calculate scale to fit canvas in preview while maintaining aspect ratio
   const scale = previewSize.width > 0 && previewSize.height > 0
-    ? Math.min(previewSize.width / CANVAS_W, previewSize.height / CANVAS_H)
+    ? Math.min(
+        previewSize.width / canvasSize.width,
+        previewSize.height / canvasSize.height
+      )
     : 1;
 
   return (
@@ -103,8 +162,8 @@ function SavedLayoutPreview({ objects, bagOrigin }: { objects: LayoutObject[]; b
           top: "50%",
           transformOrigin: "center",
           transform: `translate(-50%, -50%) scale(${scale})`,
-          width: CANVAS_W,
-          height: CANVAS_H,
+          width: canvasSize.width,
+          height: canvasSize.height,
         }}
       >
         {sortedObjects.map((obj) => {
@@ -203,11 +262,10 @@ function FilterDropdown({ label, value, options, onChange, placeholder }: {
   );
 }
 
-// Multi-select dropdown for threat types
-function MultiSelectDropdown({ label, selected, options, onChange, placeholder }: {
-  label: string;
+// Multi-select dropdown component
+function MultiSelectDropdown({ selected, options, onChange, placeholder }: {
   selected: string[];
-  options: { slug: string; name: string }[];
+  options: { id: string; name: string }[];
   onChange: (vals: string[]) => void;
   placeholder?: string;
 }) {
@@ -224,56 +282,91 @@ function MultiSelectDropdown({ label, selected, options, onChange, placeholder }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const toggle = (slug: string) => {
-    if (selected.includes(slug)) {
-      onChange(selected.filter(s => s !== slug));
+  const toggle = (id: string) => {
+    if (id === 'ALL') {
+      // Toggle all items
+      if (selected.length === options.length) {
+        onChange([]);
+      } else {
+        onChange(options.map(o => o.id));
+      }
     } else {
-      onChange([...selected, slug]);
+      if (selected.includes(id)) {
+        onChange(selected.filter(s => s !== id));
+      } else {
+        onChange([...selected, id]);
+      }
     }
   };
 
+  const isAllSelected = selected.length === options.length && options.length > 0;
   const displayText = selected.length === 0
-    ? (placeholder || 'All')
-    : selected.map(s => options.find(o => o.slug === s)?.name || s).join(', ');
+    ? (placeholder || 'None selected')
+    : isAllSelected
+    ? 'All selected'
+    : `${selected.length} selected`;
 
   return (
     <div ref={ref} className="relative">
-      <label className="block text-[10px] uppercase tracking-wider text-muted mb-1">{label}</label>
       <div
         onClick={() => setOpen(!open)}
-        className={`w-full p-2 border border-border rounded-lg text-xs bg-white cursor-pointer flex items-center justify-between gap-2 hover:border-accent ${selected.length > 0 ? 'text-ink' : 'text-muted'}`}
+        className={`w-full px-3 py-2 border border-border rounded-lg text-sm bg-white cursor-pointer flex items-center justify-between gap-2 hover:border-accent transition-colors ${selected.length > 0 ? 'text-ink' : 'text-muted'}`}
       >
         <span className="truncate">{displayText}</span>
-        <ChevronDown size={14} className={`text-muted transition-transform shrink-0 ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown size={16} className={`text-muted transition-transform shrink-0 ${open ? 'rotate-180' : ''}`} />
       </div>
+      
       {open && (
-        <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-border rounded-lg shadow-xl max-h-72 overflow-y-auto">
-          {options.map((opt) => {
-            const isSelected = selected.includes(opt.slug);
-            return (
-              <label
-                key={opt.slug}
-                className={`flex items-center gap-2 p-2 text-xs cursor-pointer ${
-                  isSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface'
+        <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-border rounded-lg shadow-xl max-h-64 overflow-y-auto">
+          {options.length === 0 ? (
+            <div className="p-3 text-xs text-muted text-center">No options available</div>
+          ) : (
+            <>
+              {/* ALL option at top */}
+              <div
+                onClick={() => toggle('ALL')}
+                className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
+                  isAllSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
                 }`}
               >
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => toggle(opt.slug)}
-                  className="rounded border-gray-300"
-                />
-                {opt.name}
-              </label>
-            );
-          })}
+                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                  isAllSelected ? 'bg-accent border-accent' : 'border-gray-300'
+                }`}>
+                  {isAllSelected && <Check size={12} className="text-white" />}
+                </div>
+                <span className="truncate font-medium">All Items</span>
+              </div>
+              
+              <div className="border-t border-border my-1" />
+              
+              {options.map((opt) => {
+                const isSelected = selected.includes(opt.id);
+                return (
+                  <div
+                    key={opt.id}
+                    onClick={() => toggle(opt.id)}
+                    className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
+                      isSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                      isSelected ? 'bg-accent border-accent' : 'border-gray-300'
+                    }`}>
+                      {isSelected && <Check size={12} className="text-white" />}
+                    </div>
+                    <span className="truncate">{opt.name}</span>
+                  </div>
+                );
+              })}
+            </>
+          )}
           {selected.length > 0 && (
             <div className="sticky bottom-0 border-t border-border bg-white p-2">
               <button
-                onClick={() => { onChange([]); setOpen(false); }}
-                className="w-full px-2 py-1 text-[11px] text-muted hover:text-ink text-center"
+                onClick={(e) => { e.stopPropagation(); onChange([]); }}
+                className="w-full px-2 py-1.5 text-xs text-muted hover:text-ink text-center font-medium"
               >
-                Clear all
+                Clear all selections
               </button>
             </div>
           )}
@@ -289,9 +382,17 @@ export default function SavedPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedLayout, setSelectedLayout] = useState<SavedLayout | null>(null);
 
-  // Filter state
-  const [bagType, setBagType] = useState("");
-  const [threatTypes, setThreatTypes] = useState<string[]>([]);
+  // Advanced filter state
+  const [filterType, setFilterType] = useState<'date' | 'bags'>('date');
+  const [selectedBagIds, setSelectedBagIds] = useState<string[]>([]);
+  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Available items for filter dropdowns (extracted from all layouts)
+  const [availableBags, setAvailableBags] = useState<{id: string, name: string}[]>([]);
+  const [availableObjects, setAvailableObjects] = useState<{id: string, name: string, library: string}[]>([]);
 
   // Pagination state
   const [page, setPage] = useState(1);
@@ -306,8 +407,12 @@ export default function SavedPage() {
       const params = new URLSearchParams();
       params.set('page', String(pageNum));
       params.set('limit', String(pageSize));
-      if (bagType) params.set('bagType', bagType);
-      if (threatTypes.length > 0) params.set('threatTypes', threatTypes.join(','));
+      
+      // New filter parameters
+      if (selectedBagIds.length > 0) params.set('bagIds', selectedBagIds.join(','));
+      if (selectedObjectIds.length > 0) params.set('objectIds', selectedObjectIds.join(','));
+      if (dateFrom) params.set('dateFrom', dateFrom);
+      if (dateTo) params.set('dateTo', dateTo);
 
       const res = await fetch(`${API_BASE}/api/saved-layouts/filtered?${params}`);
       const data = await res.json();
@@ -322,7 +427,7 @@ export default function SavedPage() {
     } finally {
       setLoading(false);
     }
-  }, [bagType, threatTypes]);
+  }, [selectedBagIds, selectedObjectIds, dateFrom, dateTo]);
 
   // Load on mount and when filters change
   useEffect(() => {
@@ -350,7 +455,38 @@ export default function SavedPage() {
     return { bg: "bg-gray-50", text: "text-gray-600", border: "border-gray-200" };
   };
 
+  // Extract available bags and objects from layouts for filter dropdowns
+  useEffect(() => {
+    if (layouts.length === 0) return;
+    
+    const bagsMap = new Map<string, string>();
+    const objectsMap = new Map<string, {name: string, library: string}>();
+    
+    layouts.forEach(layout => {
+      const objects = layout.layout_json?.objects || [];
+      objects.forEach((obj: any) => {
+        if (obj.library?.toLowerCase().includes('bag')) {
+          bagsMap.set(obj.id, obj.name || obj.id);
+        } else {
+          objectsMap.set(obj.id, { name: obj.name || obj.id, library: obj.library || 'other' });
+        }
+      });
+    });
+    
+    setAvailableBags(Array.from(bagsMap.entries()).map(([id, name]) => ({ id, name })));
+    setAvailableObjects(Array.from(objectsMap.entries()).map(([id, data]) => ({ id, ...data })));
+  }, [layouts]);
+
   const handleApplyFilters = () => {
+    setPage(1);
+    loadLayouts(1);
+  };
+
+  const handleClearFilters = () => {
+    setSelectedBagIds([]);
+    setSelectedObjectIds([]);
+    setDateFrom("");
+    setDateTo("");
     setPage(1);
     loadLayouts(1);
   };
@@ -381,44 +517,122 @@ export default function SavedPage() {
 
       {/* Filter Bar */}
       <div className="mb-6 rounded-2xl border border-border bg-panel p-4 shadow-sm">
-        <div className="flex items-end gap-4 flex-wrap">
-          <div className="w-48">
-            <FilterDropdown
-              label="Bag Type"
-              value={bagType}
-              options={BAG_SUBCATEGORIES}
-              onChange={setBagType}
-              placeholder="All Bags"
-            />
-          </div>
-          <div className="w-64">
-            <MultiSelectDropdown
-              label="Threat Types"
-              selected={threatTypes}
-              options={THREAT_SUBCATEGORIES}
-              onChange={setThreatTypes}
-              placeholder="All Threats"
-            />
-          </div>
-          <button
-            onClick={handleApplyFilters}
-            className="px-5 py-2 rounded-xl bg-accent text-white text-sm font-semibold flex items-center gap-2 hover:bg-accent/90"
-          >
-            <Search size={16} />
-            Apply Filters
-          </button>
-          {(bagType || threatTypes.length > 0) && (
+        {/* Filter Type Selector */}
+        <div className="flex items-center gap-3 mb-4">
+          <span className="text-sm font-semibold text-ink">Filter by:</span>
+          <div className="flex gap-2">
             <button
-              onClick={() => {
-                setBagType("");
-                setThreatTypes([]);
-              }}
-              className="px-4 py-2 rounded-xl border border-border text-sm text-muted hover:text-ink"
+              onClick={() => setFilterType('date')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                filterType === 'date'
+                  ? 'bg-accent text-white'
+                  : 'bg-surface text-muted hover:text-ink border border-border'
+              }`}
             >
-              Clear
+              Date
             </button>
-          )}
+            <button
+              onClick={() => setFilterType('bags')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                filterType === 'bags'
+                  ? 'bg-accent text-white'
+                  : 'bg-surface text-muted hover:text-ink border border-border'
+              }`}
+            >
+              Bags & Objects
+            </button>
+          </div>
         </div>
+
+        {/* Date Filter */}
+        {filterType === 'date' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">From Date</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm text-ink focus:outline-none focus:border-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">To Date</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm text-ink focus:outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+            {(dateFrom || dateTo) && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleApplyFilters}
+                  className="px-5 py-2 rounded-xl bg-accent text-white text-sm font-semibold flex items-center gap-2 hover:bg-accent/90"
+                >
+                  <Search size={16} />
+                  Apply Date Filter
+                </button>
+                <button
+                  onClick={() => { setDateFrom(''); setDateTo(''); }}
+                  className="px-4 py-2 rounded-xl border border-border text-sm text-muted hover:text-ink"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Bags & Objects Filter */}
+        {filterType === 'bags' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Bag Multi-Select Dropdown */}
+              <div>
+                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Select Bags</label>
+                <MultiSelectDropdown
+                  selected={selectedBagIds}
+                  options={availableBags.map(b => ({ id: b.id, name: b.name }))}
+                  onChange={setSelectedBagIds}
+                  placeholder="Choose bags..."
+                />
+              </div>
+
+              {/* Object Multi-Select Dropdown */}
+              <div>
+                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Select Objects</label>
+                <MultiSelectDropdown
+                  selected={selectedObjectIds}
+                  options={availableObjects.map(o => ({ id: o.id, name: `${o.name} (${o.library})` }))}
+                  onChange={setSelectedObjectIds}
+                  placeholder="Choose objects..."
+                />
+              </div>
+            </div>
+
+            {(selectedBagIds.length > 0 || selectedObjectIds.length > 0) && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleApplyFilters}
+                  className="px-5 py-2 rounded-xl bg-accent text-white text-sm font-semibold flex items-center gap-2 hover:bg-accent/90"
+                >
+                  <Search size={16} />
+                  Apply Filter
+                </button>
+                <button
+                  onClick={() => { setSelectedBagIds([]); setSelectedObjectIds([]); }}
+                  className="px-4 py-2 rounded-xl border border-border text-sm text-muted hover:text-ink"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {loading ? (

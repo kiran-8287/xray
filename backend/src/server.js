@@ -298,45 +298,62 @@ app.get('/api/saved-layouts', async (_req, res) => {
 // Filtered/paginated saved layouts endpoint
 app.get('/api/saved-layouts/filtered', async (req, res) => {
     try {
-        const page = Math.max(1, parseInt(req.query.page) || 1);
-        const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
-        const bagType = req.query.bagType ? String(req.query.bagType).toLowerCase() : '';
-        const threatTypes = req.query.threatTypes ? String(req.query.threatTypes).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+      const page = Math.max(1, parseInt(req.query.page) || 1);
+      const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+      
+      // New filter parameters
+      const bagIds = req.query.bagIds ? String(req.query.bagIds).split(',').map(s => s.trim()).filter(Boolean) : [];
+      const objectIds = req.query.objectIds ? String(req.query.objectIds).split(',').map(s => s.trim()).filter(Boolean) : [];
+      const dateFrom = req.query.dateFrom ? String(req.query.dateFrom) : '';
+      const dateTo = req.query.dateTo ? String(req.query.dateTo) : '';
+      
+      // Legacy filters (kept for backward compatibility)
+      const bagType = req.query.bagType ? String(req.query.bagType).toLowerCase() : '';
+      const threatTypes = req.query.threatTypes ? String(req.query.threatTypes).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
 
-        const allLayouts = await getSavedLayouts();
+      const allLayouts = await getSavedLayouts();
 
-        // Filter layouts based on bag type and threat types
-        const filtered = allLayouts.filter((layout) => {
-            try {
-                const objects = layout.layout_json?.objects || [];
-                if (!objects.length) return false;
+      // Filter layouts based on criteria (OR logic)
+      const filtered = allLayouts.filter((layout) => {
+        try {
+          const objects = layout.layout_json?.objects || [];
+          if (!objects.length) return false;
 
-                // Check bag type filter
-                if (bagType) {
-                    const bagObj = objects.find(o => (o.library || '').toLowerCase().includes('bag'));
-                    if (!bagObj) return false;
-                    // Check if bag name/subcategory matches the filter
-                    const bagName = (bagObj.name || '').toLowerCase();
-                    if (!bagName.includes(bagType)) return false;
-                }
+          // Extract bag and non-bag objects
+          const bagObjs = objects.filter(o => (o.library || '').toLowerCase().includes('bag'));
+          const nonBagObjs = objects.filter(o => !(o.library || '').toLowerCase().includes('bag'));
+          
+          // Get IDs from objects
+          const layoutBagIds = bagObjs.map(o => o.id);
+          const layoutObjectIds = nonBagObjs.map(o => o.id);
 
-                // Check threat types filter
-                if (threatTypes.length > 0) {
-                    const threatObjs = objects.filter(o => (o.library || '').toLowerCase().includes('threat'));
-                    if (threatObjs.length === 0) return false;
-                    // Check if at least one threat matches each selected type
-                    const threatNames = threatObjs.map(o => (o.name || '').toLowerCase());
-                    const hasAllThreats = threatTypes.every(tt => 
-                        threatNames.some(tn => tn.includes(tt))
-                    );
-                    if (!hasAllThreats) return false;
-                }
+          // Date range filter (AND condition)
+          if (dateFrom || dateTo) {
+            const layoutDate = new Date(layout.created_at);
+            if (dateFrom && layoutDate < new Date(dateFrom)) return false;
+            if (dateTo && layoutDate > new Date(dateTo + 'T23:59:59')) return false;
+          }
 
-                return true;
-            } catch {
-                return false;
-            }
-        });
+          // Build OR conditions for bags and objects
+          const bagMatch = bagIds.length === 0 || bagIds.some(bid => layoutBagIds.includes(bid));
+          const objectMatch = objectIds.length === 0 || objectIds.some(oid => layoutObjectIds.includes(oid));
+          
+          // OR logic: match if ANY of the selected bags OR ANY of the selected objects are present
+          const matchesSelection = bagMatch || objectMatch;
+          
+          // Legacy filters (AND logic for backward compatibility)
+          const legacyBagMatch = !bagType || bagObjs.some(b => (b.name || '').toLowerCase().includes(bagType));
+          const legacyThreatMatch = !threatTypes.length || nonBagObjs.some(o => {
+            const name = (o.name || '').toLowerCase();
+            return threatTypes.some(tt => name.includes(tt));
+          });
+
+          // Combine: new filters (OR) AND legacy filters (AND)
+          return matchesSelection && legacyBagMatch && legacyThreatMatch;
+        } catch {
+          return false;
+        }
+      });
 
         const total = filtered.length;
         const totalPages = Math.max(1, Math.ceil(total / limit));
