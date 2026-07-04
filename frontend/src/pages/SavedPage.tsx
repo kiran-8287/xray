@@ -383,16 +383,14 @@ export default function SavedPage() {
   const [selectedLayout, setSelectedLayout] = useState<SavedLayout | null>(null);
 
   // Advanced filter state
-  const [filterType, setFilterType] = useState<'date' | 'bags'>('date');
-  const [selectedBagIds, setSelectedBagIds] = useState<string[]>([]);
-  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [selectedBagSubcategories, setSelectedBagSubcategories] = useState<string[]>([]);
+  const [selectedThreatSubcategories, setSelectedThreatSubcategories] = useState<string[]>([]);
+  const [filterLogic, setFilterLogic] = useState<'or' | 'and' | 'both'>('or');
   const [showFilters, setShowFilters] = useState(false);
 
-  // Available items for filter dropdowns (extracted from all layouts)
-  const [availableBags, setAvailableBags] = useState<{id: string, name: string}[]>([]);
-  const [availableObjects, setAvailableObjects] = useState<{id: string, name: string, library: string}[]>([]);
+  // All available subcategories from config
+  const allBagSubcategories = getLibrarySubcategories("bags");
+  const allThreatSubcategories = getLibrarySubcategories("threats");
 
   // Pagination state
   const [page, setPage] = useState(1);
@@ -408,11 +406,12 @@ export default function SavedPage() {
       params.set('page', String(pageNum));
       params.set('limit', String(pageSize));
       
-      // New filter parameters
-      if (selectedBagIds.length > 0) params.set('bagIds', selectedBagIds.join(','));
-      if (selectedObjectIds.length > 0) params.set('objectIds', selectedObjectIds.join(','));
-      if (dateFrom) params.set('dateFrom', dateFrom);
-      if (dateTo) params.set('dateTo', dateTo);
+      // Filter by bag subcategories
+      if (selectedBagSubcategories.length > 0) params.set('bagSubcategories', selectedBagSubcategories.join(','));
+      // Filter by threat subcategories
+      if (selectedThreatSubcategories.length > 0) params.set('threatSubcategories', selectedThreatSubcategories.join(','));
+      // Filter logic mode
+      params.set('filterLogic', filterLogic);
 
       const res = await fetch(`${API_BASE}/api/saved-layouts/filtered?${params}`);
       const data = await res.json();
@@ -427,7 +426,7 @@ export default function SavedPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedBagIds, selectedObjectIds, dateFrom, dateTo]);
+  }, [selectedBagSubcategories, selectedThreatSubcategories, filterLogic]);
 
   // Load on mount and when filters change
   useEffect(() => {
@@ -455,38 +454,15 @@ export default function SavedPage() {
     return { bg: "bg-gray-50", text: "text-gray-600", border: "border-gray-200" };
   };
 
-  // Extract available bags and objects from layouts for filter dropdowns
-  useEffect(() => {
-    if (layouts.length === 0) return;
-    
-    const bagsMap = new Map<string, string>();
-    const objectsMap = new Map<string, {name: string, library: string}>();
-    
-    layouts.forEach(layout => {
-      const objects = layout.layout_json?.objects || [];
-      objects.forEach((obj: any) => {
-        if (obj.library?.toLowerCase().includes('bag')) {
-          bagsMap.set(obj.id, obj.name || obj.id);
-        } else {
-          objectsMap.set(obj.id, { name: obj.name || obj.id, library: obj.library || 'other' });
-        }
-      });
-    });
-    
-    setAvailableBags(Array.from(bagsMap.entries()).map(([id, name]) => ({ id, name })));
-    setAvailableObjects(Array.from(objectsMap.entries()).map(([id, data]) => ({ id, ...data })));
-  }, [layouts]);
-
   const handleApplyFilters = () => {
     setPage(1);
     loadLayouts(1);
   };
 
   const handleClearFilters = () => {
-    setSelectedBagIds([]);
-    setSelectedObjectIds([]);
-    setDateFrom("");
-    setDateTo("");
+    setSelectedBagSubcategories([]);
+    setSelectedThreatSubcategories([]);
+    setFilterLogic('or');
     setPage(1);
     loadLayouts(1);
   };
@@ -517,122 +493,94 @@ export default function SavedPage() {
 
       {/* Filter Bar */}
       <div className="mb-6 rounded-2xl border border-border bg-panel p-4 shadow-sm">
-        {/* Filter Type Selector */}
-        <div className="flex items-center gap-3 mb-4">
-          <span className="text-sm font-semibold text-ink">Filter by:</span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setFilterType('date')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                filterType === 'date'
-                  ? 'bg-accent text-white'
-                  : 'bg-surface text-muted hover:text-ink border border-border'
-              }`}
-            >
-              Date
-            </button>
-            <button
-              onClick={() => setFilterType('bags')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                filterType === 'bags'
-                  ? 'bg-accent text-white'
-                  : 'bg-surface text-muted hover:text-ink border border-border'
-              }`}
-            >
-              Bags & Objects
-            </button>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Bag Subcategory Filter */}
+            <div>
+              <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter by Bag Subcategory</label>
+              <MultiSelectDropdown
+                selected={selectedBagSubcategories}
+                options={allBagSubcategories.map(s => ({ id: s.slug, name: s.name }))}
+                onChange={setSelectedBagSubcategories}
+                placeholder="Choose bag subcategories..."
+              />
+            </div>
+
+            {/* Threat Subcategory Filter */}
+            <div>
+              <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter by Threat Subcategory</label>
+              <MultiSelectDropdown
+                selected={selectedThreatSubcategories}
+                options={allThreatSubcategories.map(s => ({ id: s.slug, name: s.name }))}
+                onChange={setSelectedThreatSubcategories}
+                placeholder="Choose threat subcategories..."
+              />
+            </div>
           </div>
+
+          {/* Filter Logic Segmented Control */}
+          <div>
+            <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter Logic</label>
+            <div className="inline-flex items-center rounded-lg border border-border bg-white p-1">
+              <button
+                onClick={() => setFilterLogic('or')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                  filterLogic === 'or'
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'text-muted hover:text-ink hover:bg-surface'
+                }`}
+                title="Match ANY selected subcategory"
+              >
+                OR
+              </button>
+              <button
+                onClick={() => setFilterLogic('and')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                  filterLogic === 'and'
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'text-muted hover:text-ink hover:bg-surface'
+                }`}
+                title="Match ALL selected subcategories"
+              >
+                AND
+              </button>
+              <button
+                onClick={() => setFilterLogic('both')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                  filterLogic === 'both'
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'text-muted hover:text-ink hover:bg-surface'
+                }`}
+                title="OR within category, AND between categories"
+              >
+                Both
+              </button>
+            </div>
+            <p className="text-[10px] text-muted mt-1">
+              {filterLogic === 'or' && 'Shows layouts with ANY selected subcategory'}
+              {filterLogic === 'and' && 'Shows layouts with ALL selected subcategories'}
+              {filterLogic === 'both' && 'Shows layouts with (ANY bag OR ANY threat) from each category'}
+            </p>
+          </div>
+
+          {(selectedBagSubcategories.length > 0 || selectedThreatSubcategories.length > 0) && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleApplyFilters}
+                className="px-5 py-2 rounded-xl bg-accent text-white text-sm font-semibold flex items-center gap-2 hover:bg-accent/90"
+              >
+                <Search size={16} />
+                Apply Filters
+              </button>
+              <button
+                onClick={handleClearFilters}
+                className="px-4 py-2 rounded-xl border border-border text-sm text-muted hover:text-ink"
+              >
+                Clear All
+              </button>
+            </div>
+          )}
         </div>
-
-        {/* Date Filter */}
-        {filterType === 'date' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">From Date</label>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm text-ink focus:outline-none focus:border-accent"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">To Date</label>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm text-ink focus:outline-none focus:border-accent"
-                />
-              </div>
-            </div>
-            {(dateFrom || dateTo) && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleApplyFilters}
-                  className="px-5 py-2 rounded-xl bg-accent text-white text-sm font-semibold flex items-center gap-2 hover:bg-accent/90"
-                >
-                  <Search size={16} />
-                  Apply Date Filter
-                </button>
-                <button
-                  onClick={() => { setDateFrom(''); setDateTo(''); }}
-                  className="px-4 py-2 rounded-xl border border-border text-sm text-muted hover:text-ink"
-                >
-                  Clear
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Bags & Objects Filter */}
-        {filterType === 'bags' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Bag Multi-Select Dropdown */}
-              <div>
-                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Select Bags</label>
-                <MultiSelectDropdown
-                  selected={selectedBagIds}
-                  options={availableBags.map(b => ({ id: b.id, name: b.name }))}
-                  onChange={setSelectedBagIds}
-                  placeholder="Choose bags..."
-                />
-              </div>
-
-              {/* Object Multi-Select Dropdown */}
-              <div>
-                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Select Objects</label>
-                <MultiSelectDropdown
-                  selected={selectedObjectIds}
-                  options={availableObjects.map(o => ({ id: o.id, name: `${o.name} (${o.library})` }))}
-                  onChange={setSelectedObjectIds}
-                  placeholder="Choose objects..."
-                />
-              </div>
-            </div>
-
-            {(selectedBagIds.length > 0 || selectedObjectIds.length > 0) && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleApplyFilters}
-                  className="px-5 py-2 rounded-xl bg-accent text-white text-sm font-semibold flex items-center gap-2 hover:bg-accent/90"
-                >
-                  <Search size={16} />
-                  Apply Filter
-                </button>
-                <button
-                  onClick={() => { setSelectedBagIds([]); setSelectedObjectIds([]); }}
-                  className="px-4 py-2 rounded-xl border border-border text-sm text-muted hover:text-ink"
-                >
-                  Clear
-                </button>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {loading ? (

@@ -301,55 +301,63 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
       const page = Math.max(1, parseInt(req.query.page) || 1);
       const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
       
-      // New filter parameters
-      const bagIds = req.query.bagIds ? String(req.query.bagIds).split(',').map(s => s.trim()).filter(Boolean) : [];
-      const objectIds = req.query.objectIds ? String(req.query.objectIds).split(',').map(s => s.trim()).filter(Boolean) : [];
-      const dateFrom = req.query.dateFrom ? String(req.query.dateFrom) : '';
-      const dateTo = req.query.dateTo ? String(req.query.dateTo) : '';
-      
-      // Legacy filters (kept for backward compatibility)
-      const bagType = req.query.bagType ? String(req.query.bagType).toLowerCase() : '';
-      const threatTypes = req.query.threatTypes ? String(req.query.threatTypes).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+      // New filter parameters for subcategories
+      const bagSubcategories = req.query.bagSubcategories ? String(req.query.bagSubcategories).split(',').map(s => s.trim()).filter(Boolean) : [];
+      const threatSubcategories = req.query.threatSubcategories ? String(req.query.threatSubcategories).split(',').map(s => s.trim()).filter(Boolean) : [];
+      const filterLogic = req.query.filterLogic ? String(req.query.filterLogic).toLowerCase() : 'or';
 
       const allLayouts = await getSavedLayouts();
+      const allItems = await getItems();
 
-      // Filter layouts based on criteria (OR logic)
+      // Filter layouts based on criteria
       const filtered = allLayouts.filter((layout) => {
         try {
           const objects = layout.layout_json?.objects || [];
           if (!objects.length) return false;
 
-          // Extract bag and non-bag objects
+          // Extract bag and threat objects
           const bagObjs = objects.filter(o => (o.library || '').toLowerCase().includes('bag'));
-          const nonBagObjs = objects.filter(o => !(o.library || '').toLowerCase().includes('bag'));
+          const threatObjs = objects.filter(o => (o.library || '').toLowerCase().includes('threat'));
           
-          // Get IDs from objects
-          const layoutBagIds = bagObjs.map(o => o.id);
-          const layoutObjectIds = nonBagObjs.map(o => o.id);
+          // Get subcategories by looking up the items database
+          const layoutBagSubcategories = bagObjs.map(o => {
+            const item = allItems.find(i => i.id === o.id);
+            return item?.subcategory || 'general';
+          }).filter(Boolean);
+          
+          const layoutThreatSubcategories = threatObjs.map(o => {
+            const item = allItems.find(i => i.id === o.id);
+            return item?.subcategory || 'general';
+          }).filter(Boolean);
 
-          // Date range filter (AND condition)
-          if (dateFrom || dateTo) {
-            const layoutDate = new Date(layout.created_at);
-            if (dateFrom && layoutDate < new Date(dateFrom)) return false;
-            if (dateTo && layoutDate > new Date(dateTo + 'T23:59:59')) return false;
+          // If no filters selected, include all layouts
+          if (bagSubcategories.length === 0 && threatSubcategories.length === 0) {
+            return true;
           }
 
-          // Build OR conditions for bags and objects
-          const bagMatch = bagIds.length === 0 || bagIds.some(bid => layoutBagIds.includes(bid));
-          const objectMatch = objectIds.length === 0 || objectIds.some(oid => layoutObjectIds.includes(oid));
+          // Apply filter logic based on selected mode
+          let matchesSelection = false;
           
-          // OR logic: match if ANY of the selected bags OR ANY of the selected objects are present
-          const matchesSelection = bagMatch || objectMatch;
+          if (filterLogic === 'or') {
+            // OR logic: match if ANY selected subcategory is present
+            const bagMatch = bagSubcategories.length === 0 || bagSubcategories.some(sub => layoutBagSubcategories.includes(sub));
+            const threatMatch = threatSubcategories.length === 0 || threatSubcategories.some(sub => layoutThreatSubcategories.includes(sub));
+            matchesSelection = bagMatch || threatMatch;
+          } 
+          else if (filterLogic === 'and') {
+            // AND logic: ALL selected subcategories must be present
+            const bagMatch = bagSubcategories.length === 0 || bagSubcategories.every(sub => layoutBagSubcategories.includes(sub));
+            const threatMatch = threatSubcategories.length === 0 || threatSubcategories.every(sub => layoutThreatSubcategories.includes(sub));
+            matchesSelection = bagMatch && threatMatch;
+          } 
+          else if (filterLogic === 'both') {
+            // Both logic: OR within category, AND between categories
+            const bagMatch = bagSubcategories.length === 0 || bagSubcategories.some(sub => layoutBagSubcategories.includes(sub));
+            const threatMatch = threatSubcategories.length === 0 || threatSubcategories.some(sub => layoutThreatSubcategories.includes(sub));
+            matchesSelection = bagMatch && threatMatch;
+          }
           
-          // Legacy filters (AND logic for backward compatibility)
-          const legacyBagMatch = !bagType || bagObjs.some(b => (b.name || '').toLowerCase().includes(bagType));
-          const legacyThreatMatch = !threatTypes.length || nonBagObjs.some(o => {
-            const name = (o.name || '').toLowerCase();
-            return threatTypes.some(tt => name.includes(tt));
-          });
-
-          // Combine: new filters (OR) AND legacy filters (AND)
-          return matchesSelection && legacyBagMatch && legacyThreatMatch;
+          return matchesSelection;
         } catch {
           return false;
         }
