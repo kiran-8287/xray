@@ -122,7 +122,7 @@ export default function UploadPage() {
                 preGeneratedFilepath: msg.filepath,
                 fileType: msg.fileType,
                 itemId: msg.id,
-                pixelDataFilename: `${msg.id}.json`,
+                pixelDataFilename: msg.pixelDataFilename,
                 width: msg.width,
                 height: msg.height,
               }];

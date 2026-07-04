@@ -413,8 +413,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     setAutoGeneratingIndices(prev => new Set(prev).add(idx));
     
     try {
-      // Use the itemId to find the pixel data file (now .npz format)
-      const pixelDataPath = `${stagedItem.itemId}.npz`;
+      // Use the pixelDataFilename from the staged item (includes highenrgy/ prefix)
+      const pixelDataPath = stagedItem.pixelDataFilename || `${stagedItem.itemId}.npz`;
       
       const res = await fetch(`http://localhost:8080/api/auto-valid-region`, {
         method: "POST",
@@ -485,7 +485,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
       
       const stagedItem = staged[idx];
       try {
-        const pixelDataPath = `${stagedItem.itemId}.npz`;
+        // Use the pixelDataFilename from the staged item (includes highenrgy/ prefix)
+        const pixelDataPath = stagedItem.pixelDataFilename || `${stagedItem.itemId}.npz`;
         
         const res = await fetch(`http://localhost:8080/api/auto-valid-region`, {
           method: "POST",
