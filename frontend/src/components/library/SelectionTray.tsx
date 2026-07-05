@@ -10,11 +10,20 @@ interface SelectionTrayProps {
   setKValue: (value: number) => void;
   maxThreats: number;
   setMaxThreats: (value: number) => void;
+  threatDistribution: Record<number, number>;
+  setThreatDistribution: (value: Record<number, number>) => void;
   isGenerating: boolean;
   generationProgress: string;
   onGenerate: () => void;
   hasCombinations: boolean;
 }
+
+const THREAT_LABELS: Record<number, string> = {
+  1: "1 threat",
+  2: "2 threats",
+  3: "3 threats",
+  4: "4 threats",
+};
 
 export default function SelectionTray({
   selectedCount,
@@ -24,12 +33,20 @@ export default function SelectionTray({
   setKValue,
   maxThreats,
   setMaxThreats,
+  threatDistribution,
+  setThreatDistribution,
   isGenerating,
   generationProgress,
   onGenerate,
   hasCombinations,
 }: SelectionTrayProps) {
   if (selectedCount === 0) return null;
+
+  const updateDistribution = (key: number, raw: string) => {
+    const val = parseInt(raw);
+    if (isNaN(val) || val < 0) return;
+    setThreatDistribution({ ...threatDistribution, [key]: Math.min(val, 100) });
+  };
 
   return (
     <div className="flex-shrink-0 bg-panel/95 backdrop-blur-sm border-t border-border px-6 py-3 flex items-center gap-4 shadow-[0_-4px_20px_rgba(27,35,51,0.08)] z-30">
@@ -41,8 +58,9 @@ export default function SelectionTray({
         item{selectedCount !== 1 ? "s" : ""} selected
       </span>
 
-      {/* Middle: K-combinations generator */}
+      {/* Middle: Controls */}
       <div className="flex items-center gap-3 ml-auto flex-wrap">
+        {/* K value input */}
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-muted uppercase tracking-wider">Generate</span>
         </div>
@@ -59,8 +77,10 @@ export default function SelectionTray({
         />
         <span className="text-xs text-muted">unique combinations</span>
 
-        {/* Max threats per combo */}
-        <div className="flex items-center gap-1.5 ml-2">
+        <div className="w-px h-6 bg-border mx-1" />
+
+        {/* Step 1: Max threats selector */}
+        <div className="flex items-center gap-1.5">
           <span className="text-xs text-muted">max</span>
           <select
             value={maxThreats}
@@ -74,6 +94,22 @@ export default function SelectionTray({
           </select>
           <span className="text-xs text-muted">threats/combo</span>
         </div>
+
+        {/* Step 2: Percentage inputs for 1..maxThreats */}
+        {Array.from({ length: maxThreats }, (_, i) => i + 1).map((n) => (
+          <div key={n} className="flex items-center gap-1">
+            <span className="text-[11px] text-muted whitespace-nowrap">{THREAT_LABELS[n]}:</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={threatDistribution[n] ?? 0}
+              onChange={(e) => updateDistribution(n, e.target.value)}
+              className="w-12 bg-surface border border-border rounded-lg px-1.5 py-1 text-xs text-ink font-mono text-center focus:outline-none focus:border-accent"
+            />
+            <span className="text-[11px] text-muted">%</span>
+          </div>
+        ))}
 
         {generationProgress && (
           <span className="text-xs text-muted animate-pulse">{generationProgress}</span>

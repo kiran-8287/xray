@@ -350,8 +350,42 @@ function generateSingleThreatPlacement(
 }
 
 /**
- * Generate a multi-threat combo: pick 1-4 random threats, place all inside bag
- * without overlapping each other, then add non-threats.
+ * Pick a threat count (1-4) based on percentage distribution weights.
+ * The distribution is an object like {1: 60, 2: 20, 3: 10, 4: 10}.
+ * Only considers counts up to the available threats length.
+ */
+function pickThreatCountByDistribution(
+  distribution: Record<number, number>,
+  availableThreats: number
+): number {
+  // Build weighted list of eligible counts
+  const eligible: { count: number; weight: number }[] = [];
+  for (let i = 1; i <= Math.min(4, availableThreats); i++) {
+    const weight = distribution[i] ?? 0;
+    if (weight > 0) {
+      eligible.push({ count: i, weight });
+    }
+  }
+
+  if (eligible.length === 0) {
+    // Fallback: uniform distribution
+    return 1 + Math.floor(Math.random() * Math.min(4, availableThreats));
+  }
+
+  const totalWeight = eligible.reduce((sum, e) => sum + e.weight, 0);
+  const random = Math.random() * totalWeight;
+  let cumulative = 0;
+  for (const e of eligible) {
+    cumulative += e.weight;
+    if (random <= cumulative) return e.count;
+  }
+
+  return eligible[eligible.length - 1].count;
+}
+
+/**
+ * Generate a multi-threat combo: pick 1-4 random threats based on distribution,
+ * place all inside bag without overlapping each other, then add non-threats.
  */
 function generateMultiThreatPlacements(
   bag: Item,
@@ -359,7 +393,7 @@ function generateMultiThreatPlacements(
   target: number,
   density: "empty" | "few" | "filled",
   nonThreats: Item[],
-  maxThreats: number,
+  threatDistribution: Record<number, number>,
   globalUsedIds?: Set<string>
 ): { results: CombinatorialResult[]; failure: FailureLog | null } {
   const results: CombinatorialResult[] = [];
@@ -375,11 +409,8 @@ function generateMultiThreatPlacements(
   const maxAttempts = Math.max(target * 200, 2000);
 
   for (let attempt = 0; attempt < maxAttempts && results.length < target; attempt++) {
-    // Pick 1 to maxThreats random threats (but not more than available)
-    const threatCount = Math.min(
-      1 + Math.floor(Math.random() * maxThreats),
-      threats.length
-    );
+    // Pick threat count based on percentage distribution
+    const threatCount = pickThreatCountByDistribution(threatDistribution, threats.length);
     const selectedThreats = shuffleArray(threats).slice(0, threatCount);
 
     // Try to place all selected threats without overlap
@@ -723,6 +754,7 @@ function generateCleanCombinations(
  *   get higher weight, ensuring the dataset is unbiased towards any subset of bags
  * - For each selected bag, distributes evenly across threats (if any)
  * - Supports multi-threat combos: when threats are available, each combo gets 1-4 random threats
+ *   based on the percentage distribution provided
  * - If a bag can't generate combinations, it's marked as exhausted
  *
  * @param bags - Selected bag items
@@ -730,7 +762,7 @@ function generateCleanCombinations(
  * @param nonThreats - Selected non-threat items
  * @param k - Target number of combinations
  * @param density - Density preset for non-threats
- * @param maxThreats - Maximum number of threats per combination (1-4, default 4)
+ * @param threatDistribution - Percentage distribution for threat counts, e.g. {1: 60, 2: 20, 3: 10, 4: 10}
  * @returns GenerationResult with results array and failures array
  */
 export function generateCombinations(
@@ -739,7 +771,7 @@ export function generateCombinations(
   nonThreats: Item[],
   k: number,
   density: "empty" | "few" | "filled" = "filled",
-  maxThreats: number = 4
+  threatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 }
 ): GenerationResult {
   if (bags.length === 0) return { results: [], failures: [] };
   if (k <= 0) return { results: [], failures: [] };
@@ -821,14 +853,14 @@ export function generateCombinations(
     }
 
     if (threats.length > 0) {
-      // Multi-threat mode: generate 1-maxThreats threats per combo
+      // Multi-threat mode: generate threats per combo based on distribution
       const { results: placements, failure } = generateMultiThreatPlacements(
         entry.bag,
         threats,
         1,
         density,
         nonThreats,
-        maxThreats,
+        threatDistribution,
         usedIds
       );
       if (placements.length > 0) {

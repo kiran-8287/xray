@@ -57,12 +57,46 @@ export default function LibraryPage() {
     } catch { return 20; }
   });
 
-  const [maxThreats, setMaxThreats] = useState<number>(() => {
+  const threatDistributionPresets: Record<number, Record<number, number>> = {
+    1: { 1: 100 },
+    2: { 1: 60, 2: 40 },
+    3: { 1: 60, 2: 30, 3: 10 },
+    4: { 1: 60, 2: 20, 3: 10, 4: 10 },
+  };
+
+  // Compute initial maxThreats first so defaultDist can use it
+  const initialMax = (() => {
     try {
       const saved = localStorage.getItem("libraryMaxThreats");
-      return saved ? parseInt(saved) : 4;
-    } catch { return 4; }
+      return saved ? parseInt(saved) : 1;
+    } catch { return 1; }
+  })();
+
+  const [maxThreats, setMaxThreats] = useState<number>(initialMax);
+
+  const [threatDistribution, setThreatDistribution] = useState<Record<number, number>>(() => {
+    try {
+      const saved = localStorage.getItem("libraryThreatDistribution");
+      return saved ? JSON.parse(saved) : { ...threatDistributionPresets[initialMax] };
+    } catch { return { ...threatDistributionPresets[initialMax] }; }
   });
+
+  // Auto-set distribution preset when maxThreats changes (only on first load or preset change)
+  useEffect(() => {
+    setThreatDistribution((prev) => {
+      const preset = threatDistributionPresets[maxThreats];
+      if (!preset) return prev;
+      // Only apply preset if the current distribution doesn't look user-customized
+      // Check if the current values match any known preset
+      const isCurrentPreset = Object.values(threatDistributionPresets).some(
+        (p) => JSON.stringify(p) === JSON.stringify(prev)
+      );
+      if (isCurrentPreset) {
+        return { ...preset };
+      }
+      return prev;
+    });
+  }, [maxThreats]);
 
   const [combinations, setCombinations] = useState<CombinatorialResult[]>(() => {
     try {
@@ -494,13 +528,18 @@ export default function LibraryPage() {
 
     try {
       const density = (localStorage.getItem("densityPreset") as "empty" | "few" | "filled") || "filled";
+      // Build distribution: only include counts up to maxThreats
+      const effectiveDist: Record<number, number> = {};
+      for (let i = 1; i <= maxThreats; i++) {
+        effectiveDist[i] = threatDistribution[i] ?? 0;
+      }
       const { results, failures: genFailures } = generateCombinations(
         selectedBags,
         selectedThreats,
         selectedOthers,
         kValue,
         density,
-        maxThreats
+        effectiveDist
       );
 
       setCombinations(results);
@@ -517,17 +556,22 @@ export default function LibraryPage() {
     } finally {
       setIsGenerating(false);
     }
-  }, [selectedItems, categorizedItems, kValue, combinations, failures]);
+  }, [selectedItems, categorizedItems, kValue, maxThreats, threatDistribution, combinations, failures]);
 
   // Persist K value
   useEffect(() => {
     localStorage.setItem("libraryKValue", String(kValue));
   }, [kValue]);
 
-  // Persist maxThreats value
+  // Persist maxThreats
   useEffect(() => {
     localStorage.setItem("libraryMaxThreats", String(maxThreats));
   }, [maxThreats]);
+
+  // Persist threat distribution
+  useEffect(() => {
+    localStorage.setItem("libraryThreatDistribution", JSON.stringify(threatDistribution));
+  }, [threatDistribution]);
 
   // Persist combinations and failures to sessionStorage
   useEffect(() => {
@@ -631,12 +675,15 @@ export default function LibraryPage() {
         setKValue={setKValue}
         maxThreats={maxThreats}
         setMaxThreats={setMaxThreats}
+        threatDistribution={threatDistribution}
+        setThreatDistribution={setThreatDistribution}
         isGenerating={isGenerating}
         generationProgress={generationProgress}
         onGenerate={handleGenerate}
         hasCombinations={combinations.length > 0}
       />
 
+      {/* editingItem modal, notifications, confirmDialog, ValidRegionEditor, AddSubcategoryModal */}
       {editingItem && editDraft && (
         <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4 py-6">
           <div className="w-full max-w-3xl rounded-3xl bg-panel border border-border shadow-2xl overflow-hidden">
