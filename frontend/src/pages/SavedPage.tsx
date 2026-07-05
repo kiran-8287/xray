@@ -44,12 +44,12 @@ const BAG_SUBCATEGORIES = getLibrarySubcategories("bags");
 // Threat subcategories for filter multi-select
 const THREAT_SUBCATEGORIES = getLibrarySubcategories("threats");
 
-function SavedLayoutPreview({ objects, bagOrigin }: { objects: LayoutObject[]; bagOrigin?: { x: number; y: number } }) {
+function SavedLayoutPreview({ objects }: { objects: LayoutObject[]; bagOrigin?: { x: number; y: number } }) {
   const previewRef = useRef<HTMLDivElement>(null);
   const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
 
   // Convert saved layout format (center/size/rotation) to transform format
-  // Coordinates are relative to bag's top-left corner, so we add bagOrigin offset
+  // Coordinates are absolute canvas positions
   const sortedObjects = [...objects]
     .map((obj) => {
       if (obj.transform) return obj;
@@ -58,8 +58,8 @@ function SavedLayoutPreview({ objects, bagOrigin }: { objects: LayoutObject[]; b
         return {
           ...obj,
           transform: {
-            x: (bagOrigin?.x || 0) + obj.center.x,
-            y: (bagOrigin?.y || 0) + obj.center.y,
+            x: obj.center.x,
+            y: obj.center.y,
             width: obj.size.width,
             height: obj.size.height,
             rotation: obj.rotation || 0,
@@ -441,7 +441,23 @@ export default function SavedPage() {
 
   const getObjects = (layout: SavedLayout): LayoutObject[] => {
     try {
-      return layout.layout_json?.objects || [];
+      const obj = layout.layout_json?.objects;
+      if (!obj) return [];
+      // New structure: { bag: {...}, threats: [...], non-threats: [...] }
+      if (obj.bag || obj.threats || obj["non-threats"]) {
+        const result: LayoutObject[] = [];
+        if (obj.bag) result.push({ ...obj.bag, library: "bag" });
+        if (Array.isArray(obj.threats)) {
+          obj.threats.forEach((t: any) => result.push({ ...t, library: "threat" }));
+        }
+        if (Array.isArray(obj["non-threats"])) {
+          obj["non-threats"].forEach((n: any) => result.push({ ...n, library: "non-threat" }));
+        }
+        return result;
+      }
+      // Legacy flat array structure
+      if (Array.isArray(obj)) return obj;
+      return [];
     } catch {
       return [];
     }
@@ -642,8 +658,8 @@ export default function SavedPage() {
                     const objects = getObjects(layout);
                     const bagObj = objects.find(o => (o.library || "").toLowerCase().includes("bag"));
                     const threatObjs = objects.filter(o => (o.library || "").toLowerCase().includes("threat"));
-                    const bagName = bagObj?.name || "—";
-                    const threatNames = threatObjs.map(t => t.name).filter(Boolean).join(", ") || "—";
+                    const bagName = bagObj?.id || bagObj?.name || "—";
+                    const threatNames = threatObjs.map(t => t.id || t.name).filter(Boolean).join(", ") || "—";
 
                     return (
                       <tr
@@ -706,8 +722,7 @@ export default function SavedPage() {
                    <div className="min-h-0 border-b border-border bg-surface p-4 lg:border-b-0 lg:border-r">
                      <div className="h-full rounded-2xl overflow-hidden border border-border bg-white">
                        <SavedLayoutPreview 
-                         objects={getObjects(selectedLayout)} 
-                         bagOrigin={selectedLayout.layout_json?.bagOrigin}
+                         objects={getObjects(selectedLayout)}
                        />
                      </div>
                    </div>
@@ -715,11 +730,11 @@ export default function SavedPage() {
                    {/* Right: Annotation Details */}
                    <div className="min-h-0 overflow-y-auto p-5">
                      <div className="space-y-4">
-                       {selectedLayout.layout_json?.objects?.length > 0 && (
-                         <div>
-                           <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Objects in Layout</h3>
-                           <div className="space-y-2">
-                             {selectedLayout.layout_json.objects.map((obj: any, idx: number) => {
+                  {(selectedLayout.layout_json?.objects?.bag || selectedLayout.layout_json?.objects?.threats?.length > 0 || selectedLayout.layout_json?.objects?.["non-threats"]?.length > 0) && (
+                    <div>
+                      <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Objects in Layout</h3>
+                      <div className="space-y-2">
+                        {getObjects(selectedLayout).map((obj: any, idx: number) => {
                                // Use center (now relative to bag origin) and size
                                const transform = obj.center && obj.size ? {
                                  x: obj.center.x,
@@ -732,7 +747,7 @@ export default function SavedPage() {
                                return (
                                  <div key={idx} className="rounded-xl border border-border bg-white p-2.5">
                                    <div className="flex items-center justify-between mb-1.5">
-                                     <span className="text-xs font-semibold text-ink">{obj.name}</span>
+                                     <span className="text-xs font-semibold text-ink">{obj.id || obj.name}</span>
                                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
                                        obj.library === "bag" ? "bg-blue-50 text-blue-700 border-blue-200" :
                                        obj.library === "threat" ? "bg-rose-50 text-rose-700 border-rose-200" :

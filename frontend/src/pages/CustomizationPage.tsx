@@ -626,60 +626,59 @@ export default function CustomizationPage() {
         bagTopLeft = bagCorners[0];
       }
 
-      const objectsWithSegmentation = objects.map((obj) => {
-        const corners = getRectCorners(
-          { x: obj.transform.x, y: obj.transform.y },
-          { width: obj.transform.width, height: obj.transform.height },
-          obj.transform.rotation
-        );
-        
-        const relativeCorners = corners.map(c => ({
-          x: c.x - bagTopLeft.x,
-          y: c.y - bagTopLeft.y
-        }));
-        
-        const relativeCenter = {
-          x: obj.transform.x - bagTopLeft.x,
-          y: obj.transform.y - bagTopLeft.y
-        };
+      // Separate objects into bag, threats, and non-threats
+      const bagObj = bagObject ? {
+        id: bagObject.id,
+        subcategory: bagObject.subcategory,
+        filepath: bagObject.filepath,
+        center: { x: bagObject.transform.x, y: bagObject.transform.y },
+        size: { width: bagObject.transform.width, height: bagObject.transform.height },
+        originalPixelValue: bagObject.originalPixelValue,
+        currentPixelValue: bagObject.currentPixelValue,
+        oldPixelValue: bagObject.oldPixelValue,
+        polygonOutline: bagObject.polygonOutline,
+        validRegionPolygon,
+        layer: bagObject.layer,
+      } : null;
 
-        return {
+      const threats = objects
+        .filter(o => o.library === "threat")
+        .map(obj => ({
           id: obj.id,
-          name: obj.name,
-          library: obj.library,
           subcategory: obj.subcategory,
           filepath: obj.filepath,
           center: { x: obj.transform.x, y: obj.transform.y },
-          relativeCenter,
           size: { width: obj.transform.width, height: obj.transform.height },
           rotation: obj.transform.rotation,
-          corners,
-          relativeCorners,
           originalPixelValue: obj.originalPixelValue,
           currentPixelValue: obj.currentPixelValue,
           oldPixelValue: obj.oldPixelValue,
-          polygonOutline: obj.polygonOutline,
           layer: obj.layer,
-        };
-      });
+        }));
 
-      const relativeValidRegion = validRegionPolygon.map(p => ({
-        x: p.x - bagTopLeft.x,
-        y: p.y - bagTopLeft.y
-      }));
+      const nonThreats = objects
+        .filter(o => o.library !== "bag" && o.library !== "threat")
+        .map(obj => ({
+          id: obj.id,
+          subcategory: obj.subcategory,
+          filepath: obj.filepath,
+          center: { x: obj.transform.x, y: obj.transform.y },
+          size: { width: obj.transform.width, height: obj.transform.height },
+          rotation: obj.transform.rotation,
+          originalPixelValue: obj.originalPixelValue,
+          currentPixelValue: obj.currentPixelValue,
+          oldPixelValue: obj.oldPixelValue,
+          layer: obj.layer,
+        }));
 
       const layout_json = {
-        name: annotation,
-        bagOrigin: bagTopLeft,
-        bag: bagObject ? {
-          id: bagObject.id,
-          name: bagObject.name,
-          filepath: bagObject.filepath,
-          size: { width: bagObject.transform.width, height: bagObject.transform.height },
-        } : null,
-        objects: objectsWithSegmentation,
-        validRegionPolygon,
-        relativeValidRegion,
+        threat_count: threats.length,
+        non_threat_count: nonThreats.length,
+        objects: {
+          bag: bagObj,
+          threats,
+          "non-threats": nonThreats,
+        },
         createdAt: new Date().toISOString(),
       };
 

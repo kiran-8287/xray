@@ -289,70 +289,59 @@ export default function CollagePage() {
           }
         }
         
-        // Prepare objects with all details
-        const objectsWithDetails = comb.objects.map((obj: any) => {
-          const corners = getRectCorners(
-            { x: obj.transform.x, y: obj.transform.y },
-            { width: obj.transform.width, height: obj.transform.height },
-            obj.transform.rotation
-          );
-          
-          // Transform coordinates relative to bag's top-left corner
-          const relativeCorners = corners.map((c: any) => ({
-            x: c.x - bagTopLeft.x,
-            y: c.y - bagTopLeft.y
-          }));
-          
-          const relativeCenter = {
-            x: obj.transform.x - bagTopLeft.x,
-            y: obj.transform.y - bagTopLeft.y
-          };
+        // Separate objects into bag, threats, and non-threats
+        const bagObj = bagObject ? {
+          id: bagObject.id,
+          subcategory: bagObject.subcategory,
+          filepath: bagObject.filepath,
+          center: { x: bagObject.transform.x, y: bagObject.transform.y },
+          size: { width: bagObject.transform.width, height: bagObject.transform.height },
+          originalPixelValue: bagObject.originalPixelValue,
+          currentPixelValue: bagObject.currentPixelValue,
+          oldPixelValue: bagObject.oldPixelValue,
+          polygonOutline: bagObject.polygonOutline,
+          validRegionPolygon,
+          layer: bagObject.layer,
+        } : null;
 
-          return {
+        const threats = comb.objects
+          .filter((o: any) => o.library === "threat")
+          .map((obj: any) => ({
             id: obj.id,
-            name: obj.name,
-            library: obj.library,
             subcategory: obj.subcategory,
             filepath: obj.filepath,
-            // Center coordinates relative to bag's top-left (ONLY store these)
-            center: relativeCenter,
-            // Dimensions
+            center: { x: obj.transform.x, y: obj.transform.y },
             size: { width: obj.transform.width, height: obj.transform.height },
-            // Rotation
             rotation: obj.transform.rotation,
-            // 4 corner coordinates relative to bag's top-left (ONLY store these)
-            corners: relativeCorners,
             originalPixelValue: obj.originalPixelValue,
             currentPixelValue: obj.currentPixelValue,
             oldPixelValue: obj.oldPixelValue,
-            polygonOutline: obj.polygonOutline,
             layer: obj.layer,
-          };
-        });
-        
-        // Transform valid region relative to bag's top-left
-        const relativeValidRegion = validRegionPolygon.map((p: any) => ({
-          x: p.x - bagTopLeft.x,
-          y: p.y - bagTopLeft.y
-        }));
+          }));
+
+        const nonThreats = comb.objects
+          .filter((o: any) => o.library !== "bag" && o.library !== "threat")
+          .map((obj: any) => ({
+            id: obj.id,
+            subcategory: obj.subcategory,
+            filepath: obj.filepath,
+            center: { x: obj.transform.x, y: obj.transform.y },
+            size: { width: obj.transform.width, height: obj.transform.height },
+            rotation: obj.transform.rotation,
+            originalPixelValue: obj.originalPixelValue,
+            currentPixelValue: obj.currentPixelValue,
+            oldPixelValue: obj.oldPixelValue,
+            layer: obj.layer,
+          }));
 
         const layout_json = {
-          name: annotation,
-          // Bag top-left corner (origin for relative coordinates)
-          bagOrigin: bagTopLeft,
-          // Bag information
-          bag: bagObject ? {
-            id: bagObject.id,
-            name: bagObject.name,
-            filepath: bagObject.filepath,
-            size: { width: bagObject.transform.width, height: bagObject.transform.height },
-          } : null,
-          // All objects
-          objects: objectsWithDetails,
-          // Valid region (absolute coordinates)
-          validRegionPolygon,
-          // Valid region (relative to bag's top-left)
-          relativeValidRegion,
+          threat_count: threats.length,
+          non_threat_count: nonThreats.length,
+          objects: {
+            bag: bagObj,
+            threats,
+            "non-threats": nonThreats,
+          },
           createdAt: new Date().toISOString(),
         };
         

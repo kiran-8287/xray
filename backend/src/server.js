@@ -308,10 +308,31 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
 
       const allLayouts = await getSavedLayouts();
 
+      // Helper to extract objects from either new or legacy structure
+      function extractObjects(layout) {
+        const obj = layout.layout_json?.objects;
+        if (!obj) return [];
+        // New structure: { bag: {...}, threats: [...], non-threats: [...] }
+        if (obj.bag || obj.threats || obj['non-threats']) {
+          const result = [];
+          if (obj.bag) result.push({ ...obj.bag, library: 'bag' });
+          if (Array.isArray(obj.threats)) {
+            obj.threats.forEach(t => result.push({ ...t, library: 'threat' }));
+          }
+          if (Array.isArray(obj['non-threats'])) {
+            obj['non-threats'].forEach(n => result.push({ ...n, library: 'non-threat' }));
+          }
+          return result;
+        }
+        // Legacy flat array structure
+        if (Array.isArray(obj)) return obj;
+        return [];
+      }
+
       // Filter layouts based on criteria
       const filtered = allLayouts.filter((layout) => {
         try {
-          const objects = layout.layout_json?.objects || [];
+          const objects = extractObjects(layout);
           if (!objects.length) return false;
 
           // Extract bag and threat objects
