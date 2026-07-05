@@ -8,6 +8,8 @@ interface SelectionTrayProps {
   onGenerateCollage: () => void;
   kValue: number;
   setKValue: (value: number) => void;
+  maxThreats: number;
+  setMaxThreats: (value: number) => void;
   isGenerating: boolean;
   generationProgress: string;
   onGenerate: () => void;
@@ -20,6 +22,8 @@ export default function SelectionTray({
   onGenerateCollage,
   kValue,
   setKValue,
+  maxThreats,
+  setMaxThreats,
   isGenerating,
   generationProgress,
   onGenerate,
@@ -54,6 +58,23 @@ export default function SelectionTray({
           className="w-25 bg-surface border border-border rounded-xl px-3 py-1.5 text-sm text-ink font-mono text-center focus:outline-none focus:border-accent"
         />
         <span className="text-xs text-muted">unique combinations</span>
+
+        {/* Max threats per combo */}
+        <div className="flex items-center gap-1.5 ml-2">
+          <span className="text-xs text-muted">max</span>
+          <select
+            value={maxThreats}
+            onChange={(e) => setMaxThreats(parseInt(e.target.value))}
+            className="bg-surface border border-border rounded-xl px-2 py-1.5 text-sm text-ink font-mono text-center focus:outline-none focus:border-accent"
+          >
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+            <option value={4}>4</option>
+          </select>
+          <span className="text-xs text-muted">threats/combo</span>
+        </div>
+
         {generationProgress && (
           <span className="text-xs text-muted animate-pulse">{generationProgress}</span>
         )}

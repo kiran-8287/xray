@@ -57,6 +57,13 @@ export default function LibraryPage() {
     } catch { return 20; }
   });
 
+  const [maxThreats, setMaxThreats] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("libraryMaxThreats");
+      return saved ? parseInt(saved) : 4;
+    } catch { return 4; }
+  });
+
   const [combinations, setCombinations] = useState<CombinatorialResult[]>(() => {
     try {
       const cached = sessionStorage.getItem("collageCombinations");
@@ -492,7 +499,8 @@ export default function LibraryPage() {
         selectedThreats,
         selectedOthers,
         kValue,
-        density
+        density,
+        maxThreats
       );
 
       setCombinations(results);
@@ -515,6 +523,11 @@ export default function LibraryPage() {
   useEffect(() => {
     localStorage.setItem("libraryKValue", String(kValue));
   }, [kValue]);
+
+  // Persist maxThreats value
+  useEffect(() => {
+    localStorage.setItem("libraryMaxThreats", String(maxThreats));
+  }, [maxThreats]);
 
   // Persist combinations and failures to sessionStorage
   useEffect(() => {
@@ -616,6 +629,8 @@ export default function LibraryPage() {
         onGenerateCollage={handleGenerateCollage}
         kValue={kValue}
         setKValue={setKValue}
+        maxThreats={maxThreats}
+        setMaxThreats={setMaxThreats}
         isGenerating={isGenerating}
         generationProgress={generationProgress}
         onGenerate={handleGenerate}

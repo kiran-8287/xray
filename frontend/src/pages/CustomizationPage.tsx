@@ -115,7 +115,7 @@ export default function CustomizationPage() {
     hasInitialized.current = true;
 
     const bagId = searchParams.get("bagId") || "";
-    const threatId = searchParams.get("threatId") || "";
+    const threatIdsStr = searchParams.get("threatIds") || "";
     const otherIds = searchParams.get("otherIds") || "";
     const precomputedId = searchParams.get("precomputed") || "";
 
@@ -144,7 +144,7 @@ export default function CustomizationPage() {
     }
 
     // 2. Check localStorage for previously saved workspace
-    const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+    const storageKey = `xray_workspace_${bagId}_${threatIdsStr}_${otherIds}`;
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
@@ -188,9 +188,9 @@ export default function CustomizationPage() {
   useEffect(() => {
     if (!hasInitialized.current || objects.length === 0) return;
     const bagId = searchParams.get("bagId") || "";
-    const threatId = searchParams.get("threatId") || "";
+    const threatIds = searchParams.get("threatIds") || searchParams.get("threatId") || "";
     const otherIds = searchParams.get("otherIds") || "";
-    const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+    const storageKey = `xray_workspace_${bagId}_${threatIds}_${otherIds}`;
     localStorage.setItem(storageKey, JSON.stringify(objects));
   }, [objects, searchParams]);
 
@@ -213,10 +213,11 @@ export default function CustomizationPage() {
     imageDimensions: Map<string, { width: number; height: number }> = new Map()
   ) {
     const bagId = params.get("bagId");
-    const threatId = params.get("threatId");
+    const threatIdsStr = params.get("threatIds") || "";
+    const threatIds = threatIdsStr ? threatIdsStr.split(",").filter(Boolean) : [];
     const otherIdsStr = params.get("otherIds");
     const otherIds = otherIdsStr ? otherIdsStr.split(",").filter(Boolean) : [];
-    const hasQueryParams = params.has("bagId") || params.has("threatId") || params.has("otherIds");
+    const hasQueryParams = params.has("bagId") || params.has("threatIds") || params.has("threatId") || params.has("otherIds");
 
     // Flatten all items across all categories and subcategories
     const allItems: Item[] = [];
@@ -352,11 +353,13 @@ export default function CustomizationPage() {
       });
     });
 
-    // 3. Locate threat
+    // 3. Locate threats (multiple)
     const allThreats = allItems.filter(isThreat);
-    const threatItem = allThreats.find((t) => t.id === threatId);
+    const matchedThreats = threatIds
+      .map((id) => allThreats.find((t) => t.id === id))
+      .filter(Boolean) as Item[];
 
-    if (threatItem) {
+    matchedThreats.forEach((threatItem, i) => {
       let threatOutline = null;
       if (threatItem.polygon_json) {
         threatOutline = typeof threatItem.polygon_json === "string"
@@ -376,7 +379,7 @@ export default function CustomizationPage() {
         pos = { x: padding + Math.random() * (CANVAS_W - 2 * padding), y: padding + Math.random() * (CANVAS_H - 2 * padding), rotation: Math.random() * 360 };
       }
       newObjects.push({
-        id: "initial-threat",
+        id: `initial-threat-${i}`,
         name: threatItem.name,
         library: getStencilKind(threatItem.category),
         subcategory: threatItem.subcategory,
@@ -391,7 +394,7 @@ export default function CustomizationPage() {
         initialHeight: h,
         layer: layer++,
       });
-    }
+    });
 
     if (newObjects.length > 0) {
       setObj(newObjects);
@@ -407,9 +410,9 @@ export default function CustomizationPage() {
     
     // Clear localStorage for this combination so it doesn't load old positions
     const bagId = searchParams.get("bagId") || "";
-    const threatId = searchParams.get("threatId") || "";
+    const threatIds = searchParams.get("threatIds") || searchParams.get("threatId") || "";
     const otherIds = searchParams.get("otherIds") || "";
-    const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+    const storageKey = `xray_workspace_${bagId}_${threatIds}_${otherIds}`;
     localStorage.removeItem(storageKey);
 
     buildAndSetObjects(categorizedList, searchParams, setObjects, setHistory, setHistoryIndex);
@@ -706,9 +709,9 @@ export default function CustomizationPage() {
       
       // Update localStorage so collage page reflects the changes
       const bagId = searchParams.get("bagId") || "";
-      const threatId = searchParams.get("threatId") || "";
+      const threatIds = searchParams.get("threatIds") || searchParams.get("threatId") || "";
       const otherIds = searchParams.get("otherIds") || "";
-      const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+      const storageKey = `xray_workspace_${bagId}_${threatIds}_${otherIds}`;
       localStorage.setItem(storageKey, JSON.stringify(objects));
       
       // Also update the collage combinations in sessionStorage
@@ -725,7 +728,7 @@ export default function CustomizationPage() {
                   ...combo,
                   objects: objects,
                   bag: objects.find((o: any) => o.library === "bag") || combo.bag,
-                  threat: objects.find((o: any) => o.library === "threat") || combo.threat,
+                  threats: objects.filter((o: any) => o.library === "threat") || combo.threats,
                   others: objects.filter((o: any) => o.library !== "bag" && o.library !== "threat")
                 };
               }

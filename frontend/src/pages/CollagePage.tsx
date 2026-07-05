@@ -73,7 +73,7 @@ export default function CollagePage() {
     const comboItemIds = new Set();
     restoredCombos.forEach(c => {
       comboItemIds.add(c.bag.id);
-      if (c.threat) comboItemIds.add(c.threat.id);
+      if (c.threats && c.threats.length > 0) c.threats.forEach((t: any) => comboItemIds.add(t.id));
       c.others.forEach((o: any) => comboItemIds.add(o.id));
     });
 
@@ -186,7 +186,9 @@ export default function CollagePage() {
 
     const queryParams = new URLSearchParams();
     queryParams.set("bagId", comb.bag.id);
-    if (comb.threat) queryParams.set("threatId", comb.threat.id);
+    if (comb.threats && comb.threats.length > 0) {
+      queryParams.set("threatIds", comb.threats.map(t => t.id).join(","));
+    }
     if (comb.others.length > 0) {
       queryParams.set("otherIds", comb.others.map((o) => o.id).join(","));
     }
@@ -253,7 +255,7 @@ export default function CollagePage() {
     try {
       for (const comb of combinations) {
         // Generate auto-annotation from workspace contents
-        const threatNames = comb.threat ? [comb.threat.name] : [];
+        const threatNames = comb.threats && comb.threats.length > 0 ? comb.threats.map(t => t.name) : [];
         const otherNames = comb.others.map(o => o.name);
         const allObjects = [...threatNames, ...otherNames];
         const annotation = `${comb.bag.name}${allObjects.length > 0 ? ` containing ${allObjects.join(", ")}` : ""}`;
@@ -582,7 +584,7 @@ export default function CollagePage() {
                       objects={comb.objects}
                       combinationId={comb.id}
                       bagId={comb.bag.id}
-                      threatId={comb.threat?.id}
+                      threatId={comb.threats?.[0]?.id}
                       otherIds={comb.others.map(o => o.id)}
                     />
                   </button>
@@ -665,7 +667,7 @@ export default function CollagePage() {
                   objects={selectedCombination.objects}
                   combinationId={selectedCombination.id}
                   bagId={selectedCombination.bag.id}
-                  threatId={selectedCombination.threat?.id}
+                  threatId={selectedCombination.threats?.[0]?.id}
                   otherIds={selectedCombination.others.map(o => o.id)}
                 />
               </div>

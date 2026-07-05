@@ -24,7 +24,7 @@ export type SceneObject = {
 export type CombinatorialResult = {
   id: string;
   bag: import("../types/library").Item;
-  threat?: import("../types/library").Item;
+  threats: import("../types/library").Item[];
   others: import("../types/library").Item[];
   objects: SceneObject[];
 };
