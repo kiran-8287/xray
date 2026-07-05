@@ -866,6 +866,81 @@ app.post("/api/render-and-save-collage", async (req, res) => {
     }
 });
 
+// Render a preview image from a saved layout using real pixel data (I1*I2/65535)
+app.post('/api/render-preview', async (req, res) => {
+    try {
+        const { objects } = req.body;
+        if (!objects) return res.status(400).json({ ok: false, error: 'Missing objects' });
+
+        // Load all items to look up pixel_data_path by id
+        const allItems = await getItems();
+        const itemMap = new Map(allItems.map(i => [i.id, i]));
+
+        // Flatten objects into renderScene format
+        const flatObjects = [];
+        let bagWidth = 800;
+        let bagHeight = 600;
+
+        if (objects.bag) {
+            const b = objects.bag;
+            bagWidth = b.size?.width || 800;
+            bagHeight = b.size?.height || 600;
+            const item = itemMap.get(b.id);
+            flatObjects.push({
+                id: b.id,
+                filepath: b.filepath,
+                pixel_data_path: item?.pixel_data_path || null,
+                originalPixelValue: b.originalPixelValue,
+                transform: {
+                    x: b.center?.x || 0,
+                    y: b.center?.y || 0,
+                    width: b.size?.width || 0,
+                    height: b.size?.height || 0,
+                    rotation: 0,
+                },
+                layer: b.layer || 0,
+            });
+        }
+
+        const addObjects = (list, library) => {
+            if (!Array.isArray(list)) return;
+            for (const obj of list) {
+                const item = itemMap.get(obj.id);
+                flatObjects.push({
+                    id: obj.id,
+                    filepath: obj.filepath,
+                    pixel_data_path: item?.pixel_data_path || null,
+                    originalPixelValue: obj.originalPixelValue,
+                    transform: {
+                        x: obj.center?.x || 0,
+                        y: obj.center?.y || 0,
+                        width: obj.size?.width || 0,
+                        height: obj.size?.height || 0,
+                        rotation: obj.rotation || 0,
+                    },
+                    layer: obj.layer || 0,
+                });
+            }
+        };
+
+        addObjects(objects.threats, 'threat');
+        addObjects(objects['non-threats'], 'non-threat');
+
+        if (flatObjects.length === 0) {
+            return res.status(400).json({ ok: false, error: 'No objects to render' });
+        }
+
+        // Render using the bag's dimensions as canvas size
+        const pngBuffer = await renderSceneAsync(flatObjects, bagWidth, bagHeight);
+
+        res.set('Content-Type', 'image/png');
+        res.send(pngBuffer);
+    } catch (err) {
+        console.error('[render-preview] Error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;
 
 app.listen(port, () => {

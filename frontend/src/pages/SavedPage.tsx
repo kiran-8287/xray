@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
-import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check } from "lucide-react";
+import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check, Loader2 } from "lucide-react";
 import { getLibrarySubcategories } from "../config/categories";
 
 interface SavedLayout {
@@ -44,89 +44,44 @@ const BAG_SUBCATEGORIES = getLibrarySubcategories("bags");
 // Threat subcategories for filter multi-select
 const THREAT_SUBCATEGORIES = getLibrarySubcategories("threats");
 
-function SavedLayoutPreview({ objects }: { objects: LayoutObject[]; bagOrigin?: { x: number; y: number } }) {
+function SavedLayoutPreview({ layoutJson }: { layoutJson: any }) {
   const previewRef = useRef<HTMLDivElement>(null);
   const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // Convert saved layout format (center/size/rotation) to transform format
-  // Coordinates are absolute canvas positions
-  const sortedObjects = [...objects]
-    .map((obj) => {
-      if (obj.transform) return obj;
-      // Convert from saved format to transform format
-      if (obj.center && obj.size) {
-        return {
-          ...obj,
-          transform: {
-            x: obj.center.x,
-            y: obj.center.y,
-            width: obj.size.width,
-            height: obj.size.height,
-            rotation: obj.rotation || 0,
-          },
-        };
-      }
-      return null;
+  // Fetch rendered preview from backend when layoutJson changes
+  useEffect(() => {
+    if (!layoutJson?.objects) return;
+
+    let cancelled = false;
+    setLoading(true);
+    setPreviewUrl(null);
+
+    fetch(`${API_BASE}/api/render-preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ objects: layoutJson.objects }),
     })
-    .filter((obj): obj is LayoutObject => obj !== null)
-    .sort((a, b) => (a.layer ?? 0) - (b.layer ?? 0));
-
-  // Calculate dynamic canvas size based on objects (especially the bag)
-  const canvasSize = React.useMemo(() => {
-    if (sortedObjects.length === 0) {
-      return { width: 800, height: 600 };
-    }
-
-    // Find the bag object to use as base
-    const bagObj = sortedObjects.find(obj => 
-      (obj.library || "").toLowerCase().includes("bag")
-    );
-
-    if (bagObj && bagObj.transform) {
-      // Use bag dimensions as canvas size
-      const bagWidth = bagObj.transform.width;
-      const bagHeight = bagObj.transform.height;
-      
-      // Find bounding box of all objects
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      
-      sortedObjects.forEach(obj => {
-        if (!obj.transform) return;
-        const halfW = obj.transform.width / 2;
-        const halfH = obj.transform.height / 2;
-        const cos = Math.cos((obj.transform.rotation * Math.PI) / 180);
-        const sin = Math.sin((obj.transform.rotation * Math.PI) / 180);
-        
-        // Get four corners of the rotated rectangle
-        const corners = [
-          { x: -halfW, y: -halfH },
-          { x: halfW, y: -halfH },
-          { x: halfW, y: halfH },
-          { x: -halfW, y: halfH },
-        ].map(corner => ({
-          x: obj.transform!.x + corner.x * cos - corner.y * sin,
-          y: obj.transform!.y + corner.x * sin + corner.y * cos,
-        }));
-        
-        corners.forEach(corner => {
-          minX = Math.min(minX, corner.x);
-          minY = Math.min(minY, corner.y);
-          maxX = Math.max(maxX, corner.x);
-          maxY = Math.max(maxY, corner.y);
-        });
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Render failed');
+        const blob = await res.blob();
+        if (!cancelled) {
+          const url = URL.createObjectURL(blob);
+          setPreviewUrl(url);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error('Error rendering preview:', err);
+        if (!cancelled) setLoading(false);
       });
-      
-      // Add some padding
-      const padding = 20;
-      const width = Math.max(bagWidth, maxX - minX + padding * 2);
-      const height = Math.max(bagHeight, maxY - minY + padding * 2);
-      
-      return { width, height };
-    }
 
-    // Fallback if no bag found
-    return { width: 800, height: 600 };
-  }, [sortedObjects]);
+    return () => {
+      cancelled = true;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [layoutJson]);
 
   useLayoutEffect(() => {
     const node = previewRef.current;
@@ -145,63 +100,24 @@ function SavedLayoutPreview({ objects }: { objects: LayoutObject[]; bagOrigin?: 
     return () => observer.disconnect();
   }, []);
 
-  // Calculate scale to fit canvas in preview while maintaining aspect ratio
-  const scale = previewSize.width > 0 && previewSize.height > 0
-    ? Math.min(
-        previewSize.width / canvasSize.width,
-        previewSize.height / canvasSize.height
-      )
-    : 1;
-
   return (
-    <div ref={previewRef} className="relative w-full h-full overflow-hidden bg-white">
-      <div
-        className="absolute"
-        style={{
-          left: "50%",
-          top: "50%",
-          transformOrigin: "center",
-          transform: `translate(-50%, -50%) scale(${scale})`,
-          width: canvasSize.width,
-          height: canvasSize.height,
-        }}
-      >
-        {sortedObjects.map((obj) => {
-          const transform = obj.transform!;
-          const isBag = (obj.library || "").toLowerCase() === "bag" || (obj.library || "").toLowerCase() === "bags";
-
-          return (
-            <div
-              key={obj.id}
-              className="absolute"
-              style={{
-                left: transform.x - transform.width / 2,
-                top: transform.y - transform.height / 2,
-                width: transform.width,
-                height: transform.height,
-                transform: `rotate(${transform.rotation}deg)`,
-                transformOrigin: "center",
-                zIndex: obj.layer ?? 0,
-                opacity: isBag ? 1 : 0.7,
-                mixBlendMode: isBag ? "normal" : "multiply",
-              }}
-            >
-              <img
-                src={`${IMAGE_BASE_URL}${obj.filepath}`}
-                alt={obj.name || "Object"}
-                className="w-full h-full object-fill pointer-events-none"
-                draggable={false}
-              />
-            </div>
-          );
-        })}
-
-        {sortedObjects.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center text-muted/40">
-            <Grid3X3 size={28} />
-          </div>
-        )}
-      </div>
+    <div ref={previewRef} className="relative w-full h-full overflow-hidden bg-white flex items-center justify-center">
+      {loading ? (
+        <div className="flex items-center gap-2 text-sm text-muted">
+          <Loader2 size={16} className="animate-spin" />
+          Rendering preview...
+        </div>
+      ) : previewUrl ? (
+        <img
+          src={previewUrl}
+          alt="Layout preview"
+          className="max-w-full max-h-full object-contain"
+        />
+      ) : (
+        <div className="flex items-center justify-center text-muted/40">
+          <Grid3X3 size={28} />
+        </div>
+      )}
     </div>
   );
 }
@@ -436,7 +352,7 @@ export default function SavedPage() {
 
   // Load on page change
   useEffect(() => {
-    if (page > 1) loadLayouts(page);
+    loadLayouts(page);
   }, [page]);
 
   const getObjects = (layout: SavedLayout): LayoutObject[] => {
@@ -722,7 +638,7 @@ export default function SavedPage() {
                    <div className="min-h-0 border-b border-border bg-surface p-4 lg:border-b-0 lg:border-r">
                      <div className="h-full rounded-2xl overflow-hidden border border-border bg-white">
                        <SavedLayoutPreview 
-                         objects={getObjects(selectedLayout)}
+                         layoutJson={selectedLayout.layout_json}
                        />
                      </div>
                    </div>
