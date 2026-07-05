@@ -50,6 +50,11 @@ export default function SimpleLibrarySidebar({
 
   return (
     <aside className="w-96 border-r border-border bg-nav flex flex-col overflow-y-auto flex-shrink-0 select-none shadow-sm">
+      <div className="p-4">
+        <div className="border-l-4 border-accent pl-4">
+          <h2 className="text-3xl font-bold text-ink tracking-tight">Library Images</h2>
+        </div>
+      </div>
       <div className="p-3 space-y-3 flex-1 overflow-y-auto">
         {['bags', 'threats', 'non-threats'].map((catKey) => {
           const config = getCategoryConfig(catKey);

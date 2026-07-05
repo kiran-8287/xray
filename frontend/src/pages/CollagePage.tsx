@@ -431,7 +431,7 @@ export default function CollagePage() {
       {/* Header Row */}
       <div className="flex items-end justify-between mb-8 border-l-4 border-accent pl-4">
         <div>
-          <h2 className="text-3xl font-bold text-ink tracking-tight">Collage Generator</h2>
+          <h2 className="text-3xl font-bold text-ink tracking-tight">Collage Images</h2>
         </div>
         <div className="flex items-center gap-3">
           <button

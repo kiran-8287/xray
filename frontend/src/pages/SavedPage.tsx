@@ -413,9 +413,8 @@ export default function SavedPage() {
   return (
     <div className="p-6">
       <div className="mb-6 flex items-center justify-between gap-4">
-        <div>
-          <p className="text-sm uppercase tracking-[0.2em] text-muted">Saved Workspaces</p>
-          <h1 className="text-3xl font-semibold text-ink">Saved Layouts</h1>
+        <div className="border-l-4 border-accent pl-4">
+          <h2 className="text-3xl font-bold text-ink tracking-tight">Saved Layouts</h2>
         </div>
         <div className="inline-flex items-center gap-2 rounded-xl border border-border bg-panel px-4 py-3 text-sm text-muted">
           <FolderOpen size={18} />
@@ -562,11 +561,10 @@ export default function SavedPage() {
                 <thead className="bg-surface/50">
                   <tr className="text-xs font-semibold text-muted uppercase tracking-wider">
                     <th className="text-left py-3 px-4 w-12">#</th>
-                    <th className="text-left py-3 px-4">ID</th>
-                    <th className="text-left py-3 px-4">Bag</th>
-                    <th className="text-left py-3 px-4">Threats</th>
-                    <th className="text-center py-3 px-4">Objects</th>
-                    <th className="text-right py-3 px-4">Date</th>
+                    <th className="text-left py-3 px-4 w-48">ID</th>
+                    <th className="text-left py-3 px-4 w-48">Bag</th>
+                    <th className="text-left py-3 px-4 w-48">Threats</th>
+                    <th className="text-left py-3 px-4 w-48">Non-Threats</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -574,8 +572,10 @@ export default function SavedPage() {
                     const objects = getObjects(layout);
                     const bagObj = objects.find(o => (o.library || "").toLowerCase().includes("bag"));
                     const threatObjs = objects.filter(o => (o.library || "").toLowerCase().includes("threat"));
+                    const nonThreatObjs = objects.filter(o => (o.library || "").toLowerCase().includes("non-threat"));
                     const bagName = bagObj?.id || bagObj?.name || "—";
                     const threatNames = threatObjs.map(t => t.id || t.name).filter(Boolean).join(", ") || "—";
+                    const nonThreatNames = nonThreatObjs.map(t => t.id || t.name).filter(Boolean).join(", ") || "—";
 
                     return (
                       <tr
@@ -595,13 +595,8 @@ export default function SavedPage() {
                         <td className="py-3 px-4">
                           <span className="text-sm text-rose-700">{threatNames}</span>
                         </td>
-                        <td className="py-3 px-4 text-center">
-                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-surface text-xs font-semibold text-muted border border-border">
-                            {objects.length}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <span className="text-xs text-muted">{new Date(layout.created_at).toLocaleDateString()}</span>
+                        <td className="py-3 px-4">
+                          <span className="text-sm text-ink">{nonThreatNames}</span>
                         </td>
                       </tr>
                     );
