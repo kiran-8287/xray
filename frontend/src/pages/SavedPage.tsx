@@ -518,9 +518,9 @@ export default function SavedPage() {
             </div>
           </div>
 
-          {/* Filter Logic Segmented Control */}
+          {/* Threat Filter Logic Segmented Control */}
           <div>
-            <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter Logic</label>
+            <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Threat Filter Logic</label>
             <div className="inline-flex items-center rounded-lg border border-border bg-white p-1">
               <button
                 onClick={() => setFilterLogic('or')}
@@ -529,7 +529,7 @@ export default function SavedPage() {
                     ? 'bg-accent text-white shadow-sm'
                     : 'text-muted hover:text-ink hover:bg-surface'
                 }`}
-                title="Match ANY selected subcategory"
+                title="Show layouts with ANY selected threat"
               >
                 OR
               </button>
@@ -540,7 +540,7 @@ export default function SavedPage() {
                     ? 'bg-accent text-white shadow-sm'
                     : 'text-muted hover:text-ink hover:bg-surface'
                 }`}
-                title="Match ALL selected subcategories"
+                title="Show layouts with ALL selected threats together"
               >
                 AND
               </button>
@@ -551,15 +551,15 @@ export default function SavedPage() {
                     ? 'bg-accent text-white shadow-sm'
                     : 'text-muted hover:text-ink hover:bg-surface'
                 }`}
-                title="OR within category, AND between categories"
+                title="Show selected bag(s) with ANY of the selected threats"
               >
                 Both
               </button>
             </div>
             <p className="text-[10px] text-muted mt-1">
-              {filterLogic === 'or' && 'Shows layouts with ANY selected subcategory'}
-              {filterLogic === 'and' && 'Shows layouts with ALL selected subcategories'}
-              {filterLogic === 'both' && 'Shows layouts with (ANY bag OR ANY threat) from each category'}
+              {filterLogic === 'or' && 'Shows selected bag(s) with ANY one of the selected threats (backpack+gun OR backpack+knife)'}
+              {filterLogic === 'and' && 'Shows selected bag(s) with ALL selected threats together (backpack+gun+knife)'}
+              {filterLogic === 'both' && 'Shows selected bag(s) with at least one selected threat (backpack+gun, backpack+knife, or backpack+gun+knife)'}
             </p>
           </div>
 

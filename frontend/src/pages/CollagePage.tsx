@@ -310,6 +310,7 @@ export default function CollagePage() {
             id: obj.id,
             name: obj.name,
             library: obj.library,
+            subcategory: obj.subcategory,
             filepath: obj.filepath,
             // Center coordinates relative to bag's top-left (ONLY store these)
             center: relativeCenter,

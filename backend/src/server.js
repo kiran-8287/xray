@@ -307,7 +307,6 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
       const filterLogic = req.query.filterLogic ? String(req.query.filterLogic).toLowerCase() : 'or';
 
       const allLayouts = await getSavedLayouts();
-      const allItems = await getItems();
 
       // Filter layouts based on criteria
       const filtered = allLayouts.filter((layout) => {
@@ -319,43 +318,60 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
           const bagObjs = objects.filter(o => (o.library || '').toLowerCase().includes('bag'));
           const threatObjs = objects.filter(o => (o.library || '').toLowerCase().includes('threat'));
           
-          // Get subcategories by looking up the items database
+          // Get subcategories from objects (use subcategory field if available, otherwise extract from library)
           const layoutBagSubcategories = bagObjs.map(o => {
-            const item = allItems.find(i => i.id === o.id);
-            return item?.subcategory || 'general';
-          }).filter(Boolean);
+            // First try the subcategory field (Option A: stored in layout)
+            if (o.subcategory) return o.subcategory.toLowerCase();
+            // Fallback: extract from library field (e.g., "bag-backpack" -> "backpack")
+            const lib = (o.library || '').toLowerCase();
+            if (lib.includes('bag')) {
+              const parts = lib.split('-');
+              if (parts.length > 1) return parts[1];
+            }
+            return 'general';
+          });
           
           const layoutThreatSubcategories = threatObjs.map(o => {
-            const item = allItems.find(i => i.id === o.id);
-            return item?.subcategory || 'general';
-          }).filter(Boolean);
+            // First try the subcategory field (Option A: stored in layout)
+            if (o.subcategory) return o.subcategory.toLowerCase();
+            // Fallback: extract from library field
+            const lib = (o.library || '').toLowerCase();
+            if (lib.includes('threat')) {
+              const parts = lib.split('-');
+              if (parts.length > 1) return parts[1];
+            }
+            return 'general';
+          });
 
           // If no filters selected, include all layouts
           if (bagSubcategories.length === 0 && threatSubcategories.length === 0) {
             return true;
           }
 
-          // Apply filter logic based on selected mode
-          let matchesSelection = false;
+          // Bags always use OR logic (each layout has only one bag)
+          const bagMatch = bagSubcategories.length === 0 || 
+                          bagSubcategories.some(sub => layoutBagSubcategories.includes(sub));
           
-          if (filterLogic === 'or') {
-            // OR logic: match if ANY selected subcategory is present
-            const bagMatch = bagSubcategories.length === 0 || bagSubcategories.some(sub => layoutBagSubcategories.includes(sub));
-            const threatMatch = threatSubcategories.length === 0 || threatSubcategories.some(sub => layoutThreatSubcategories.includes(sub));
-            matchesSelection = bagMatch || threatMatch;
-          } 
-          else if (filterLogic === 'and') {
-            // AND logic: ALL selected subcategories must be present
-            const bagMatch = bagSubcategories.length === 0 || bagSubcategories.every(sub => layoutBagSubcategories.includes(sub));
-            const threatMatch = threatSubcategories.length === 0 || threatSubcategories.every(sub => layoutThreatSubcategories.includes(sub));
-            matchesSelection = bagMatch && threatMatch;
-          } 
-          else if (filterLogic === 'both') {
-            // Both logic: OR within category, AND between categories
-            const bagMatch = bagSubcategories.length === 0 || bagSubcategories.some(sub => layoutBagSubcategories.includes(sub));
-            const threatMatch = threatSubcategories.length === 0 || threatSubcategories.some(sub => layoutThreatSubcategories.includes(sub));
-            matchesSelection = bagMatch && threatMatch;
+          // Threats use the selected filter logic
+          let threatMatch = true;
+          if (threatSubcategories.length > 0) {
+            if (filterLogic === 'or') {
+              // OR: Layout has ANY of the selected threats
+              threatMatch = threatSubcategories.some(sub => layoutThreatSubcategories.includes(sub));
+            } else if (filterLogic === 'and') {
+              // AND: Layout has ALL of the selected threats
+              threatMatch = threatSubcategories.every(sub => layoutThreatSubcategories.includes(sub));
+            } else if (filterLogic === 'both') {
+              // Both: Layout has selected bag(s) AND at least one selected threat
+              // This shows all combinations: bag+gun, bag+knife, bag+gun+knife
+              const hasBag = bagSubcategories.some(sub => layoutBagSubcategories.includes(sub));
+              const hasThreat = threatSubcategories.some(sub => layoutThreatSubcategories.includes(sub));
+              threatMatch = hasBag && hasThreat;
+            }
           }
+          
+          // Match if bag matches AND threat matches
+          const matchesSelection = bagMatch && threatMatch;
           
           return matchesSelection;
         } catch {

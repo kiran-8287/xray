@@ -644,6 +644,7 @@ export default function CustomizationPage() {
           id: obj.id,
           name: obj.name,
           library: obj.library,
+          subcategory: obj.subcategory,
           filepath: obj.filepath,
           center: { x: obj.transform.x, y: obj.transform.y },
           relativeCenter,
