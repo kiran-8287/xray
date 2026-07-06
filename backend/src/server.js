@@ -397,26 +397,7 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
           const tagMatch = tags.length === 0 || tags.some(tag => layoutBagTags.includes(tag));
           
           // Match if bag matches AND threat matches AND tag matches
-          const matchesSelection = bagMatch && threatMatch && tagMatch;
-          
-          // Debug logging
-          if (bagSubcategories.length > 0 || threatSubcategories.length > 0 || tags.length > 0) {
-            console.log('[FILTER DEBUG]', {
-              layoutId: layout.id,
-              bagSubcategories: bagSubcategories,
-              layoutBagSubcategories: layoutBagSubcategories,
-              bagMatch: bagMatch,
-              threatSubcategories: threatSubcategories,
-              layoutThreatSubcategories: layoutThreatSubcategories,
-              threatMatch: threatMatch,
-              tags: tags,
-              layoutBagTags: layoutBagTags,
-              tagMatch: tagMatch,
-              result: matchesSelection
-            });
-          }
-          
-          return matchesSelection;
+          return bagMatch && threatMatch && tagMatch;
         } catch {
           return false;
         }
