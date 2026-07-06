@@ -626,10 +626,26 @@ export default function CustomizationPage() {
         bagTopLeft = bagCorners[0];
       }
 
+      // Fetch bag tags from backend
+      let bagTags: string[] = [];
+      if (bagObject?.id) {
+        try {
+          const itemResponse = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(bagObject.id)}`);
+          if (itemResponse.ok) {
+            const itemData = await itemResponse.json();
+            if (itemData.item?.tags && Array.isArray(itemData.item.tags)) {
+              bagTags = itemData.item.tags;
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to fetch bag tags:", err);
+        }
+      }
+
       // Separate objects into bag, threats, and non-threats
       const bagObj = bagObject ? {
         id: bagObject.id,
-        subcategory: bagObject.subcategory,
+        subcategory: bagObject.subcategory ? bagObject.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
         filepath: bagObject.filepath,
         center: { x: bagObject.transform.x, y: bagObject.transform.y },
         size: { width: bagObject.transform.width, height: bagObject.transform.height },
@@ -639,13 +655,14 @@ export default function CustomizationPage() {
         polygonOutline: bagObject.polygonOutline,
         validRegionPolygon,
         layer: bagObject.layer,
+        tags: bagTags.length > 0 ? bagTags : undefined,
       } : null;
 
       const threats = objects
         .filter(o => o.library === "threat")
         .map(obj => ({
           id: obj.id,
-          subcategory: obj.subcategory,
+          subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
           filepath: obj.filepath,
           center: { x: obj.transform.x, y: obj.transform.y },
           size: { width: obj.transform.width, height: obj.transform.height },
@@ -660,7 +677,7 @@ export default function CustomizationPage() {
         .filter(o => o.library !== "bag" && o.library !== "threat")
         .map(obj => ({
           id: obj.id,
-          subcategory: obj.subcategory,
+          subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
           filepath: obj.filepath,
           center: { x: obj.transform.x, y: obj.transform.y },
           size: { width: obj.transform.width, height: obj.transform.height },

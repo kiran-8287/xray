@@ -302,8 +302,9 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
       const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
       
       // New filter parameters for subcategories
-      const bagSubcategories = req.query.bagSubcategories ? String(req.query.bagSubcategories).split(',').map(s => s.trim()).filter(Boolean) : [];
-      const threatSubcategories = req.query.threatSubcategories ? String(req.query.threatSubcategories).split(',').map(s => s.trim()).filter(Boolean) : [];
+      const bagSubcategories = req.query.bagSubcategories ? String(req.query.bagSubcategories).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+      const threatSubcategories = req.query.threatSubcategories ? String(req.query.threatSubcategories).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+      const tags = req.query.tags ? String(req.query.tags).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
       const filterLogic = req.query.filterLogic ? String(req.query.filterLogic).toLowerCase() : 'or';
 
       const allLayouts = await getSavedLayouts();
@@ -342,7 +343,10 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
           // Get subcategories from objects (use subcategory field if available, otherwise extract from library)
           const layoutBagSubcategories = bagObjs.map(o => {
             // First try the subcategory field (Option A: stored in layout)
-            if (o.subcategory) return o.subcategory.toLowerCase();
+            if (o.subcategory) {
+              // Normalize to slug format (replace spaces with hyphens) to match frontend
+              return o.subcategory.toLowerCase().replace(/\s+/g, '-');
+            }
             // Fallback: extract from library field (e.g., "bag-backpack" -> "backpack")
             const lib = (o.library || '').toLowerCase();
             if (lib.includes('bag')) {
@@ -354,7 +358,10 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
           
           const layoutThreatSubcategories = threatObjs.map(o => {
             // First try the subcategory field (Option A: stored in layout)
-            if (o.subcategory) return o.subcategory.toLowerCase();
+            if (o.subcategory) {
+              // Normalize to slug format (replace spaces with hyphens) to match frontend
+              return o.subcategory.toLowerCase().replace(/\s+/g, '-');
+            }
             // Fallback: extract from library field
             const lib = (o.library || '').toLowerCase();
             if (lib.includes('threat')) {
@@ -365,7 +372,7 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
           });
 
           // If no filters selected, include all layouts
-          if (bagSubcategories.length === 0 && threatSubcategories.length === 0) {
+          if (bagSubcategories.length === 0 && threatSubcategories.length === 0 && tags.length === 0) {
             return true;
           }
 
@@ -382,17 +389,32 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
             } else if (filterLogic === 'and') {
               // AND: Layout has ALL of the selected threats
               threatMatch = threatSubcategories.every(sub => layoutThreatSubcategories.includes(sub));
-            } else if (filterLogic === 'both') {
-              // Both: Layout has selected bag(s) AND at least one selected threat
-              // This shows all combinations: bag+gun, bag+knife, bag+gun+knife
-              const hasBag = bagSubcategories.some(sub => layoutBagSubcategories.includes(sub));
-              const hasThreat = threatSubcategories.some(sub => layoutThreatSubcategories.includes(sub));
-              threatMatch = hasBag && hasThreat;
             }
           }
+
+          // Tags filter - OR logic (layout has ANY of the selected tags)
+          const layoutBagTags = bagObjs.length > 0 ? (bagObjs[0].tags || []) : [];
+          const tagMatch = tags.length === 0 || tags.some(tag => layoutBagTags.includes(tag));
           
-          // Match if bag matches AND threat matches
-          const matchesSelection = bagMatch && threatMatch;
+          // Match if bag matches AND threat matches AND tag matches
+          const matchesSelection = bagMatch && threatMatch && tagMatch;
+          
+          // Debug logging
+          if (bagSubcategories.length > 0 || threatSubcategories.length > 0 || tags.length > 0) {
+            console.log('[FILTER DEBUG]', {
+              layoutId: layout.id,
+              bagSubcategories: bagSubcategories,
+              layoutBagSubcategories: layoutBagSubcategories,
+              bagMatch: bagMatch,
+              threatSubcategories: threatSubcategories,
+              layoutThreatSubcategories: layoutThreatSubcategories,
+              threatMatch: threatMatch,
+              tags: tags,
+              layoutBagTags: layoutBagTags,
+              tagMatch: tagMatch,
+              result: matchesSelection
+            });
+          }
           
           return matchesSelection;
         } catch {

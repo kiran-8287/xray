@@ -292,7 +292,7 @@ export default function CollagePage() {
         // Separate objects into bag, threats, and non-threats
         const bagObj = bagObject ? {
           id: bagObject.id,
-          subcategory: bagObject.subcategory,
+          subcategory: bagObject.subcategory ? bagObject.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
           filepath: bagObject.filepath,
           center: { x: bagObject.transform.x, y: bagObject.transform.y },
           size: { width: bagObject.transform.width, height: bagObject.transform.height },
@@ -302,13 +302,14 @@ export default function CollagePage() {
           polygonOutline: bagObject.polygonOutline,
           validRegionPolygon,
           layer: bagObject.layer,
+          tags: bagObject.tags || [],
         } : null;
 
         const threats = comb.objects
           .filter((o: any) => o.library === "threat")
           .map((obj: any) => ({
             id: obj.id,
-            subcategory: obj.subcategory,
+            subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
             filepath: obj.filepath,
             center: { x: obj.transform.x, y: obj.transform.y },
             size: { width: obj.transform.width, height: obj.transform.height },
@@ -323,7 +324,7 @@ export default function CollagePage() {
           .filter((o: any) => o.library !== "bag" && o.library !== "threat")
           .map((obj: any) => ({
             id: obj.id,
-            subcategory: obj.subcategory,
+            subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
             filepath: obj.filepath,
             center: { x: obj.transform.x, y: obj.transform.y },
             size: { width: obj.transform.width, height: obj.transform.height },

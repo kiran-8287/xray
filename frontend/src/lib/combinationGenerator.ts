@@ -56,6 +56,7 @@ function createBagSceneObject(bag: Item): SceneObject {
     initialWidth: bagWidth,
     initialHeight: bagHeight,
     layer: 0,
+    tags: bag.tags || [],
   };
 }
 
