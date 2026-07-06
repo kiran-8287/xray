@@ -571,12 +571,12 @@ export default function SavedPage() {
               <table className="w-full divide-y divide-border">
                 <thead className="bg-surface/50">
                   <tr className="text-xs font-semibold text-muted uppercase tracking-wider">
-                    <th className="text-left py-3 px-4 w-12">#</th>
-                    <th className="text-left py-3 px-4 w-48">ID</th>
+                    <th className="text-left py-3 px-4 w-16">#</th>
+                    <th className="text-left py-3 px-4 w-40">ID</th>
                     <th className="text-left py-3 px-4 w-48">Bag</th>
-                    <th className="text-left py-3 px-4 w-48">Threats</th>
-                    <th className="text-left py-3 px-4 w-48">Non-Threats</th>
-                    <th className="text-left py-3 px-4">Tags</th>
+                    <th className="text-left py-3 px-4 w-64">Threats</th>
+                    <th className="text-left py-3 px-4 w-56">Non-Threats</th>
+                    <th className="text-left py-3 px-4 w-56">Tags</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -599,13 +599,13 @@ export default function SavedPage() {
                         onClick={() => setSelectedLayout(layout)}
                         className="cursor-pointer hover:bg-surface/50 transition-colors even:bg-surface/20"
                       >
-                        <td className="py-3 px-4 text-sm font-mono text-muted">
+                        <td className="py-3 px-4 text-sm font-mono text-muted whitespace-nowrap">
                           {((pagination?.page || 1) - 1) * pageSize + idx + 1}
                         </td>
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 whitespace-nowrap">
                           <span className="text-sm font-mono text-accent-sky font-medium">{layout.id}</span>
                         </td>
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 whitespace-nowrap">
                           <span className="text-sm text-ink">{bagName}</span>
                         </td>
                         <td className="py-3 px-4">
