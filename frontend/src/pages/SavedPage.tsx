@@ -179,7 +179,7 @@ function FilterDropdown({ label, value, options, onChange, placeholder }: {
   );
 }
 
-// Multi-select dropdown component
+// Multi-select dropdown component with search
 function MultiSelectDropdown({ selected, options, onChange, placeholder }: {
   selected: string[];
   options: { id: string; name: string }[];
@@ -187,7 +187,9 @@ function MultiSelectDropdown({ selected, options, onChange, placeholder }: {
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -198,6 +200,22 @@ function MultiSelectDropdown({ selected, options, onChange, placeholder }: {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Auto-focus search input when dropdown opens
+  useEffect(() => {
+    if (open && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+    // Clear search when dropdown closes
+    if (!open) {
+      setSearchQuery("");
+    }
+  }, [open]);
+
+  // Filter options based on search query (case-insensitive)
+  const filteredOptions = searchQuery.trim()
+    ? options.filter(opt => opt.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : options;
 
   const toggle = (id: string) => {
     if (id === 'ALL') {
@@ -234,49 +252,80 @@ function MultiSelectDropdown({ selected, options, onChange, placeholder }: {
       </div>
       
       {open && (
-        <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-border rounded-lg shadow-xl max-h-64 overflow-y-auto">
-          {options.length === 0 ? (
-            <div className="p-3 text-xs text-muted text-center">No options available</div>
-          ) : (
-            <>
-              {/* ALL option at top */}
-              <div
-                onClick={() => toggle('ALL')}
-                className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
-                  isAllSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
-                }`}
-              >
-                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
-                  isAllSelected ? 'bg-accent border-accent' : 'border-gray-300'
-                }`}>
-                  {isAllSelected && <Check size={12} className="text-white" />}
-                </div>
-                <span className="truncate font-medium">All Items</span>
-              </div>
-              
-              <div className="border-t border-border my-1" />
-              
-              {options.map((opt) => {
-                const isSelected = selected.includes(opt.id);
-                return (
-                  <div
-                    key={opt.id}
-                    onClick={() => toggle(opt.id)}
-                    className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
-                      isSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
-                    }`}
-                  >
-                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
-                      isSelected ? 'bg-accent border-accent' : 'border-gray-300'
-                    }`}>
-                      {isSelected && <Check size={12} className="text-white" />}
-                    </div>
-                    <span className="truncate">{opt.name}</span>
+        <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-border rounded-lg shadow-xl">
+          {/* Search input */}
+          <div className="sticky top-0 bg-white border-b border-border rounded-t-lg">
+            <div className="flex items-center gap-2 px-3 py-2">
+              <Search size={14} className="text-muted shrink-0" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search..."
+                className="w-full text-sm text-ink bg-transparent outline-none placeholder:text-muted/60"
+                onClick={(e) => e.stopPropagation()}
+              />
+              {searchQuery && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setSearchQuery(""); }}
+                  className="text-muted hover:text-ink"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="max-h-56 overflow-y-auto">
+            {options.length === 0 ? (
+              <div className="p-3 text-xs text-muted text-center">No options available</div>
+            ) : (
+              <>
+                {/* ALL option at top (always visible) */}
+                <div
+                  onClick={() => toggle('ALL')}
+                  className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
+                    isAllSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                    isAllSelected ? 'bg-accent border-accent' : 'border-gray-300'
+                  }`}>
+                    {isAllSelected && <Check size={12} className="text-white" />}
                   </div>
-                );
-              })}
-            </>
-          )}
+                  <span className="truncate font-medium">All Items</span>
+                </div>
+                
+                {filteredOptions.length > 0 && <div className="border-t border-border my-1" />}
+                
+                {filteredOptions.length === 0 ? (
+                  <div className="p-3 text-xs text-muted text-center">No matches found</div>
+                ) : (
+                  filteredOptions.map((opt) => {
+                    const isSelected = selected.includes(opt.id);
+                    return (
+                      <div
+                        key={opt.id}
+                        onClick={() => toggle(opt.id)}
+                        className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
+                          isSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                          isSelected ? 'bg-accent border-accent' : 'border-gray-300'
+                        }`}>
+                          {isSelected && <Check size={12} className="text-white" />}
+                        </div>
+                        <span className="truncate">{opt.name}</span>
+                      </div>
+                    );
+                  })
+                )}
+              </>
+            )}
+          </div>
+
           {selected.length > 0 && (
             <div className="sticky bottom-0 border-t border-border bg-white p-2">
               <button
