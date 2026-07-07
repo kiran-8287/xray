@@ -40,12 +40,16 @@ const __dirname = path.dirname(__filename);
 const exportsRoot = path.resolve(__dirname, "../data/exports");
 const libraryImagesRoot = path.resolve(__dirname, "../data/library_images");
 const collageImagesRoot = path.resolve(__dirname, "../data/collage_images");
+const collageHighRoot = path.resolve(collageImagesRoot, "high");
+const collageLowRoot = path.resolve(collageImagesRoot, "low");
 const pixelDataRoot = path.resolve(__dirname, "../data/pixel_data");
 
 // Ensure directories exist
 await fs.mkdir(exportsRoot, { recursive: true });
 await fs.mkdir(libraryImagesRoot, { recursive: true });
 await fs.mkdir(collageImagesRoot, { recursive: true });
+await fs.mkdir(collageHighRoot, { recursive: true });
+await fs.mkdir(collageLowRoot, { recursive: true });
 await fs.mkdir(pixelDataRoot, { recursive: true });
 
 // Serve static files from data directory
@@ -832,10 +836,23 @@ app.get("/api/items/:id", async (req, res) => {
   }
 });
 
+// Helper: inject pixel_data_path into flat objects array from items database
+async function enrichObjectsWithPixelData(objects) {
+  const allItems = await getItems();
+  const itemMap = new Map(allItems.map(i => [i.id, i]));
+  return objects.map(obj => {
+    const item = itemMap.get(obj.id);
+    if (item?.pixel_data_path) {
+      return { ...obj, pixel_data_path: item.pixel_data_path };
+    }
+    return obj;
+  });
+}
+
 // Render and save a collage combination as a PNG image
 app.post("/api/render-and-save-collage", async (req, res) => {
     try {
-        const { objects, name } = req.body;
+        const { objects, name, energyType = "highenrgy" } = req.body;
         if (!objects || !Array.isArray(objects) || objects.length === 0) {
             return res.status(400).json({ ok: false, error: "Missing or invalid objects array" });
         }
@@ -843,15 +860,21 @@ app.post("/api/render-and-save-collage", async (req, res) => {
             return res.status(400).json({ ok: false, error: "Missing name" });
         }
 
+        // Determine output directory based on energy type
+        const energyDir = energyType === "lowenergy" ? collageLowRoot : collageHighRoot;
+
         // Sanitize the filename - use the synthesized ID directly (already unique)
         const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
         const filename = `${safeName}.png`;
-        const outputPath = path.join(collageImagesRoot, filename);
+        const outputPath = path.join(energyDir, filename);
 
-        console.log(`[render-and-save-collage] Rendering scene "${name}" → ${filename}`);
+        console.log(`[render-and-save-collage] Rendering scene "${name}" (${energyType}) → ${filename}`);
+
+        // Enrich objects with pixel_data_path from items database (frontend objects lack this)
+        const enrichedObjects = await enrichObjectsWithPixelData(objects);
 
         // Render the scene to a PNG buffer
-        const pngBuffer = await renderSceneAsync(objects, 800, 600);
+        const pngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, energyType);
 
         // Write to disk
         await fs.writeFile(outputPath, pngBuffer);
@@ -861,10 +884,51 @@ app.post("/api/render-and-save-collage", async (req, res) => {
         res.json({
             ok: true,
             filename,
-            url: `/data/collage_images/${filename}`,
+            url: `/data/collage_images/${energyType}/${filename}`,
         });
     } catch (err) {
         console.error("[render-and-save-collage] Error:", err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Render and save BOTH high-energy and low-energy collage images at once
+app.post("/api/render-and-save-collage-both", async (req, res) => {
+    try {
+        const { objects, name } = req.body;
+        if (!objects || !Array.isArray(objects) || objects.length === 0) {
+            return res.status(400).json({ ok: false, error: "Missing or invalid objects array" });
+        }
+        if (!name) {
+            return res.status(400).json({ ok: false, error: "Missing name" });
+        }
+
+        const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+        const filename = `${safeName}.png`;
+
+        console.log(`[render-and-save-collage-both] Rendering BOTH energies for "${name}"`);
+
+        // Enrich objects with pixel_data_path from items database (frontend objects lack this)
+        const enrichedObjects = await enrichObjectsWithPixelData(objects);
+
+        // Render high energy
+        const highPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "highenrgy");
+        await fs.writeFile(path.join(collageHighRoot, filename), highPngBuffer);
+        console.log(`[render-and-save-collage-both] High saved: ${filename} (${highPngBuffer.length} bytes)`);
+
+        // Render low energy
+        const lowPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "lowenergy");
+        await fs.writeFile(path.join(collageLowRoot, filename), lowPngBuffer);
+        console.log(`[render-and-save-collage-both] Low saved: ${filename} (${lowPngBuffer.length} bytes)`);
+
+        res.json({
+            ok: true,
+            filename,
+            high_url: `/data/collage_images/high/${filename}`,
+            low_url: `/data/collage_images/low/${filename}`,
+        });
+    } catch (err) {
+        console.error("[render-and-save-collage-both] Error:", err);
         res.status(500).json({ ok: false, error: String(err) });
     }
 });

@@ -213,11 +213,11 @@ export default function CollagePage() {
   const handleSaveImage = async () => {
     if (!selectedCombination) return;
 
-    setSaveImageState({ status: "saving", message: "Rendering image...", imageUrl: null });
+    setSaveImageState({ status: "saving", message: "Rendering high & low energy images...", imageUrl: null });
 
     try {
-      // Save using the synthesized combination ID as the filename
-      const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage`, {
+      // Save BOTH high and low energy images using the combined endpoint
+      const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -227,20 +227,20 @@ export default function CollagePage() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to render image");
+        throw new Error("Failed to render images");
       }
 
       const data = await response.json();
       setSaveImageState({
         status: "success",
-        message: "Image saved successfully!",
-        imageUrl: data.url,
+        message: `High & low energy images saved!`,
+        imageUrl: data.high_url,
       });
     } catch (err) {
-      console.error("Error saving image:", err);
+      console.error("Error saving images:", err);
       setSaveImageState({
         status: "error",
-        message: "Failed to save image. Make sure backend is running.",
+        message: "Failed to save images. Make sure backend is running.",
         imageUrl: null,
       });
     }
@@ -363,10 +363,10 @@ export default function CollagePage() {
           failedCount++;
         }
 
-        // Also save the rendered image if requested
+        // Also save both high and low energy rendered images if requested
         if (saveImages && response.ok) {
           try {
-            await fetch(`${API_BASE_URL}/api/render-and-save-collage`, {
+            await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -375,7 +375,7 @@ export default function CollagePage() {
               }),
             });
           } catch (err) {
-            console.error(`Error saving image for ${comb.id}:`, err);
+            console.error(`Error saving images for ${comb.id}:`, err);
           }
         }
 
