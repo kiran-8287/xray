@@ -1,6 +1,4 @@
 import React from "react";
-import { Grid3X3, Loader2, Settings2 } from "lucide-react";
-import { IoMdPhotos } from "react-icons/io";
 
 interface SelectionTrayProps {
   selectedCount: number;
@@ -12,6 +10,13 @@ interface SelectionTrayProps {
   setMaxThreats: (value: number) => void;
   threatDistribution: Record<number, number>;
   setThreatDistribution: (value: Record<number, number>) => void;
+  maxNonThreats: number;
+  setMaxNonThreats: (value: number) => void;
+  nonThreatDistribution: Record<number, number>;
+  setNonThreatDistribution: (value: Record<number, number>) => void;
+  selectedNonThreatCount: number;
+  requireAtLeastOneNonThreat: boolean;
+  setRequireAtLeastOneNonThreat: (value: boolean) => void;
   isGenerating: boolean;
   generationProgress: string;
   onGenerate: () => void;
@@ -25,6 +30,13 @@ const THREAT_LABELS: Record<number, string> = {
   4: "4 threats",
 };
 
+const NON_THREAT_LABELS: Record<number, string> = {
+  1: "1 non-threat",
+  2: "2 non-threats",
+  3: "3 non-threats",
+  4: "4 non-threats",
+};
+
 export default function SelectionTray({
   selectedCount,
   onClearSelection,
@@ -35,6 +47,13 @@ export default function SelectionTray({
   setMaxThreats,
   threatDistribution,
   setThreatDistribution,
+  maxNonThreats,
+  setMaxNonThreats,
+  nonThreatDistribution,
+  setNonThreatDistribution,
+  selectedNonThreatCount,
+  requireAtLeastOneNonThreat,
+  setRequireAtLeastOneNonThreat,
   isGenerating,
   generationProgress,
   onGenerate,
@@ -42,10 +61,16 @@ export default function SelectionTray({
 }: SelectionTrayProps) {
   if (selectedCount === 0) return null;
 
-  const updateDistribution = (key: number, raw: string) => {
+  const updateThreatDistribution = (key: number, raw: string) => {
     const val = parseInt(raw);
     if (isNaN(val) || val < 0) return;
     setThreatDistribution({ ...threatDistribution, [key]: Math.min(val, 100) });
+  };
+
+  const updateNonThreatDistribution = (key: number, raw: string) => {
+    const val = parseInt(raw);
+    if (isNaN(val) || val < 0) return;
+    setNonThreatDistribution({ ...nonThreatDistribution, [key]: Math.min(val, 100) });
   };
 
   return (
@@ -97,19 +122,69 @@ export default function SelectionTray({
 
         {/* Step 2: Percentage inputs for 1..maxThreats */}
         {Array.from({ length: maxThreats }, (_, i) => i + 1).map((n) => (
-          <div key={n} className="flex items-center gap-1">
+          <div key={`threat-${n}`} className="flex items-center gap-1">
             <span className="text-[11px] text-muted whitespace-nowrap">{THREAT_LABELS[n]}:</span>
             <input
               type="number"
               min={0}
               max={100}
               value={threatDistribution[n] ?? 0}
-              onChange={(e) => updateDistribution(n, e.target.value)}
+              onChange={(e) => updateThreatDistribution(n, e.target.value)}
               className="w-12 bg-surface border border-border rounded-lg px-1.5 py-1 text-xs text-ink font-mono text-center focus:outline-none focus:border-accent"
             />
             <span className="text-[11px] text-muted">%</span>
           </div>
         ))}
+
+        {/* Non-threat distribution controls - only show when non-threats are selected */}
+        {selectedNonThreatCount > 0 && (
+          <>
+            <div className="w-px h-6 bg-border mx-1" />
+
+            {/* Max non-threats selector */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted">max</span>
+              <select
+                value={maxNonThreats}
+                onChange={(e) => setMaxNonThreats(parseInt(e.target.value))}
+                className="bg-surface border border-border rounded-xl px-2 py-1.5 text-sm text-ink font-mono text-center focus:outline-none focus:border-accent"
+              >
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+                <option value={3}>3</option>
+                <option value={4}>4</option>
+              </select>
+              <span className="text-xs text-muted">non-threats/combo</span>
+            </div>
+
+            {/* Percentage inputs for 1..maxNonThreats */}
+            {Array.from({ length: maxNonThreats }, (_, i) => i + 1).map((n) => (
+              <div key={`non-threat-${n}`} className="flex items-center gap-1">
+                <span className="text-[11px] text-muted whitespace-nowrap">{NON_THREAT_LABELS[n]}:</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={nonThreatDistribution[n] ?? 0}
+                  onChange={(e) => updateNonThreatDistribution(n, e.target.value)}
+                  className="w-12 bg-surface border border-border rounded-lg px-1.5 py-1 text-xs text-ink font-mono text-center focus:outline-none focus:border-accent"
+                />
+                <span className="text-[11px] text-muted">%</span>
+              </div>
+            ))}
+
+            {/* Include at least one non-threat checkbox */}
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={requireAtLeastOneNonThreat}
+                onChange={(e) => setRequireAtLeastOneNonThreat(e.target.checked)}
+                className="w-3.5 h-3.5 border border-border rounded bg-surface focus:outline-none focus:border-accent"
+              />
+              <span className="text-[11px] text-muted whitespace-nowrap">Include at least one non-threat</span>
+            </label>
+          </>
+        )}
 
         {generationProgress && (
           <span className="text-xs text-muted animate-pulse">{generationProgress}</span>

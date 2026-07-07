@@ -250,6 +250,7 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
 function normalizeCategory(cat) {
     const normalized = (cat || "").toLowerCase();
     if (normalized.includes("bag")) return "bags";
+    if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) return "non-threats";
     if (normalized.includes("threat") || normalized.includes("electronic") || normalized === "electronics") return "threats";
     return "non-threats";
 }
@@ -299,6 +300,18 @@ app.get('/api/saved-layouts', async (_req, res) => {
     }
 });
 
+// Return only the saved layout IDs (used to continue the synthesized ID sequence)
+app.get('/api/saved-layouts/ids', async (_req, res) => {
+    try {
+        const layouts = await getSavedLayouts();
+        const ids = layouts.map((l) => l.id).filter(Boolean);
+        res.json({ ok: true, ids });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
 // Filtered/paginated saved layouts endpoint
 app.get('/api/saved-layouts/filtered', async (req, res) => {
     try {
@@ -340,40 +353,43 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
           const objects = extractObjects(layout);
           if (!objects.length) return false;
 
-          // Extract bag and threat objects
-          const bagObjs = objects.filter(o => (o.library || '').toLowerCase().includes('bag'));
-          const threatObjs = objects.filter(o => (o.library || '').toLowerCase().includes('threat'));
-          
-          // Get subcategories from objects (use subcategory field if available, otherwise extract from library)
-          const layoutBagSubcategories = bagObjs.map(o => {
-            // First try the subcategory field (Option A: stored in layout)
-            if (o.subcategory) {
-              // Normalize to slug format (replace spaces with hyphens) to match frontend
-              return o.subcategory.toLowerCase().replace(/\s+/g, '-');
-            }
-            // Fallback: extract from library field (e.g., "bag-backpack" -> "backpack")
-            const lib = (o.library || '').toLowerCase();
-            if (lib.includes('bag')) {
-              const parts = lib.split('-');
-              if (parts.length > 1) return parts[1];
-            }
-            return 'general';
-          });
-          
-          const layoutThreatSubcategories = threatObjs.map(o => {
-            // First try the subcategory field (Option A: stored in layout)
-            if (o.subcategory) {
-              // Normalize to slug format (replace spaces with hyphens) to match frontend
-              return o.subcategory.toLowerCase().replace(/\s+/g, '-');
-            }
-            // Fallback: extract from library field
-            const lib = (o.library || '').toLowerCase();
-            if (lib.includes('threat')) {
-              const parts = lib.split('-');
-              if (parts.length > 1) return parts[1];
-            }
-            return 'general';
-          });
+// Extract bag and threat objects
+           const bagObjs = objects.filter(o => (o.library || '').toLowerCase().includes('bag'));
+           const threatObjs = objects.filter(o => {
+             const lib = (o.library || '').toLowerCase();
+             return lib.includes('threat') && !lib.includes('non-threat');
+           });
+           
+           // Get subcategories from objects (use subcategory field if available, otherwise extract from library)
+           const layoutBagSubcategories = bagObjs.map(o => {
+             // First try the subcategory field (Option A: stored in layout)
+             if (o.subcategory) {
+               // Normalize to slug format (replace spaces with hyphens) to match frontend
+               return o.subcategory.toLowerCase().replace(/\s+/g, '-');
+             }
+             // Fallback: extract from library field (e.g., "bag-backpack" -> "backpack")
+             const lib = (o.library || '').toLowerCase();
+             if (lib.includes('bag')) {
+               const parts = lib.split('-');
+               if (parts.length > 1) return parts[1];
+             }
+             return 'general';
+           });
+           
+           const layoutThreatSubcategories = threatObjs.map(o => {
+             // First try the subcategory field (Option A: stored in layout)
+             if (o.subcategory) {
+               // Normalize to slug format (replace spaces with hyphens) to match frontend
+               return o.subcategory.toLowerCase().replace(/\s+/g, '-');
+             }
+             // Fallback: extract from library field
+             const lib = (o.library || '').toLowerCase();
+             if (lib.includes('threat') && !lib.includes('non-threat')) {
+               const parts = lib.split('-');
+               if (parts.length > 1) return parts[1];
+             }
+             return 'general';
+           });
 
           // If no filters selected, include all layouts
           if (bagSubcategories.length === 0 && threatSubcategories.length === 0 && tags.length === 0) {

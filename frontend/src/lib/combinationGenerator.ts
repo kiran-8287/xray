@@ -385,6 +385,46 @@ function pickThreatCountByDistribution(
 }
 
 /**
+ * Pick a non-threat count (1-4) based on percentage distribution weights.
+ * The distribution is an object like {1: 60, 2: 20, 3: 10, 4: 10}.
+ * Only considers counts up to the available non-threats length.
+ * If requireAtLeastOne is true, ensures at least 1 non-threat is selected.
+ */
+function pickNonThreatCountByDistribution(
+  distribution: Record<number, number>,
+  availableNonThreats: number,
+  requireAtLeastOne: boolean = false
+): number {
+  // Build weighted list of eligible counts
+  const eligible: { count: number; weight: number }[] = [];
+  for (let i = 1; i <= Math.min(4, availableNonThreats); i++) {
+    const weight = distribution[i] ?? 0;
+    if (weight > 0) {
+      eligible.push({ count: i, weight });
+    }
+  }
+
+  // If requireAtLeastOne and no eligible counts with weight, force at least 1
+  if (eligible.length === 0) {
+    if (requireAtLeastOne && availableNonThreats > 0) {
+      return 1;
+    }
+    // Fallback: uniform distribution
+    return 1 + Math.floor(Math.random() * Math.min(4, availableNonThreats));
+  }
+
+  const totalWeight = eligible.reduce((sum, e) => sum + e.weight, 0);
+  const random = Math.random() * totalWeight;
+  let cumulative = 0;
+  for (const e of eligible) {
+    cumulative += e.weight;
+    if (random <= cumulative) return e.count;
+  }
+
+  return eligible[eligible.length - 1].count;
+}
+
+/**
  * Generate a multi-threat combo: pick 1-4 random threats based on distribution,
  * place all inside bag without overlapping each other, then add non-threats.
  */
@@ -392,9 +432,10 @@ function generateMultiThreatPlacements(
   bag: Item,
   threats: Item[],
   target: number,
-  density: "empty" | "few" | "filled",
   nonThreats: Item[],
   threatDistribution: Record<number, number>,
+  nonThreatDistribution: Record<number, number>,
+  requireAtLeastOneNonThreat: boolean = false,
   globalUsedIds?: Set<string>
 ): { results: CombinatorialResult[]; failure: FailureLog | null } {
   const results: CombinatorialResult[] = [];
@@ -464,16 +505,13 @@ function generateMultiThreatPlacements(
       createThreatSceneObject(pt.item, pt.x, pt.y, pt.rotation, i + 1)
     );
 
-    // Select and place non-threats
+    // Select and place non-threats based on distribution
     let nonThreatPositions: { x: number; y: number; rotation: number }[] | null = [];
     let selectedNonThreats: Item[] = [];
 
-    if (density === "empty") {
-      selectedNonThreats = [];
-    } else if (density === "few") {
-      selectedNonThreats = pickRandomSubset(nonThreats, 1, 2);
-    } else {
-      selectedNonThreats = pickRandomSubset(nonThreats, 2, Math.min(4, nonThreats.length));
+    if (nonThreats.length > 0) {
+      const nonThreatCount = pickNonThreatCountByDistribution(nonThreatDistribution, nonThreats.length, requireAtLeastOneNonThreat);
+      selectedNonThreats = shuffleArray(nonThreats).slice(0, nonThreatCount);
     }
 
     if (selectedNonThreats.length > 0) {
@@ -551,8 +589,8 @@ function generateThreatPlacements(
   bag: Item,
   threat: Item,
   target: number,
-  density: "empty" | "few" | "filled",
   nonThreats: Item[],
+  nonThreatDistribution: Record<number, number>,
   existingUsed?: Set<string>,
   globalUsedIds?: Set<string>
 ): { results: CombinatorialResult[]; failure: FailureLog | null } {
@@ -579,16 +617,13 @@ function generateThreatPlacements(
     // Create threat scene object
     const threatObj = createThreatSceneObject(threat, pos.x, pos.y, rotation, 1);
 
-    // Select and place non-threats
+    // Select and place non-threats based on distribution
     let nonThreatPositions: { x: number; y: number; rotation: number }[] | null = [];
     let selectedNonThreats: Item[] = [];
 
-    if (density === "empty") {
-      selectedNonThreats = [];
-    } else if (density === "few") {
-      selectedNonThreats = pickRandomSubset(nonThreats, 1, 2);
-    } else {
-      selectedNonThreats = pickRandomSubset(nonThreats, 2, Math.min(4, nonThreats.length));
+    if (nonThreats.length > 0) {
+      const nonThreatCount = pickNonThreatCountByDistribution(nonThreatDistribution, nonThreats.length);
+      selectedNonThreats = shuffleArray(nonThreats).slice(0, nonThreatCount);
     }
 
     if (selectedNonThreats.length > 0) {
@@ -665,8 +700,9 @@ function generateThreatPlacements(
 function generateCleanCombinations(
   bag: Item,
   target: number,
-  density: "empty" | "few" | "filled",
   nonThreats: Item[],
+  nonThreatDistribution: Record<number, number>,
+  requireAtLeastOneNonThreat: boolean = false,
   globalUsedIds?: Set<string>
 ): CombinatorialResult[] {
   const results: CombinatorialResult[] = [];
@@ -677,14 +713,18 @@ function generateCleanCombinations(
   const maxAttempts = Math.max(target * 50, 1000);
 
   for (let attempt = 0; attempt < maxAttempts && results.length < target; attempt++) {
-    // Select non-threat subset
+    // Select non-threat subset based on distribution
     let selectedNonThreats: Item[];
-    if (density === "empty") {
+    if (nonThreats.length === 0) {
       selectedNonThreats = [];
-    } else if (density === "few") {
-      selectedNonThreats = pickRandomSubset(nonThreats, 1, 2);
     } else {
-      selectedNonThreats = pickRandomSubset(nonThreats, 2, Math.min(4, nonThreats.length));
+      const nonThreatCount = pickNonThreatCountByDistribution(nonThreatDistribution, nonThreats.length, requireAtLeastOneNonThreat);
+      selectedNonThreats = shuffleArray(nonThreats).slice(0, nonThreatCount);
+    }
+
+    // If requireAtLeastOneNonThreat is true and no non-threats selected, skip this attempt
+    if (requireAtLeastOneNonThreat && selectedNonThreats.length === 0) {
+      continue;
     }
 
     if (selectedNonThreats.length === 0) {
@@ -762,8 +802,9 @@ function generateCleanCombinations(
  * @param threats - Selected threat items
  * @param nonThreats - Selected non-threat items
  * @param k - Target number of combinations
- * @param density - Density preset for non-threats
  * @param threatDistribution - Percentage distribution for threat counts, e.g. {1: 60, 2: 20, 3: 10, 4: 10}
+ * @param nonThreatDistribution - Percentage distribution for non-threat counts, e.g. {1: 60, 2: 20, 3: 10, 4: 10}
+ * @param requireAtLeastOneNonThreat - If true, ensures every combination has at least one non-threat
  * @returns GenerationResult with results array and failures array
  */
 export function generateCombinations(
@@ -771,8 +812,10 @@ export function generateCombinations(
   threats: Item[],
   nonThreats: Item[],
   k: number,
-  density: "empty" | "few" | "filled" = "filled",
-  threatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 }
+  threatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 },
+  nonThreatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 },
+  requireAtLeastOneNonThreat: boolean = false,
+  existingIds: string[] = []
 ): GenerationResult {
   if (bags.length === 0) return { results: [], failures: [] };
   if (k <= 0) return { results: [], failures: [] };
@@ -780,7 +823,9 @@ export function generateCombinations(
   const results: CombinatorialResult[] = [];
   const failures: FailureLog[] = [];
   const seenFailures = new Set<string>(); // Avoid duplicate failure logs
-  const usedIds = new Set<string>(); // Track all generated IDs globally
+  // Seed with previously-saved IDs so the sequence continues from the highest
+  // counter for the current date prefix instead of restarting at 00001.
+  const usedIds = new Set<string>(existingIds); // Track all generated IDs globally
 
   type BagEntry = {
     bag: Item;
@@ -859,9 +904,10 @@ export function generateCombinations(
         entry.bag,
         threats,
         1,
-        density,
         nonThreats,
         threatDistribution,
+        nonThreatDistribution,
+        requireAtLeastOneNonThreat,
         usedIds
       );
       if (placements.length > 0) {
@@ -883,8 +929,9 @@ export function generateCombinations(
       const placements = generateCleanCombinations(
         entry.bag,
         1,
-        density,
         nonThreats,
+        nonThreatDistribution,
+        requireAtLeastOneNonThreat,
         usedIds
       );
       if (placements.length > 0) {
