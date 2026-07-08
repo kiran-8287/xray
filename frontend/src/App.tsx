@@ -1,6 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, NavLink } from "react-router-dom";
-import { Grid3X3, Bookmark, Upload } from "lucide-react";
-import { IoMdPhotos } from "react-icons/io";
+import { Grid3X3, Bookmark, Upload, Images } from "lucide-react";
 import UploadPage from "./pages/UploadPage";
 import CollagePage from "./pages/CollagePage";
 import CustomizationPage from "./pages/CustomizationPage";
@@ -11,9 +10,25 @@ import { UploadProvider } from "./context/UploadContext";
 import { loadCustomSubcategories } from "./config/categories";
 import { useEffect } from "react";
 
+// Register Service Worker for offline support and image caching
+export function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then((registration) => {
+          console.log('[App] Service Worker registered:', registration.scope);
+        })
+        .catch((error) => {
+          console.error('[App] Service Worker registration failed:', error);
+        });
+    });
+  }
+}
+
 export default function App() {
   useEffect(() => {
     loadCustomSubcategories();
+    registerServiceWorker();
   }, []);
   const getNavLinkClass = ({ isActive }: { isActive: boolean }) => {
     const baseClass = "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150";
@@ -34,7 +49,7 @@ export default function App() {
               Upload
             </NavLink>
             <NavLink to="/library" className={getNavLinkClass}>
-              <IoMdPhotos />
+              <Images size={15} />
               Library
             </NavLink>
             <NavLink to="/collage" className={getNavLinkClass}>

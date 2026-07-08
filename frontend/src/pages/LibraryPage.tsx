@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Image, AlertTriangle, CheckCircle2, X, XCircle, Trash2, Loader2 } from "lucide-react";
 import type { Item, CategorizedItems } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
-import { generateCombinations } from "../lib/combinationGenerator";
 import { API_BASE_URL } from "../config/api";
 import { getCategoryConfig, normalizeCategoryName, normalizeCategorizedItems, LIBRARIES_UI, getLibrarySubcategories, clearCustomSubcategoriesCache } from "../config/categories";
 import AddSubcategoryModal from "../components/common/AddSubcategoryModal";
@@ -13,7 +12,7 @@ const LIBRARIES = LIBRARIES_UI;
 
 import SimpleLibrarySidebar from "../components/library/SimpleLibrarySidebar";
 import LibraryToolbar from "../components/library/LibraryToolbar";
-import ItemCard from "../components/library/ItemCard";
+import VirtualizedItemGrid from "../components/library/VirtualizedItemGrid";
 import SelectionTray from "../components/library/SelectionTray";
 import ValidRegionEditor from "../components/upload/ValidRegionEditor";
 
@@ -173,6 +172,7 @@ export default function LibraryPage() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState("");
+  const workerRef = useRef<Worker | null>(null);
 
   const showNotification = useCallback((type: NotificationType, message: string, duration = 4000) => {
     const id = ++notifCounter.current;
@@ -540,7 +540,7 @@ export default function LibraryPage() {
     });
   };
 
-  // K-combinations generation handler
+  // K-combinations generation handler with Web Worker
   const handleGenerate = useCallback(async () => {
     const selectedBags: Item[] = [];
     const selectedThreats: Item[] = [];
@@ -572,11 +572,7 @@ export default function LibraryPage() {
     setIsGenerating(true);
     setGenerationProgress(`Generating ${kValue} combinations...`);
 
-    // Use setTimeout to allow UI to update before blocking
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    // Fetch previously-saved layout IDs so the synthesized ID sequence continues
-    // from the highest counter instead of restarting at 00001 each run.
+    // Fetch previously-saved layout IDs
     let existingIds: string[] = [];
     try {
       const savedRes = await fetch(`${API_BASE_URL}/api/saved-layouts/ids`);
@@ -601,30 +597,62 @@ export default function LibraryPage() {
       for (let i = 1; i <= maxNonThreats; i++) {
         effectiveNonThreatDist[i] = nonThreatDistribution[i] ?? 0;
       }
-      const { results, failures: genFailures } = generateCombinations(
+
+      // Use Web Worker for combination generation
+      const worker = new Worker(new URL("../workers/combinationGenerator.worker.ts", import.meta.url), {
+        type: "module",
+      });
+      workerRef.current = worker;
+
+      worker.onmessage = (event) => {
+        const response = event.data;
+        
+        if (response.type === "progress") {
+          setGenerationProgress(response.message || "Generating...");
+        } else if (response.type === "result") {
+          setCombinations(response.results || []);
+          setFailures(response.failures || []);
+          setGenerationProgress(response.message || "Generation complete");
+          setTimeout(() => setGenerationProgress(""), 3000);
+          setIsGenerating(false);
+          worker.terminate();
+        } else if (response.type === "error") {
+          console.error("Worker error:", response.error);
+          setGenerationProgress("Error generating combinations. Check console for details.");
+          setTimeout(() => setGenerationProgress(""), 5000);
+          setIsGenerating(false);
+          worker.terminate();
+        }
+      };
+
+      worker.onerror = (error) => {
+        console.error("Worker error:", error);
+        setGenerationProgress("Error generating combinations. Check console for details.");
+        setTimeout(() => setGenerationProgress(""), 5000);
+        setIsGenerating(false);
+        worker.terminate();
+      };
+
+      // Send data to worker
+      worker.postMessage({
+        type: "generate",
         selectedBags,
         selectedThreats,
         selectedOthers,
         kValue,
-        effectiveThreatDist,
-        effectiveNonThreatDist,
+        threatDistribution: effectiveThreatDist,
+        nonThreatDistribution: effectiveNonThreatDist,
         requireAtLeastOneNonThreat,
-        existingIds
-      );
+        existingIds,
+      });
 
-      setCombinations(results);
-      setFailures(genFailures);
-      setGenerationProgress(`Generated ${results.length} combinations${results.length < kValue ? ` (only ${results.length} unique placements possible)` : ""}`);
-      
-      setTimeout(() => setGenerationProgress(""), 3000);
-      return { results, failures: genFailures };
+      return { results: [], failures: [] }; // Will be set by worker
     } catch (err) {
       console.error("Generation error:", err);
       setGenerationProgress("Error generating combinations. Check console for details.");
       setTimeout(() => setGenerationProgress(""), 5000);
-      return { results: [], failures: [] };
-    } finally {
       setIsGenerating(false);
+      return { results: [], failures: [] };
     }
   }, [selectedItems, categorizedItems, kValue, maxThreats, threatDistribution, maxNonThreats, nonThreatDistribution, requireAtLeastOneNonThreat]);
 
@@ -657,6 +685,15 @@ export default function LibraryPage() {
   useEffect(() => {
     localStorage.setItem("libraryRequireAtLeastOneNonThreat", JSON.stringify(requireAtLeastOneNonThreat));
   }, [requireAtLeastOneNonThreat]);
+
+  // Cleanup worker on unmount
+  useEffect(() => {
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate();
+      }
+    };
+  }, []);
 
   // Persist combinations and failures to sessionStorage
   useEffect(() => {
@@ -736,34 +773,31 @@ export default function LibraryPage() {
             setSearchQuery={setSearchQuery}
           />
 
-          <div className="flex-1 overflow-y-auto p-5">
+          <div className="flex-1 overflow-hidden">
             {displayedItems.length === 0 ? (
-              <div className="text-center py-24 bg-panel rounded-2xl border border-border shadow-card">
-                <div className="w-16 h-16 bg-surface rounded-full flex items-center justify-center mx-auto mb-4 border border-border">
-                  <Image size={28} className="text-muted/40" />
+              <div className="h-full overflow-y-auto p-5">
+                <div className="text-center py-24 bg-panel rounded-2xl border border-border shadow-card">
+                  <div className="w-16 h-16 bg-surface rounded-full flex items-center justify-center mx-auto mb-4 border border-border">
+                    <Image size={28} className="text-muted/40" />
+                  </div>
+                  <h3 className="text-base font-semibold text-ink mb-1">No items found</h3>
+                  <p className="text-sm text-muted">
+                    {searchQuery ? "Try refining your search keyword." : "Upload scanned items to get started."}
+                  </p>
                 </div>
-                <h3 className="text-base font-semibold text-ink mb-1">No items found</h3>
-                <p className="text-sm text-muted">
-                  {searchQuery ? "Try refining your search keyword." : "Upload scanned items to get started."}
-                </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                {displayedItems.map((item) => (
-                  <ItemCard
-                    key={item.id}
-                    item={item}
-                    isSelected={selectedItems.has(item.id)}
-                    onSelect={() => toggleItemSelection(item.id)}
-                    onOpen={() => openItemDetail(item)}
-                    onEditRegion={() => {
-                      setEditingRegionItem(item);
-                      setIsValidRegionEditorOpen(true);
-                    }}
-                    onDelete={() => handleDeleteItem(item.id)}
-                  />
-                ))}
-              </div>
+              <VirtualizedItemGrid
+                items={displayedItems}
+                selectedItems={selectedItems}
+                onSelect={toggleItemSelection}
+                onOpen={openItemDetail}
+                onEditRegion={(item) => {
+                  setEditingRegionItem(item);
+                  setIsValidRegionEditorOpen(true);
+                }}
+                onDelete={handleDeleteItem}
+              />
             )}
           </div>
         </main>

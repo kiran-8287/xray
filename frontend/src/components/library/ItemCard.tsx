@@ -1,7 +1,8 @@
-import React from "react";
-import { Check, CheckCircle2, Edit3, Trash2 } from "lucide-react";
+import React, { memo, useRef, useEffect } from "react";
+import { Check, Edit3, Trash2 } from "lucide-react";
 import type { Item } from "../../types/library";
 import { getCategoryConfig } from "../../config/categories";
+import ImageWithPlaceholder from "../common/ImageWithPlaceholder";
 
 function formatDisplayName(name: string) {
   return name.replace(/\.[^.]+$/i, "");
@@ -24,9 +25,9 @@ function parseValidRegionPoints(validRegionPoints: any) {
 }
 
 function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; validRegionPoints: any; alt: string }) {
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -84,7 +85,7 @@ interface ItemCardProps {
   onDelete: () => void;
 }
 
-export default function ItemCard({
+const ItemCard = memo(function ItemCard({
   item,
   isSelected,
   onSelect,
@@ -130,14 +131,10 @@ export default function ItemCard({
             alt={item.filename}
           />
         ) : (
-          <img
+          <ImageWithPlaceholder
             src={`http://localhost:8080/data/library_images/${item.filepath}`}
             alt={item.filename}
             className="max-w-full max-h-full object-contain"
-            onError={(e) => {
-              const target = e.target as HTMLImageElement;
-              target.style.display = "none";
-            }}
           />
         )}
       </div>
@@ -196,4 +193,6 @@ export default function ItemCard({
       </div>
     </div>
   );
-}
+});
+
+export default ItemCard;
