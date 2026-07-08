@@ -2,6 +2,7 @@ import React, { memo, useRef, useEffect } from "react";
 import { Check, Edit3, Trash2 } from "lucide-react";
 import type { Item } from "../../types/library";
 import { getCategoryConfig } from "../../config/categories";
+import ImageWithPlaceholder from "../common/ImageWithPlaceholder";
 
 function formatDisplayName(name: string) {
   return name.replace(/\.[^.]+$/i, "");
@@ -130,14 +131,10 @@ const ItemCard = memo(function ItemCard({
             alt={item.filename}
           />
         ) : (
-          <img
+          <ImageWithPlaceholder
             src={`http://localhost:8080/data/library_images/${item.filepath}`}
             alt={item.filename}
             className="max-w-full max-h-full object-contain"
-            onError={(e) => {
-              const target = e.target as HTMLImageElement;
-              target.style.display = "none";
-            }}
           />
         )}
       </div>
