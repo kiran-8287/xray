@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
-import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check } from "lucide-react";
+import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check, Loader2 } from "lucide-react";
 import { getLibrarySubcategories } from "../config/categories";
 
 interface SavedLayout {
@@ -27,6 +27,7 @@ interface LayoutObject {
   center?: { x: number; y: number };
   size?: { width: number; height: number };
   rotation?: number;
+  tags?: string[];
 }
 
 interface PaginationInfo {
@@ -44,89 +45,44 @@ const BAG_SUBCATEGORIES = getLibrarySubcategories("bags");
 // Threat subcategories for filter multi-select
 const THREAT_SUBCATEGORIES = getLibrarySubcategories("threats");
 
-function SavedLayoutPreview({ objects, bagOrigin }: { objects: LayoutObject[]; bagOrigin?: { x: number; y: number } }) {
+function SavedLayoutPreview({ layoutJson }: { layoutJson: any }) {
   const previewRef = useRef<HTMLDivElement>(null);
   const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // Convert saved layout format (center/size/rotation) to transform format
-  // Coordinates are relative to bag's top-left corner, so we add bagOrigin offset
-  const sortedObjects = [...objects]
-    .map((obj) => {
-      if (obj.transform) return obj;
-      // Convert from saved format to transform format
-      if (obj.center && obj.size) {
-        return {
-          ...obj,
-          transform: {
-            x: (bagOrigin?.x || 0) + obj.center.x,
-            y: (bagOrigin?.y || 0) + obj.center.y,
-            width: obj.size.width,
-            height: obj.size.height,
-            rotation: obj.rotation || 0,
-          },
-        };
-      }
-      return null;
+  // Fetch rendered preview from backend when layoutJson changes
+  useEffect(() => {
+    if (!layoutJson?.objects) return;
+
+    let cancelled = false;
+    setLoading(true);
+    setPreviewUrl(null);
+
+    fetch(`${API_BASE}/api/render-preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ objects: layoutJson.objects }),
     })
-    .filter((obj): obj is LayoutObject => obj !== null)
-    .sort((a, b) => (a.layer ?? 0) - (b.layer ?? 0));
-
-  // Calculate dynamic canvas size based on objects (especially the bag)
-  const canvasSize = React.useMemo(() => {
-    if (sortedObjects.length === 0) {
-      return { width: 800, height: 600 };
-    }
-
-    // Find the bag object to use as base
-    const bagObj = sortedObjects.find(obj => 
-      (obj.library || "").toLowerCase().includes("bag")
-    );
-
-    if (bagObj && bagObj.transform) {
-      // Use bag dimensions as canvas size
-      const bagWidth = bagObj.transform.width;
-      const bagHeight = bagObj.transform.height;
-      
-      // Find bounding box of all objects
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      
-      sortedObjects.forEach(obj => {
-        if (!obj.transform) return;
-        const halfW = obj.transform.width / 2;
-        const halfH = obj.transform.height / 2;
-        const cos = Math.cos((obj.transform.rotation * Math.PI) / 180);
-        const sin = Math.sin((obj.transform.rotation * Math.PI) / 180);
-        
-        // Get four corners of the rotated rectangle
-        const corners = [
-          { x: -halfW, y: -halfH },
-          { x: halfW, y: -halfH },
-          { x: halfW, y: halfH },
-          { x: -halfW, y: halfH },
-        ].map(corner => ({
-          x: obj.transform!.x + corner.x * cos - corner.y * sin,
-          y: obj.transform!.y + corner.x * sin + corner.y * cos,
-        }));
-        
-        corners.forEach(corner => {
-          minX = Math.min(minX, corner.x);
-          minY = Math.min(minY, corner.y);
-          maxX = Math.max(maxX, corner.x);
-          maxY = Math.max(maxY, corner.y);
-        });
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Render failed');
+        const blob = await res.blob();
+        if (!cancelled) {
+          const url = URL.createObjectURL(blob);
+          setPreviewUrl(url);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error('Error rendering preview:', err);
+        if (!cancelled) setLoading(false);
       });
-      
-      // Add some padding
-      const padding = 20;
-      const width = Math.max(bagWidth, maxX - minX + padding * 2);
-      const height = Math.max(bagHeight, maxY - minY + padding * 2);
-      
-      return { width, height };
-    }
 
-    // Fallback if no bag found
-    return { width: 800, height: 600 };
-  }, [sortedObjects]);
+    return () => {
+      cancelled = true;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [layoutJson]);
 
   useLayoutEffect(() => {
     const node = previewRef.current;
@@ -145,63 +101,24 @@ function SavedLayoutPreview({ objects, bagOrigin }: { objects: LayoutObject[]; b
     return () => observer.disconnect();
   }, []);
 
-  // Calculate scale to fit canvas in preview while maintaining aspect ratio
-  const scale = previewSize.width > 0 && previewSize.height > 0
-    ? Math.min(
-        previewSize.width / canvasSize.width,
-        previewSize.height / canvasSize.height
-      )
-    : 1;
-
   return (
-    <div ref={previewRef} className="relative w-full h-full overflow-hidden bg-white">
-      <div
-        className="absolute"
-        style={{
-          left: "50%",
-          top: "50%",
-          transformOrigin: "center",
-          transform: `translate(-50%, -50%) scale(${scale})`,
-          width: canvasSize.width,
-          height: canvasSize.height,
-        }}
-      >
-        {sortedObjects.map((obj) => {
-          const transform = obj.transform!;
-          const isBag = (obj.library || "").toLowerCase() === "bag" || (obj.library || "").toLowerCase() === "bags";
-
-          return (
-            <div
-              key={obj.id}
-              className="absolute"
-              style={{
-                left: transform.x - transform.width / 2,
-                top: transform.y - transform.height / 2,
-                width: transform.width,
-                height: transform.height,
-                transform: `rotate(${transform.rotation}deg)`,
-                transformOrigin: "center",
-                zIndex: obj.layer ?? 0,
-                opacity: isBag ? 1 : 0.7,
-                mixBlendMode: isBag ? "normal" : "multiply",
-              }}
-            >
-              <img
-                src={`${IMAGE_BASE_URL}${obj.filepath}`}
-                alt={obj.name || "Object"}
-                className="w-full h-full object-fill pointer-events-none"
-                draggable={false}
-              />
-            </div>
-          );
-        })}
-
-        {sortedObjects.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center text-muted/40">
-            <Grid3X3 size={28} />
-          </div>
-        )}
-      </div>
+    <div ref={previewRef} className="relative w-full h-full overflow-hidden bg-white flex items-center justify-center">
+      {loading ? (
+        <div className="flex items-center gap-2 text-sm text-muted">
+          <Loader2 size={16} className="animate-spin" />
+          Rendering preview...
+        </div>
+      ) : previewUrl ? (
+        <img
+          src={previewUrl}
+          alt="Layout preview"
+          className="max-w-full max-h-full object-contain"
+        />
+      ) : (
+        <div className="flex items-center justify-center text-muted/40">
+          <Grid3X3 size={28} />
+        </div>
+      )}
     </div>
   );
 }
@@ -262,7 +179,7 @@ function FilterDropdown({ label, value, options, onChange, placeholder }: {
   );
 }
 
-// Multi-select dropdown component
+// Multi-select dropdown component with search
 function MultiSelectDropdown({ selected, options, onChange, placeholder }: {
   selected: string[];
   options: { id: string; name: string }[];
@@ -270,7 +187,9 @@ function MultiSelectDropdown({ selected, options, onChange, placeholder }: {
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -281,6 +200,22 @@ function MultiSelectDropdown({ selected, options, onChange, placeholder }: {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Auto-focus search input when dropdown opens
+  useEffect(() => {
+    if (open && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+    // Clear search when dropdown closes
+    if (!open) {
+      setSearchQuery("");
+    }
+  }, [open]);
+
+  // Filter options based on search query (case-insensitive)
+  const filteredOptions = searchQuery.trim()
+    ? options.filter(opt => opt.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : options;
 
   const toggle = (id: string) => {
     if (id === 'ALL') {
@@ -317,49 +252,80 @@ function MultiSelectDropdown({ selected, options, onChange, placeholder }: {
       </div>
       
       {open && (
-        <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-border rounded-lg shadow-xl max-h-64 overflow-y-auto">
-          {options.length === 0 ? (
-            <div className="p-3 text-xs text-muted text-center">No options available</div>
-          ) : (
-            <>
-              {/* ALL option at top */}
-              <div
-                onClick={() => toggle('ALL')}
-                className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
-                  isAllSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
-                }`}
-              >
-                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
-                  isAllSelected ? 'bg-accent border-accent' : 'border-gray-300'
-                }`}>
-                  {isAllSelected && <Check size={12} className="text-white" />}
-                </div>
-                <span className="truncate font-medium">All Items</span>
-              </div>
-              
-              <div className="border-t border-border my-1" />
-              
-              {options.map((opt) => {
-                const isSelected = selected.includes(opt.id);
-                return (
-                  <div
-                    key={opt.id}
-                    onClick={() => toggle(opt.id)}
-                    className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
-                      isSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
-                    }`}
-                  >
-                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
-                      isSelected ? 'bg-accent border-accent' : 'border-gray-300'
-                    }`}>
-                      {isSelected && <Check size={12} className="text-white" />}
-                    </div>
-                    <span className="truncate">{opt.name}</span>
+        <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-border rounded-lg shadow-xl">
+          {/* Search input */}
+          <div className="sticky top-0 bg-white border-b border-border rounded-t-lg">
+            <div className="flex items-center gap-2 px-3 py-2">
+              <Search size={14} className="text-muted shrink-0" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search..."
+                className="w-full text-sm text-ink bg-transparent outline-none placeholder:text-muted/60"
+                onClick={(e) => e.stopPropagation()}
+              />
+              {searchQuery && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setSearchQuery(""); }}
+                  className="text-muted hover:text-ink"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="max-h-56 overflow-y-auto">
+            {options.length === 0 ? (
+              <div className="p-3 text-xs text-muted text-center">No options available</div>
+            ) : (
+              <>
+                {/* ALL option at top (always visible) */}
+                <div
+                  onClick={() => toggle('ALL')}
+                  className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
+                    isAllSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                    isAllSelected ? 'bg-accent border-accent' : 'border-gray-300'
+                  }`}>
+                    {isAllSelected && <Check size={12} className="text-white" />}
                   </div>
-                );
-              })}
-            </>
-          )}
+                  <span className="truncate font-medium">All Items</span>
+                </div>
+                
+                {filteredOptions.length > 0 && <div className="border-t border-border my-1" />}
+                
+                {filteredOptions.length === 0 ? (
+                  <div className="p-3 text-xs text-muted text-center">No matches found</div>
+                ) : (
+                  filteredOptions.map((opt) => {
+                    const isSelected = selected.includes(opt.id);
+                    return (
+                      <div
+                        key={opt.id}
+                        onClick={() => toggle(opt.id)}
+                        className={`flex items-center gap-2 p-2.5 text-sm cursor-pointer transition-colors ${
+                          isSelected ? 'bg-accent/10 text-accent font-medium' : 'hover:bg-surface text-ink'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                          isSelected ? 'bg-accent border-accent' : 'border-gray-300'
+                        }`}>
+                          {isSelected && <Check size={12} className="text-white" />}
+                        </div>
+                        <span className="truncate">{opt.name}</span>
+                      </div>
+                    );
+                  })
+                )}
+              </>
+            )}
+          </div>
+
           {selected.length > 0 && (
             <div className="sticky bottom-0 border-t border-border bg-white p-2">
               <button
@@ -383,16 +349,17 @@ export default function SavedPage() {
   const [selectedLayout, setSelectedLayout] = useState<SavedLayout | null>(null);
 
   // Advanced filter state
-  const [filterType, setFilterType] = useState<'date' | 'bags'>('date');
-  const [selectedBagIds, setSelectedBagIds] = useState<string[]>([]);
-  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [selectedBagSubcategories, setSelectedBagSubcategories] = useState<string[]>([]);
+  const [selectedThreatSubcategories, setSelectedThreatSubcategories] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [filterLogic, setFilterLogic] = useState<'or' | 'and'>('or');
   const [showFilters, setShowFilters] = useState(false);
+  const [showTagsFilter, setShowTagsFilter] = useState(false);
 
-  // Available items for filter dropdowns (extracted from all layouts)
-  const [availableBags, setAvailableBags] = useState<{id: string, name: string}[]>([]);
-  const [availableObjects, setAvailableObjects] = useState<{id: string, name: string, library: string}[]>([]);
+  // All available subcategories from config
+  const allBagSubcategories = getLibrarySubcategories("bags");
+  const allThreatSubcategories = getLibrarySubcategories("threats");
+  const allTags = getLibrarySubcategories("non-threats");
 
   // Pagination state
   const [page, setPage] = useState(1);
@@ -408,11 +375,14 @@ export default function SavedPage() {
       params.set('page', String(pageNum));
       params.set('limit', String(pageSize));
       
-      // New filter parameters
-      if (selectedBagIds.length > 0) params.set('bagIds', selectedBagIds.join(','));
-      if (selectedObjectIds.length > 0) params.set('objectIds', selectedObjectIds.join(','));
-      if (dateFrom) params.set('dateFrom', dateFrom);
-      if (dateTo) params.set('dateTo', dateTo);
+      // Filter by bag subcategories
+      if (selectedBagSubcategories.length > 0) params.set('bagSubcategories', selectedBagSubcategories.join(','));
+      // Filter by threat subcategories
+      if (selectedThreatSubcategories.length > 0) params.set('threatSubcategories', selectedThreatSubcategories.join(','));
+      // Filter by tags
+      if (selectedTags.length > 0) params.set('tags', selectedTags.join(','));
+      // Filter logic mode
+      params.set('filterLogic', filterLogic);
 
       const res = await fetch(`${API_BASE}/api/saved-layouts/filtered?${params}`);
       const data = await res.json();
@@ -427,22 +397,38 @@ export default function SavedPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedBagIds, selectedObjectIds, dateFrom, dateTo]);
+  }, [selectedBagSubcategories, selectedThreatSubcategories, selectedTags, filterLogic]);
 
-  // Load on mount and when filters change
+  // Auto-apply filters when any filter changes (AND logic between different filter types)
   useEffect(() => {
     setPage(1);
     loadLayouts(1);
-  }, [loadLayouts]);
+  }, [selectedBagSubcategories, selectedThreatSubcategories, selectedTags, filterLogic, loadLayouts]);
 
   // Load on page change
   useEffect(() => {
-    if (page > 1) loadLayouts(page);
+    loadLayouts(page);
   }, [page]);
 
   const getObjects = (layout: SavedLayout): LayoutObject[] => {
     try {
-      return layout.layout_json?.objects || [];
+      const obj = layout.layout_json?.objects;
+      if (!obj) return [];
+      // New structure: { bag: {...}, threats: [...], non-threats: [...] }
+      if (obj.bag || obj.threats || obj["non-threats"]) {
+        const result: LayoutObject[] = [];
+        if (obj.bag) result.push({ ...obj.bag, library: "bag" });
+        if (Array.isArray(obj.threats)) {
+          obj.threats.forEach((t: any) => result.push({ ...t, library: "threat" }));
+        }
+        if (Array.isArray(obj["non-threats"])) {
+          obj["non-threats"].forEach((n: any) => result.push({ ...n, library: "non-threat" }));
+        }
+        return result;
+      }
+      // Legacy flat array structure
+      if (Array.isArray(obj)) return obj;
+      return [];
     } catch {
       return [];
     }
@@ -455,40 +441,12 @@ export default function SavedPage() {
     return { bg: "bg-gray-50", text: "text-gray-600", border: "border-gray-200" };
   };
 
-  // Extract available bags and objects from layouts for filter dropdowns
-  useEffect(() => {
-    if (layouts.length === 0) return;
-    
-    const bagsMap = new Map<string, string>();
-    const objectsMap = new Map<string, {name: string, library: string}>();
-    
-    layouts.forEach(layout => {
-      const objects = layout.layout_json?.objects || [];
-      objects.forEach((obj: any) => {
-        if (obj.library?.toLowerCase().includes('bag')) {
-          bagsMap.set(obj.id, obj.name || obj.id);
-        } else {
-          objectsMap.set(obj.id, { name: obj.name || obj.id, library: obj.library || 'other' });
-        }
-      });
-    });
-    
-    setAvailableBags(Array.from(bagsMap.entries()).map(([id, name]) => ({ id, name })));
-    setAvailableObjects(Array.from(objectsMap.entries()).map(([id, data]) => ({ id, ...data })));
-  }, [layouts]);
-
-  const handleApplyFilters = () => {
-    setPage(1);
-    loadLayouts(1);
-  };
-
   const handleClearFilters = () => {
-    setSelectedBagIds([]);
-    setSelectedObjectIds([]);
-    setDateFrom("");
-    setDateTo("");
+    setSelectedBagSubcategories([]);
+    setSelectedThreatSubcategories([]);
+    setSelectedTags([]);
+    setFilterLogic('or');
     setPage(1);
-    loadLayouts(1);
   };
 
   // Close detail on Escape
@@ -505,9 +463,8 @@ export default function SavedPage() {
   return (
     <div className="p-6">
       <div className="mb-6 flex items-center justify-between gap-4">
-        <div>
-          <p className="text-sm uppercase tracking-[0.2em] text-muted">Saved Workspaces</p>
-          <h1 className="text-3xl font-semibold text-ink">Saved Layouts</h1>
+        <div className="border-l-4 border-accent pl-4">
+          <h2 className="text-3xl font-bold text-ink tracking-tight">Saved Layouts</h2>
         </div>
         <div className="inline-flex items-center gap-2 rounded-xl border border-border bg-panel px-4 py-3 text-sm text-muted">
           <FolderOpen size={18} />
@@ -517,122 +474,104 @@ export default function SavedPage() {
 
       {/* Filter Bar */}
       <div className="mb-6 rounded-2xl border border-border bg-panel p-4 shadow-sm">
-        {/* Filter Type Selector */}
-        <div className="flex items-center gap-3 mb-4">
-          <span className="text-sm font-semibold text-ink">Filter by:</span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setFilterType('date')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                filterType === 'date'
-                  ? 'bg-accent text-white'
-                  : 'bg-surface text-muted hover:text-ink border border-border'
-              }`}
-            >
-              Date
-            </button>
-            <button
-              onClick={() => setFilterType('bags')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                filterType === 'bags'
-                  ? 'bg-accent text-white'
-                  : 'bg-surface text-muted hover:text-ink border border-border'
-              }`}
-            >
-              Bags & Objects
-            </button>
+        <div className="space-y-4">
+          {/* Filter 1: Bags and Objects */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <label className="block text-xs font-semibold text-muted uppercase tracking-wider">Filter by Bags & Objects</label>
+              <button
+                onClick={() => setShowTagsFilter(!showTagsFilter)}
+                className="text-xs px-3 py-1.5 rounded-lg border border-border bg-white hover:bg-surface text-ink font-medium flex items-center gap-1.5"
+              >
+                {showTagsFilter ? 'Hide' : 'Show'} Tags Filter
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Bag Subcategory Filter */}
+              <div>
+                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter by Bag Subcategory</label>
+                <MultiSelectDropdown
+                  selected={selectedBagSubcategories}
+                  options={allBagSubcategories.map(s => ({ id: s.slug, name: s.name }))}
+                  onChange={setSelectedBagSubcategories}
+                  placeholder="Choose bag subcategories..."
+                />
+              </div>
+
+              {/* Threat Subcategory Filter */}
+              <div>
+                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter by Threat Subcategory</label>
+                <MultiSelectDropdown
+                  selected={selectedThreatSubcategories}
+                  options={allThreatSubcategories.map(s => ({ id: s.slug, name: s.name }))}
+                  onChange={setSelectedThreatSubcategories}
+                  placeholder="Choose threat subcategories..."
+                />
+              </div>
+            </div>
           </div>
+
+          {/* Filter 2: Tags (Toggleable) */}
+          {showTagsFilter && (
+            <div className="pt-3 border-t border-border">
+              <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter by Tags</label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <MultiSelectDropdown
+                    selected={selectedTags}
+                    options={allTags.map(s => ({ id: s.slug, name: s.name }))}
+                    onChange={setSelectedTags}
+                    placeholder="Choose tags..."
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Threat Filter Logic Segmented Control */}
+          <div>
+            <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Threat Filter Logic</label>
+            <div className="inline-flex items-center rounded-lg border border-border bg-white p-1">
+              <button
+                onClick={() => setFilterLogic('or')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                  filterLogic === 'or'
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'text-muted hover:text-ink hover:bg-surface'
+                }`}
+                title="Show layouts with ANY selected threat"
+              >
+                OR
+              </button>
+              <button
+                onClick={() => setFilterLogic('and')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                  filterLogic === 'and'
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'text-muted hover:text-ink hover:bg-surface'
+                }`}
+                title="Show layouts with ALL selected threats together"
+              >
+                AND
+              </button>
+            </div>
+            <p className="text-[10px] text-muted mt-1">
+              {filterLogic === 'or' && 'Shows selected bag(s) with ANY one of the selected threats (backpack+gun OR backpack+knife)'}
+              {filterLogic === 'and' && 'Shows selected bag(s) with ALL selected threats together (backpack+gun+knife)'}
+            </p>
+          </div>
+
+          {(selectedBagSubcategories.length > 0 || selectedThreatSubcategories.length > 0 || selectedTags.length > 0) && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleClearFilters}
+                className="px-4 py-2 rounded-xl border border-border text-sm text-muted hover:text-ink"
+              >
+                Clear All
+              </button>
+            </div>
+          )}
         </div>
-
-        {/* Date Filter */}
-        {filterType === 'date' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">From Date</label>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm text-ink focus:outline-none focus:border-accent"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">To Date</label>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm text-ink focus:outline-none focus:border-accent"
-                />
-              </div>
-            </div>
-            {(dateFrom || dateTo) && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleApplyFilters}
-                  className="px-5 py-2 rounded-xl bg-accent text-white text-sm font-semibold flex items-center gap-2 hover:bg-accent/90"
-                >
-                  <Search size={16} />
-                  Apply Date Filter
-                </button>
-                <button
-                  onClick={() => { setDateFrom(''); setDateTo(''); }}
-                  className="px-4 py-2 rounded-xl border border-border text-sm text-muted hover:text-ink"
-                >
-                  Clear
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Bags & Objects Filter */}
-        {filterType === 'bags' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Bag Multi-Select Dropdown */}
-              <div>
-                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Select Bags</label>
-                <MultiSelectDropdown
-                  selected={selectedBagIds}
-                  options={availableBags.map(b => ({ id: b.id, name: b.name }))}
-                  onChange={setSelectedBagIds}
-                  placeholder="Choose bags..."
-                />
-              </div>
-
-              {/* Object Multi-Select Dropdown */}
-              <div>
-                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Select Objects</label>
-                <MultiSelectDropdown
-                  selected={selectedObjectIds}
-                  options={availableObjects.map(o => ({ id: o.id, name: `${o.name} (${o.library})` }))}
-                  onChange={setSelectedObjectIds}
-                  placeholder="Choose objects..."
-                />
-              </div>
-            </div>
-
-            {(selectedBagIds.length > 0 || selectedObjectIds.length > 0) && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleApplyFilters}
-                  className="px-5 py-2 rounded-xl bg-accent text-white text-sm font-semibold flex items-center gap-2 hover:bg-accent/90"
-                >
-                  <Search size={16} />
-                  Apply Filter
-                </button>
-                <button
-                  onClick={() => { setSelectedBagIds([]); setSelectedObjectIds([]); }}
-                  className="px-4 py-2 rounded-xl border border-border text-sm text-muted hover:text-ink"
-                >
-                  Clear
-                </button>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {loading ? (
@@ -681,21 +620,30 @@ export default function SavedPage() {
               <table className="w-full divide-y divide-border">
                 <thead className="bg-surface/50">
                   <tr className="text-xs font-semibold text-muted uppercase tracking-wider">
-                    <th className="text-left py-3 px-4 w-12">#</th>
-                    <th className="text-left py-3 px-4">ID</th>
-                    <th className="text-left py-3 px-4">Bag</th>
-                    <th className="text-left py-3 px-4">Threats</th>
-                    <th className="text-center py-3 px-4">Objects</th>
-                    <th className="text-right py-3 px-4">Date</th>
+                    <th className="text-left py-3 px-4 w-16">#</th>
+                    <th className="text-left py-3 px-4 w-40">ID</th>
+                    <th className="text-left py-3 px-4 w-48">Bag</th>
+                    <th className="text-left py-3 px-4 w-64">Threats</th>
+                    <th className="text-left py-3 px-4 w-56">Non-Threats</th>
+                    <th className="text-left py-3 px-4 w-56">Tags</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {layouts.map((layout, idx) => {
                     const objects = getObjects(layout);
                     const bagObj = objects.find(o => (o.library || "").toLowerCase().includes("bag"));
-                    const threatObjs = objects.filter(o => (o.library || "").toLowerCase().includes("threat"));
-                    const bagName = bagObj?.name || "—";
-                    const threatNames = threatObjs.map(t => t.name).filter(Boolean).join(", ") || "—";
+                    const threatObjs = objects.filter(o => {
+                      const lib = (o.library || "").toLowerCase();
+                      return lib.includes("threat") && !lib.includes("non");
+                    });
+                    const nonThreatObjs = objects.filter(o => (o.library || "").toLowerCase().includes("non-threat"));
+                    const bagName = bagObj?.id || bagObj?.name || "—";
+                    const threatNames = threatObjs.map(t => t.id || t.name).filter(Boolean).join(", ") || "—";
+                    const nonThreatNames = nonThreatObjs.map(t => t.id || t.name).filter(Boolean).join(", ") || "—";
+                    const bagTags = bagObj?.tags || [];
+                    const tagsDisplay = bagTags.length > 0 
+                      ? bagTags.map((tag: string) => tag.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')).join(", ")
+                      : "—";
 
                     return (
                       <tr
@@ -703,25 +651,23 @@ export default function SavedPage() {
                         onClick={() => setSelectedLayout(layout)}
                         className="cursor-pointer hover:bg-surface/50 transition-colors even:bg-surface/20"
                       >
-                        <td className="py-3 px-4 text-sm font-mono text-muted">
+                        <td className="py-3 px-4 text-sm font-mono text-muted whitespace-nowrap">
                           {((pagination?.page || 1) - 1) * pageSize + idx + 1}
                         </td>
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 whitespace-nowrap">
                           <span className="text-sm font-mono text-accent-sky font-medium">{layout.id}</span>
                         </td>
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 whitespace-nowrap">
                           <span className="text-sm text-ink">{bagName}</span>
                         </td>
                         <td className="py-3 px-4">
                           <span className="text-sm text-rose-700">{threatNames}</span>
                         </td>
-                        <td className="py-3 px-4 text-center">
-                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-surface text-xs font-semibold text-muted border border-border">
-                            {objects.length}
-                          </span>
+                        <td className="py-3 px-4">
+                          <span className="text-sm text-ink">{nonThreatNames}</span>
                         </td>
-                        <td className="py-3 px-4 text-right">
-                          <span className="text-xs text-muted">{new Date(layout.created_at).toLocaleDateString()}</span>
+                        <td className="py-3 px-4">
+                          <span className="text-sm text-emerald-700">{tagsDisplay}</span>
                         </td>
                       </tr>
                     );
@@ -758,8 +704,7 @@ export default function SavedPage() {
                    <div className="min-h-0 border-b border-border bg-surface p-4 lg:border-b-0 lg:border-r">
                      <div className="h-full rounded-2xl overflow-hidden border border-border bg-white">
                        <SavedLayoutPreview 
-                         objects={getObjects(selectedLayout)} 
-                         bagOrigin={selectedLayout.layout_json?.bagOrigin}
+                         layoutJson={selectedLayout.layout_json}
                        />
                      </div>
                    </div>
@@ -767,11 +712,11 @@ export default function SavedPage() {
                    {/* Right: Annotation Details */}
                    <div className="min-h-0 overflow-y-auto p-5">
                      <div className="space-y-4">
-                       {selectedLayout.layout_json?.objects?.length > 0 && (
-                         <div>
-                           <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Objects in Layout</h3>
-                           <div className="space-y-2">
-                             {selectedLayout.layout_json.objects.map((obj: any, idx: number) => {
+                  {(selectedLayout.layout_json?.objects?.bag || selectedLayout.layout_json?.objects?.threats?.length > 0 || selectedLayout.layout_json?.objects?.["non-threats"]?.length > 0) && (
+                    <div>
+                      <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Objects in Layout</h3>
+                      <div className="space-y-2">
+                        {getObjects(selectedLayout).map((obj: any, idx: number) => {
                                // Use center (now relative to bag origin) and size
                                const transform = obj.center && obj.size ? {
                                  x: obj.center.x,
@@ -784,7 +729,7 @@ export default function SavedPage() {
                                return (
                                  <div key={idx} className="rounded-xl border border-border bg-white p-2.5">
                                    <div className="flex items-center justify-between mb-1.5">
-                                     <span className="text-xs font-semibold text-ink">{obj.name}</span>
+                                     <span className="text-xs font-semibold text-ink">{obj.id || obj.name}</span>
                                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
                                        obj.library === "bag" ? "bg-blue-50 text-blue-700 border-blue-200" :
                                        obj.library === "threat" ? "bg-rose-50 text-rose-700 border-rose-200" :
@@ -793,6 +738,11 @@ export default function SavedPage() {
                                        {obj.library}
                                      </span>
                                    </div>
+                                   {obj.subcategory && (
+                                     <div className="text-[10px] text-muted mb-2">
+                                       <span className="font-medium">Subcategory:</span> {obj.subcategory}
+                                     </div>
+                                   )}
                                    {transform && (
                                      <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono">
                                        <div className="bg-surface rounded px-1.5 py-1">
@@ -812,6 +762,26 @@ export default function SavedPage() {
                                        </div>
                                      </div>
                                    )}
+                                    {/* Show tags for bag objects */}
+                                    {(obj.library || "").toLowerCase() === "bag" && obj.tags && obj.tags.length > 0 && (
+                                      <div className="mt-2 pt-2 border-t border-border">
+                                        <div className="text-[10px] text-muted mb-1 font-medium">Tags:</div>
+                                        <div className="flex flex-wrap gap-1">
+                                          {obj.tags.map((tagSlug: string) => {
+                                            const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                            return (
+                                              <span
+                                                key={tagSlug}
+                                                className="inline-flex items-center px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-medium"
+                                                title={tagName}
+                                              >
+                                                {tagName}
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
                                  </div>
                                );
                              })}

@@ -1,11 +1,18 @@
 /**
- * Generates a unique ID for synthesized bags in format: SB{YYMMDD}-{ABCDE}
- * Example: SB260703-00001 (generated on July 3, 2026, first sequence)
+ * Generates a unique ID for synthesized bags in format: SB{DDMMYY}-{X}{ABCDE}
+ * Example: SB030726-A00001 (generated on July 3, 2026, first sequence)
  * 
  * Format breakdown:
  * - SB: Prefix for Synthesized Bag
- * - {YYMMDD}: 2-digit year, month, day
- * - {ABCDE}: 5-digit sequence number (00001, 00002, etc.) for same-day generations
+ * - {DDMMYY}: 2-digit day, month, year
+ * - {X}: Letter suffix (A-Z)
+ * - {ABCDE}: 5-digit sequence number (00001-99999)
+ * 
+ * Sequence progression:
+ * - A00001 to A99999 (99,999 combinations)
+ * - B00001 to B99999 (99,999 combinations)
+ * - ... up to Z99999
+ * - Total: 26 letters × 99,999 = ~2.6 million combinations per day
  */
 
 export interface GeneratedId {
@@ -27,27 +34,35 @@ export function generateSynthesizedId(
   const now = new Date();
   const timestamp = now.getTime();
   
-  // Format: YYMMDD (2-digit year, month, day)
-  const year = String(now.getFullYear()).slice(-2);
-  const month = String(now.getMonth() + 1).padStart(2, '0');
+  // Format: DDMMYY (2-digit day, month, year)
   const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const year = String(now.getFullYear()).slice(-2);
   
-  const datePrefix = `${year}${month}${day}`;
+  const datePrefix = `${day}${month}${year}`;
   
-  // Find the next available sequence number
+  // Find the next available sequence
   const baseId = `SB${datePrefix}`;
   const sequence = findNextSequence(baseId, existingIds);
   
-  const id = `${baseId}-${String(sequence).padStart(5, '0')}`;
+  // Convert sequence to letter + 5-digit format
+  // sequence 1-99999 = A00001-A99999
+  // sequence 100000-199998 = B00001-B99999
+  // etc.
+  const letterIndex = Math.floor((sequence - 1) / 99999);
+  const numberPart = ((sequence - 1) % 99999) + 1;
+  const letter = String.fromCharCode(65 + letterIndex); // 65 = 'A'
+  
+  const id = `${baseId}-${letter}${String(numberPart).padStart(5, '0')}`;
   
   return { id, timestamp };
 }
 
 /**
  * Find the next available sequence number for a given base ID
- * @param baseId - The base ID without sequence (e.g., "SB260703")
+ * @param baseId - The base ID without sequence (e.g., "SB030726")
  * @param existingIds - Array of existing IDs to check
- * @returns Next available sequence number
+ * @returns Next available sequence number (1-based)
  */
 function findNextSequence(baseId: string, existingIds: string[]): number {
   if (existingIds.length === 0) {
@@ -59,11 +74,24 @@ function findNextSequence(baseId: string, existingIds: string[]): number {
   for (const existingId of existingIds) {
     // Check if this ID starts with our base ID
     if (existingId.startsWith(baseId + '-')) {
-      // Extract sequence number
+      // Extract the letter+number suffix (e.g., "A00001" from "SB030726-A00001")
       const suffix = existingId.slice(baseId.length + 1);
-      const sequence = parseInt(suffix, 10);
-      if (!isNaN(sequence) && sequence > maxSequence) {
-        maxSequence = sequence;
+      
+      // Parse the letter and number
+      if (suffix.length >= 6) {
+        const letter = suffix.charAt(0);
+        const numberStr = suffix.slice(1);
+        const number = parseInt(numberStr, 10);
+        
+        if (!isNaN(number) && letter >= 'A' && letter <= 'Z') {
+          // Convert to sequence number: A00001 = 1, A00002 = 2, ..., B00001 = 100000
+          const letterValue = letter.charCodeAt(0) - 65; // 0 for 'A', 1 for 'B', etc.
+          const sequence = letterValue * 99999 + number;
+          
+          if (sequence > maxSequence) {
+            maxSequence = sequence;
+          }
+        }
       }
     }
   }

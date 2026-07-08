@@ -40,12 +40,16 @@ const __dirname = path.dirname(__filename);
 const exportsRoot = path.resolve(__dirname, "../data/exports");
 const libraryImagesRoot = path.resolve(__dirname, "../data/library_images");
 const collageImagesRoot = path.resolve(__dirname, "../data/collage_images");
+const collageHighRoot = path.resolve(collageImagesRoot, "high");
+const collageLowRoot = path.resolve(collageImagesRoot, "low");
 const pixelDataRoot = path.resolve(__dirname, "../data/pixel_data");
 
 // Ensure directories exist
 await fs.mkdir(exportsRoot, { recursive: true });
 await fs.mkdir(libraryImagesRoot, { recursive: true });
 await fs.mkdir(collageImagesRoot, { recursive: true });
+await fs.mkdir(collageHighRoot, { recursive: true });
+await fs.mkdir(collageLowRoot, { recursive: true });
 await fs.mkdir(pixelDataRoot, { recursive: true });
 
 // Serve static files from data directory
@@ -244,7 +248,9 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
 
 // Helper to normalize category name into exactly three main categories
 function normalizeCategory(cat) {
-    const normalized = (cat || "").toLowerCase();
+    const normalized = (cat || "").toLowerCase().trim();
+    // Match non-threat first before 'threat' to prevent 'non-threat' matching 'threat'
+    if (/^non[- ]?threat/.test(normalized)) return "non-threats";
     if (normalized.includes("bag")) return "bags";
     if (normalized.includes("threat") || normalized.includes("electronic") || normalized === "electronics") return "threats";
     return "non-threats";
@@ -295,61 +301,124 @@ app.get('/api/saved-layouts', async (_req, res) => {
     }
 });
 
+// Return only the saved layout IDs (used to continue the synthesized ID sequence)
+app.get('/api/saved-layouts/ids', async (_req, res) => {
+    try {
+        const layouts = await getSavedLayouts();
+        const ids = layouts.map((l) => l.id).filter(Boolean);
+        res.json({ ok: true, ids });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
 // Filtered/paginated saved layouts endpoint
 app.get('/api/saved-layouts/filtered', async (req, res) => {
     try {
       const page = Math.max(1, parseInt(req.query.page) || 1);
       const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
       
-      // New filter parameters
-      const bagIds = req.query.bagIds ? String(req.query.bagIds).split(',').map(s => s.trim()).filter(Boolean) : [];
-      const objectIds = req.query.objectIds ? String(req.query.objectIds).split(',').map(s => s.trim()).filter(Boolean) : [];
-      const dateFrom = req.query.dateFrom ? String(req.query.dateFrom) : '';
-      const dateTo = req.query.dateTo ? String(req.query.dateTo) : '';
-      
-      // Legacy filters (kept for backward compatibility)
-      const bagType = req.query.bagType ? String(req.query.bagType).toLowerCase() : '';
-      const threatTypes = req.query.threatTypes ? String(req.query.threatTypes).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+      // New filter parameters for subcategories
+      const bagSubcategories = req.query.bagSubcategories ? String(req.query.bagSubcategories).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+      const threatSubcategories = req.query.threatSubcategories ? String(req.query.threatSubcategories).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+      const tags = req.query.tags ? String(req.query.tags).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+      const filterLogic = req.query.filterLogic ? String(req.query.filterLogic).toLowerCase() : 'or';
 
       const allLayouts = await getSavedLayouts();
 
-      // Filter layouts based on criteria (OR logic)
+      // Helper to extract objects from either new or legacy structure
+      function extractObjects(layout) {
+        const obj = layout.layout_json?.objects;
+        if (!obj) return [];
+        // New structure: { bag: {...}, threats: [...], non-threats: [...] }
+        if (obj.bag || obj.threats || obj['non-threats']) {
+          const result = [];
+          if (obj.bag) result.push({ ...obj.bag, library: 'bag' });
+          if (Array.isArray(obj.threats)) {
+            obj.threats.forEach(t => result.push({ ...t, library: 'threat' }));
+          }
+          if (Array.isArray(obj['non-threats'])) {
+            obj['non-threats'].forEach(n => result.push({ ...n, library: 'non-threat' }));
+          }
+          return result;
+        }
+        // Legacy flat array structure
+        if (Array.isArray(obj)) return obj;
+        return [];
+      }
+
+      // Filter layouts based on criteria
       const filtered = allLayouts.filter((layout) => {
         try {
-          const objects = layout.layout_json?.objects || [];
+          const objects = extractObjects(layout);
           if (!objects.length) return false;
 
-          // Extract bag and non-bag objects
-          const bagObjs = objects.filter(o => (o.library || '').toLowerCase().includes('bag'));
-          const nonBagObjs = objects.filter(o => !(o.library || '').toLowerCase().includes('bag'));
-          
-          // Get IDs from objects
-          const layoutBagIds = bagObjs.map(o => o.id);
-          const layoutObjectIds = nonBagObjs.map(o => o.id);
+// Extract bag and threat objects
+           const bagObjs = objects.filter(o => (o.library || '').toLowerCase().includes('bag'));
+           const threatObjs = objects.filter(o => {
+             const lib = (o.library || '').toLowerCase();
+             return lib.includes('threat') && !lib.includes('non-threat');
+           });
+           
+           // Get subcategories from objects (use subcategory field if available, otherwise extract from library)
+           const layoutBagSubcategories = bagObjs.map(o => {
+             // First try the subcategory field (Option A: stored in layout)
+             if (o.subcategory) {
+               // Normalize to slug format (replace spaces with hyphens) to match frontend
+               return o.subcategory.toLowerCase().replace(/\s+/g, '-');
+             }
+             // Fallback: extract from library field (e.g., "bag-backpack" -> "backpack")
+             const lib = (o.library || '').toLowerCase();
+             if (lib.includes('bag')) {
+               const parts = lib.split('-');
+               if (parts.length > 1) return parts[1];
+             }
+             return 'general';
+           });
+           
+           const layoutThreatSubcategories = threatObjs.map(o => {
+             // First try the subcategory field (Option A: stored in layout)
+             if (o.subcategory) {
+               // Normalize to slug format (replace spaces with hyphens) to match frontend
+               return o.subcategory.toLowerCase().replace(/\s+/g, '-');
+             }
+             // Fallback: extract from library field
+             const lib = (o.library || '').toLowerCase();
+             if (lib.includes('threat') && !lib.includes('non-threat')) {
+               const parts = lib.split('-');
+               if (parts.length > 1) return parts[1];
+             }
+             return 'general';
+           });
 
-          // Date range filter (AND condition)
-          if (dateFrom || dateTo) {
-            const layoutDate = new Date(layout.created_at);
-            if (dateFrom && layoutDate < new Date(dateFrom)) return false;
-            if (dateTo && layoutDate > new Date(dateTo + 'T23:59:59')) return false;
+          // If no filters selected, include all layouts
+          if (bagSubcategories.length === 0 && threatSubcategories.length === 0 && tags.length === 0) {
+            return true;
           }
 
-          // Build OR conditions for bags and objects
-          const bagMatch = bagIds.length === 0 || bagIds.some(bid => layoutBagIds.includes(bid));
-          const objectMatch = objectIds.length === 0 || objectIds.some(oid => layoutObjectIds.includes(oid));
+          // Bags always use OR logic (each layout has only one bag)
+          const bagMatch = bagSubcategories.length === 0 || 
+                          bagSubcategories.some(sub => layoutBagSubcategories.includes(sub));
           
-          // OR logic: match if ANY of the selected bags OR ANY of the selected objects are present
-          const matchesSelection = bagMatch || objectMatch;
-          
-          // Legacy filters (AND logic for backward compatibility)
-          const legacyBagMatch = !bagType || bagObjs.some(b => (b.name || '').toLowerCase().includes(bagType));
-          const legacyThreatMatch = !threatTypes.length || nonBagObjs.some(o => {
-            const name = (o.name || '').toLowerCase();
-            return threatTypes.some(tt => name.includes(tt));
-          });
+          // Threats use the selected filter logic
+          let threatMatch = true;
+          if (threatSubcategories.length > 0) {
+            if (filterLogic === 'or') {
+              // OR: Layout has ANY of the selected threats
+              threatMatch = threatSubcategories.some(sub => layoutThreatSubcategories.includes(sub));
+            } else if (filterLogic === 'and') {
+              // AND: Layout has ALL of the selected threats
+              threatMatch = threatSubcategories.every(sub => layoutThreatSubcategories.includes(sub));
+            }
+          }
 
-          // Combine: new filters (OR) AND legacy filters (AND)
-          return matchesSelection && legacyBagMatch && legacyThreatMatch;
+          // Tags filter - OR logic (layout has ANY of the selected tags)
+          const layoutBagTags = bagObjs.length > 0 ? (bagObjs[0].tags || []) : [];
+          const tagMatch = tags.length === 0 || tags.some(tag => layoutBagTags.includes(tag));
+          
+          // Match if bag matches AND threat matches AND tag matches
+          return bagMatch && threatMatch && tagMatch;
         } catch {
           return false;
         }
@@ -784,10 +853,23 @@ app.get("/api/items/:id", async (req, res) => {
   }
 });
 
+// Helper: inject pixel_data_path into flat objects array from items database
+async function enrichObjectsWithPixelData(objects) {
+  const allItems = await getItems();
+  const itemMap = new Map(allItems.map(i => [i.id, i]));
+  return objects.map(obj => {
+    const item = itemMap.get(obj.id);
+    if (item?.pixel_data_path) {
+      return { ...obj, pixel_data_path: item.pixel_data_path };
+    }
+    return obj;
+  });
+}
+
 // Render and save a collage combination as a PNG image
 app.post("/api/render-and-save-collage", async (req, res) => {
     try {
-        const { objects, name } = req.body;
+        const { objects, name, energyType = "highenrgy" } = req.body;
         if (!objects || !Array.isArray(objects) || objects.length === 0) {
             return res.status(400).json({ ok: false, error: "Missing or invalid objects array" });
         }
@@ -795,15 +877,21 @@ app.post("/api/render-and-save-collage", async (req, res) => {
             return res.status(400).json({ ok: false, error: "Missing name" });
         }
 
+        // Determine output directory based on energy type
+        const energyDir = energyType === "lowenergy" ? collageLowRoot : collageHighRoot;
+
         // Sanitize the filename - use the synthesized ID directly (already unique)
         const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
         const filename = `${safeName}.png`;
-        const outputPath = path.join(collageImagesRoot, filename);
+        const outputPath = path.join(energyDir, filename);
 
-        console.log(`[render-and-save-collage] Rendering scene "${name}" → ${filename}`);
+        console.log(`[render-and-save-collage] Rendering scene "${name}" (${energyType}) → ${filename}`);
+
+        // Enrich objects with pixel_data_path from items database (frontend objects lack this)
+        const enrichedObjects = await enrichObjectsWithPixelData(objects);
 
         // Render the scene to a PNG buffer
-        const pngBuffer = await renderSceneAsync(objects, 800, 600);
+        const pngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, energyType);
 
         // Write to disk
         await fs.writeFile(outputPath, pngBuffer);
@@ -813,10 +901,126 @@ app.post("/api/render-and-save-collage", async (req, res) => {
         res.json({
             ok: true,
             filename,
-            url: `/data/collage_images/${filename}`,
+            url: `/data/collage_images/${energyType}/${filename}`,
         });
     } catch (err) {
         console.error("[render-and-save-collage] Error:", err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Render and save BOTH high-energy and low-energy collage images at once
+app.post("/api/render-and-save-collage-both", async (req, res) => {
+    try {
+        const { objects, name } = req.body;
+        if (!objects || !Array.isArray(objects) || objects.length === 0) {
+            return res.status(400).json({ ok: false, error: "Missing or invalid objects array" });
+        }
+        if (!name) {
+            return res.status(400).json({ ok: false, error: "Missing name" });
+        }
+
+        const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+        const filename = `${safeName}.png`;
+
+        console.log(`[render-and-save-collage-both] Rendering BOTH energies for "${name}"`);
+
+        // Enrich objects with pixel_data_path from items database (frontend objects lack this)
+        const enrichedObjects = await enrichObjectsWithPixelData(objects);
+
+        // Render high energy
+        const highPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "highenrgy");
+        await fs.writeFile(path.join(collageHighRoot, filename), highPngBuffer);
+        console.log(`[render-and-save-collage-both] High saved: ${filename} (${highPngBuffer.length} bytes)`);
+
+        // Render low energy
+        const lowPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "lowenergy");
+        await fs.writeFile(path.join(collageLowRoot, filename), lowPngBuffer);
+        console.log(`[render-and-save-collage-both] Low saved: ${filename} (${lowPngBuffer.length} bytes)`);
+
+        res.json({
+            ok: true,
+            filename,
+            high_url: `/data/collage_images/high/${filename}`,
+            low_url: `/data/collage_images/low/${filename}`,
+        });
+    } catch (err) {
+        console.error("[render-and-save-collage-both] Error:", err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Render a preview image from a saved layout using real pixel data (I1*I2/65535)
+app.post('/api/render-preview', async (req, res) => {
+    try {
+        const { objects } = req.body;
+        if (!objects) return res.status(400).json({ ok: false, error: 'Missing objects' });
+
+        // Load all items to look up pixel_data_path by id
+        const allItems = await getItems();
+        const itemMap = new Map(allItems.map(i => [i.id, i]));
+
+        // Flatten objects into renderScene format
+        const flatObjects = [];
+        let bagWidth = 800;
+        let bagHeight = 600;
+
+        if (objects.bag) {
+            const b = objects.bag;
+            bagWidth = b.size?.width || 800;
+            bagHeight = b.size?.height || 600;
+            const item = itemMap.get(b.id);
+            flatObjects.push({
+                id: b.id,
+                filepath: b.filepath,
+                pixel_data_path: item?.pixel_data_path || null,
+                originalPixelValue: b.originalPixelValue,
+                transform: {
+                    x: b.center?.x || 0,
+                    y: b.center?.y || 0,
+                    width: b.size?.width || 0,
+                    height: b.size?.height || 0,
+                    rotation: 0,
+                },
+                layer: b.layer || 0,
+            });
+        }
+
+        const addObjects = (list, library) => {
+            if (!Array.isArray(list)) return;
+            for (const obj of list) {
+                const item = itemMap.get(obj.id);
+                flatObjects.push({
+                    id: obj.id,
+                    filepath: obj.filepath,
+                    pixel_data_path: item?.pixel_data_path || null,
+                    originalPixelValue: obj.originalPixelValue,
+                    transform: {
+                        x: obj.center?.x || 0,
+                        y: obj.center?.y || 0,
+                        width: obj.size?.width || 0,
+                        height: obj.size?.height || 0,
+                        rotation: obj.rotation || 0,
+                    },
+                    layer: obj.layer || 0,
+                });
+            }
+        };
+
+        addObjects(objects.threats, 'threat');
+        addObjects(objects['non-threats'], 'non-threat');
+
+        if (flatObjects.length === 0) {
+            return res.status(400).json({ ok: false, error: 'No objects to render' });
+        }
+
+        // Render using the bag's dimensions as canvas size
+        const pngBuffer = await renderSceneAsync(flatObjects, bagWidth, bagHeight);
+
+        res.set('Content-Type', 'image/png');
+        res.send(pngBuffer);
+    } catch (err) {
+        console.error('[render-preview] Error:', err);
         res.status(500).json({ ok: false, error: String(err) });
     }
 });

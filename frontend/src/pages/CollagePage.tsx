@@ -73,7 +73,7 @@ export default function CollagePage() {
     const comboItemIds = new Set();
     restoredCombos.forEach(c => {
       comboItemIds.add(c.bag.id);
-      if (c.threat) comboItemIds.add(c.threat.id);
+      if (c.threats && c.threats.length > 0) c.threats.forEach((t: any) => comboItemIds.add(t.id));
       c.others.forEach((o: any) => comboItemIds.add(o.id));
     });
 
@@ -186,7 +186,9 @@ export default function CollagePage() {
 
     const queryParams = new URLSearchParams();
     queryParams.set("bagId", comb.bag.id);
-    if (comb.threat) queryParams.set("threatId", comb.threat.id);
+    if (comb.threats && comb.threats.length > 0) {
+      queryParams.set("threatIds", comb.threats.map(t => t.id).join(","));
+    }
     if (comb.others.length > 0) {
       queryParams.set("otherIds", comb.others.map((o) => o.id).join(","));
     }
@@ -211,11 +213,11 @@ export default function CollagePage() {
   const handleSaveImage = async () => {
     if (!selectedCombination) return;
 
-    setSaveImageState({ status: "saving", message: "Rendering image...", imageUrl: null });
+    setSaveImageState({ status: "saving", message: "Rendering high & low energy images...", imageUrl: null });
 
     try {
-      // Save using the synthesized combination ID as the filename
-      const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage`, {
+      // Save BOTH high and low energy images using the combined endpoint
+      const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -225,20 +227,20 @@ export default function CollagePage() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to render image");
+        throw new Error("Failed to render images");
       }
 
       const data = await response.json();
       setSaveImageState({
         status: "success",
-        message: "Image saved successfully!",
-        imageUrl: data.url,
+        message: `High & low energy images saved!`,
+        imageUrl: data.high_url,
       });
     } catch (err) {
-      console.error("Error saving image:", err);
+      console.error("Error saving images:", err);
       setSaveImageState({
         status: "error",
-        message: "Failed to save image. Make sure backend is running.",
+        message: "Failed to save images. Make sure backend is running.",
         imageUrl: null,
       });
     }
@@ -253,7 +255,7 @@ export default function CollagePage() {
     try {
       for (const comb of combinations) {
         // Generate auto-annotation from workspace contents
-        const threatNames = comb.threat ? [comb.threat.name] : [];
+        const threatNames = comb.threats && comb.threats.length > 0 ? comb.threats.map(t => t.name) : [];
         const otherNames = comb.others.map(o => o.name);
         const allObjects = [...threatNames, ...otherNames];
         const annotation = `${comb.bag.name}${allObjects.length > 0 ? ` containing ${allObjects.join(", ")}` : ""}`;
@@ -287,69 +289,60 @@ export default function CollagePage() {
           }
         }
         
-        // Prepare objects with all details
-        const objectsWithDetails = comb.objects.map((obj: any) => {
-          const corners = getRectCorners(
-            { x: obj.transform.x, y: obj.transform.y },
-            { width: obj.transform.width, height: obj.transform.height },
-            obj.transform.rotation
-          );
-          
-          // Transform coordinates relative to bag's top-left corner
-          const relativeCorners = corners.map((c: any) => ({
-            x: c.x - bagTopLeft.x,
-            y: c.y - bagTopLeft.y
-          }));
-          
-          const relativeCenter = {
-            x: obj.transform.x - bagTopLeft.x,
-            y: obj.transform.y - bagTopLeft.y
-          };
+        // Separate objects into bag, threats, and non-threats
+        const bagObj = bagObject ? {
+          id: bagObject.id,
+          subcategory: bagObject.subcategory ? bagObject.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
+          filepath: bagObject.filepath,
+          center: { x: bagObject.transform.x, y: bagObject.transform.y },
+          size: { width: bagObject.transform.width, height: bagObject.transform.height },
+          originalPixelValue: bagObject.originalPixelValue,
+          currentPixelValue: bagObject.currentPixelValue,
+          oldPixelValue: bagObject.oldPixelValue,
+          polygonOutline: bagObject.polygonOutline,
+          validRegionPolygon,
+          layer: bagObject.layer,
+          tags: bagObject.tags || [],
+        } : null;
 
-          return {
+        const threats = comb.objects
+          .filter((o: any) => o.library === "threat")
+          .map((obj: any) => ({
             id: obj.id,
-            name: obj.name,
-            library: obj.library,
+            subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
             filepath: obj.filepath,
-            // Center coordinates relative to bag's top-left (ONLY store these)
-            center: relativeCenter,
-            // Dimensions
+            center: { x: obj.transform.x, y: obj.transform.y },
             size: { width: obj.transform.width, height: obj.transform.height },
-            // Rotation
             rotation: obj.transform.rotation,
-            // 4 corner coordinates relative to bag's top-left (ONLY store these)
-            corners: relativeCorners,
             originalPixelValue: obj.originalPixelValue,
             currentPixelValue: obj.currentPixelValue,
             oldPixelValue: obj.oldPixelValue,
-            polygonOutline: obj.polygonOutline,
             layer: obj.layer,
-          };
-        });
-        
-        // Transform valid region relative to bag's top-left
-        const relativeValidRegion = validRegionPolygon.map((p: any) => ({
-          x: p.x - bagTopLeft.x,
-          y: p.y - bagTopLeft.y
-        }));
+          }));
+
+        const nonThreats = comb.objects
+          .filter((o: any) => o.library !== "bag" && o.library !== "threat")
+          .map((obj: any) => ({
+            id: obj.id,
+            subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
+            filepath: obj.filepath,
+            center: { x: obj.transform.x, y: obj.transform.y },
+            size: { width: obj.transform.width, height: obj.transform.height },
+            rotation: obj.transform.rotation,
+            originalPixelValue: obj.originalPixelValue,
+            currentPixelValue: obj.currentPixelValue,
+            oldPixelValue: obj.oldPixelValue,
+            layer: obj.layer,
+          }));
 
         const layout_json = {
-          name: annotation,
-          // Bag top-left corner (origin for relative coordinates)
-          bagOrigin: bagTopLeft,
-          // Bag information
-          bag: bagObject ? {
-            id: bagObject.id,
-            name: bagObject.name,
-            filepath: bagObject.filepath,
-            size: { width: bagObject.transform.width, height: bagObject.transform.height },
-          } : null,
-          // All objects
-          objects: objectsWithDetails,
-          // Valid region (absolute coordinates)
-          validRegionPolygon,
-          // Valid region (relative to bag's top-left)
-          relativeValidRegion,
+          threat_count: threats.length,
+          non_threat_count: nonThreats.length,
+          objects: {
+            bag: bagObj,
+            threats,
+            "non-threats": nonThreats,
+          },
           createdAt: new Date().toISOString(),
         };
         
@@ -370,10 +363,10 @@ export default function CollagePage() {
           failedCount++;
         }
 
-        // Also save the rendered image if requested
+        // Also save both high and low energy rendered images if requested
         if (saveImages && response.ok) {
           try {
-            await fetch(`${API_BASE_URL}/api/render-and-save-collage`, {
+            await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -382,7 +375,7 @@ export default function CollagePage() {
               }),
             });
           } catch (err) {
-            console.error(`Error saving image for ${comb.id}:`, err);
+            console.error(`Error saving images for ${comb.id}:`, err);
           }
         }
 
@@ -439,7 +432,7 @@ export default function CollagePage() {
       {/* Header Row */}
       <div className="flex items-end justify-between mb-8 border-l-4 border-accent pl-4">
         <div>
-          <h2 className="text-3xl font-bold text-ink tracking-tight">Collage Generator</h2>
+          <h2 className="text-3xl font-bold text-ink tracking-tight">Collage Images</h2>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -581,7 +574,7 @@ export default function CollagePage() {
                       objects={comb.objects}
                       combinationId={comb.id}
                       bagId={comb.bag.id}
-                      threatId={comb.threat?.id}
+                      threatId={comb.threats?.[0]?.id}
                       otherIds={comb.others.map(o => o.id)}
                     />
                   </button>
@@ -664,7 +657,7 @@ export default function CollagePage() {
                   objects={selectedCombination.objects}
                   combinationId={selectedCombination.id}
                   bagId={selectedCombination.bag.id}
-                  threatId={selectedCombination.threat?.id}
+                  threatId={selectedCombination.threats?.[0]?.id}
                   otherIds={selectedCombination.others.map(o => o.id)}
                 />
               </div>

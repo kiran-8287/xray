@@ -115,7 +115,7 @@ export default function CustomizationPage() {
     hasInitialized.current = true;
 
     const bagId = searchParams.get("bagId") || "";
-    const threatId = searchParams.get("threatId") || "";
+    const threatIdsStr = searchParams.get("threatIds") || "";
     const otherIds = searchParams.get("otherIds") || "";
     const precomputedId = searchParams.get("precomputed") || "";
 
@@ -144,7 +144,7 @@ export default function CustomizationPage() {
     }
 
     // 2. Check localStorage for previously saved workspace
-    const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+    const storageKey = `xray_workspace_${bagId}_${threatIdsStr}_${otherIds}`;
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
@@ -188,9 +188,9 @@ export default function CustomizationPage() {
   useEffect(() => {
     if (!hasInitialized.current || objects.length === 0) return;
     const bagId = searchParams.get("bagId") || "";
-    const threatId = searchParams.get("threatId") || "";
+    const threatIds = searchParams.get("threatIds") || searchParams.get("threatId") || "";
     const otherIds = searchParams.get("otherIds") || "";
-    const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+    const storageKey = `xray_workspace_${bagId}_${threatIds}_${otherIds}`;
     localStorage.setItem(storageKey, JSON.stringify(objects));
   }, [objects, searchParams]);
 
@@ -213,10 +213,11 @@ export default function CustomizationPage() {
     imageDimensions: Map<string, { width: number; height: number }> = new Map()
   ) {
     const bagId = params.get("bagId");
-    const threatId = params.get("threatId");
+    const threatIdsStr = params.get("threatIds") || "";
+    const threatIds = threatIdsStr ? threatIdsStr.split(",").filter(Boolean) : [];
     const otherIdsStr = params.get("otherIds");
     const otherIds = otherIdsStr ? otherIdsStr.split(",").filter(Boolean) : [];
-    const hasQueryParams = params.has("bagId") || params.has("threatId") || params.has("otherIds");
+    const hasQueryParams = params.has("bagId") || params.has("threatIds") || params.has("threatId") || params.has("otherIds");
 
     // Flatten all items across all categories and subcategories
     const allItems: Item[] = [];
@@ -352,11 +353,13 @@ export default function CustomizationPage() {
       });
     });
 
-    // 3. Locate threat
+    // 3. Locate threats (multiple)
     const allThreats = allItems.filter(isThreat);
-    const threatItem = allThreats.find((t) => t.id === threatId);
+    const matchedThreats = threatIds
+      .map((id) => allThreats.find((t) => t.id === id))
+      .filter(Boolean) as Item[];
 
-    if (threatItem) {
+    matchedThreats.forEach((threatItem, i) => {
       let threatOutline = null;
       if (threatItem.polygon_json) {
         threatOutline = typeof threatItem.polygon_json === "string"
@@ -376,7 +379,7 @@ export default function CustomizationPage() {
         pos = { x: padding + Math.random() * (CANVAS_W - 2 * padding), y: padding + Math.random() * (CANVAS_H - 2 * padding), rotation: Math.random() * 360 };
       }
       newObjects.push({
-        id: "initial-threat",
+        id: `initial-threat-${i}`,
         name: threatItem.name,
         library: getStencilKind(threatItem.category),
         subcategory: threatItem.subcategory,
@@ -391,7 +394,7 @@ export default function CustomizationPage() {
         initialHeight: h,
         layer: layer++,
       });
-    }
+    });
 
     if (newObjects.length > 0) {
       setObj(newObjects);
@@ -407,9 +410,9 @@ export default function CustomizationPage() {
     
     // Clear localStorage for this combination so it doesn't load old positions
     const bagId = searchParams.get("bagId") || "";
-    const threatId = searchParams.get("threatId") || "";
+    const threatIds = searchParams.get("threatIds") || searchParams.get("threatId") || "";
     const otherIds = searchParams.get("otherIds") || "";
-    const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+    const storageKey = `xray_workspace_${bagId}_${threatIds}_${otherIds}`;
     localStorage.removeItem(storageKey);
 
     buildAndSetObjects(categorizedList, searchParams, setObjects, setHistory, setHistoryIndex);
@@ -623,59 +626,76 @@ export default function CustomizationPage() {
         bagTopLeft = bagCorners[0];
       }
 
-      const objectsWithSegmentation = objects.map((obj) => {
-        const corners = getRectCorners(
-          { x: obj.transform.x, y: obj.transform.y },
-          { width: obj.transform.width, height: obj.transform.height },
-          obj.transform.rotation
-        );
-        
-        const relativeCorners = corners.map(c => ({
-          x: c.x - bagTopLeft.x,
-          y: c.y - bagTopLeft.y
-        }));
-        
-        const relativeCenter = {
-          x: obj.transform.x - bagTopLeft.x,
-          y: obj.transform.y - bagTopLeft.y
-        };
+      // Fetch bag tags from backend
+      let bagTags: string[] = [];
+      if (bagObject?.id) {
+        try {
+          const itemResponse = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(bagObject.id)}`);
+          if (itemResponse.ok) {
+            const itemData = await itemResponse.json();
+            if (itemData.item?.tags && Array.isArray(itemData.item.tags)) {
+              bagTags = itemData.item.tags;
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to fetch bag tags:", err);
+        }
+      }
 
-        return {
+      // Separate objects into bag, threats, and non-threats
+      const bagObj = bagObject ? {
+        id: bagObject.id,
+        subcategory: bagObject.subcategory ? bagObject.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
+        filepath: bagObject.filepath,
+        center: { x: bagObject.transform.x, y: bagObject.transform.y },
+        size: { width: bagObject.transform.width, height: bagObject.transform.height },
+        originalPixelValue: bagObject.originalPixelValue,
+        currentPixelValue: bagObject.currentPixelValue,
+        oldPixelValue: bagObject.oldPixelValue,
+        polygonOutline: bagObject.polygonOutline,
+        validRegionPolygon,
+        layer: bagObject.layer,
+        tags: bagTags.length > 0 ? bagTags : undefined,
+      } : null;
+
+      const threats = objects
+        .filter(o => o.library === "threat")
+        .map(obj => ({
           id: obj.id,
-          name: obj.name,
-          library: obj.library,
+          subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
           filepath: obj.filepath,
           center: { x: obj.transform.x, y: obj.transform.y },
-          relativeCenter,
           size: { width: obj.transform.width, height: obj.transform.height },
           rotation: obj.transform.rotation,
-          corners,
-          relativeCorners,
           originalPixelValue: obj.originalPixelValue,
           currentPixelValue: obj.currentPixelValue,
           oldPixelValue: obj.oldPixelValue,
-          polygonOutline: obj.polygonOutline,
           layer: obj.layer,
-        };
-      });
+        }));
 
-      const relativeValidRegion = validRegionPolygon.map(p => ({
-        x: p.x - bagTopLeft.x,
-        y: p.y - bagTopLeft.y
-      }));
+      const nonThreats = objects
+        .filter(o => o.library !== "bag" && o.library !== "threat")
+        .map(obj => ({
+          id: obj.id,
+          subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
+          filepath: obj.filepath,
+          center: { x: obj.transform.x, y: obj.transform.y },
+          size: { width: obj.transform.width, height: obj.transform.height },
+          rotation: obj.transform.rotation,
+          originalPixelValue: obj.originalPixelValue,
+          currentPixelValue: obj.currentPixelValue,
+          oldPixelValue: obj.oldPixelValue,
+          layer: obj.layer,
+        }));
 
       const layout_json = {
-        name: annotation,
-        bagOrigin: bagTopLeft,
-        bag: bagObject ? {
-          id: bagObject.id,
-          name: bagObject.name,
-          filepath: bagObject.filepath,
-          size: { width: bagObject.transform.width, height: bagObject.transform.height },
-        } : null,
-        objects: objectsWithSegmentation,
-        validRegionPolygon,
-        relativeValidRegion,
+        threat_count: threats.length,
+        non_threat_count: nonThreats.length,
+        objects: {
+          bag: bagObj,
+          threats,
+          "non-threats": nonThreats,
+        },
         createdAt: new Date().toISOString(),
       };
 
@@ -705,9 +725,9 @@ export default function CustomizationPage() {
       
       // Update localStorage so collage page reflects the changes
       const bagId = searchParams.get("bagId") || "";
-      const threatId = searchParams.get("threatId") || "";
+      const threatIds = searchParams.get("threatIds") || searchParams.get("threatId") || "";
       const otherIds = searchParams.get("otherIds") || "";
-      const storageKey = `xray_workspace_${bagId}_${threatId}_${otherIds}`;
+      const storageKey = `xray_workspace_${bagId}_${threatIds}_${otherIds}`;
       localStorage.setItem(storageKey, JSON.stringify(objects));
       
       // Also update the collage combinations in sessionStorage
@@ -724,7 +744,7 @@ export default function CustomizationPage() {
                   ...combo,
                   objects: objects,
                   bag: objects.find((o: any) => o.library === "bag") || combo.bag,
-                  threat: objects.find((o: any) => o.library === "threat") || combo.threat,
+                  threats: objects.filter((o: any) => o.library === "threat") || combo.threats,
                   others: objects.filter((o: any) => o.library !== "bag" && o.library !== "threat")
                 };
               }

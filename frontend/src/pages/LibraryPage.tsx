@@ -57,6 +57,96 @@ export default function LibraryPage() {
     } catch { return 20; }
   });
 
+  const threatDistributionPresets: Record<number, Record<number, number>> = {
+    1: { 1: 100 },
+    2: { 1: 60, 2: 40 },
+    3: { 1: 60, 2: 30, 3: 10 },
+    4: { 1: 60, 2: 20, 3: 10, 4: 10 },
+  };
+
+  const nonThreatDistributionPresets: Record<number, Record<number, number>> = {
+    1: { 1: 100 },
+    2: { 1: 60, 2: 40 },
+    3: { 1: 60, 2: 30, 3: 10 },
+    4: { 1: 60, 2: 20, 3: 10, 4: 10 },
+  };
+
+  // Compute initial maxThreats first so defaultDist can use it
+  const initialMax = (() => {
+    try {
+      const saved = localStorage.getItem("libraryMaxThreats");
+      return saved ? parseInt(saved) : 1;
+    } catch { return 1; }
+  })();
+
+  const [maxThreats, setMaxThreats] = useState<number>(initialMax);
+
+  const [threatDistribution, setThreatDistribution] = useState<Record<number, number>>(() => {
+    try {
+      const saved = localStorage.getItem("libraryThreatDistribution");
+      return saved ? JSON.parse(saved) : { ...threatDistributionPresets[initialMax] };
+    } catch { return { ...threatDistributionPresets[initialMax] }; }
+  });
+
+  // Compute initial maxNonThreats
+  const initialMaxNonThreats = (() => {
+    try {
+      const saved = localStorage.getItem("libraryMaxNonThreats");
+      return saved ? parseInt(saved) : 1;
+    } catch { return 1; }
+  })();
+
+  const [maxNonThreats, setMaxNonThreats] = useState<number>(initialMaxNonThreats);
+
+  const [nonThreatDistribution, setNonThreatDistribution] = useState<Record<number, number>>(() => {
+    try {
+      const saved = localStorage.getItem("libraryNonThreatDistribution");
+      return saved ? JSON.parse(saved) : { ...nonThreatDistributionPresets[initialMaxNonThreats] };
+    } catch { return { ...nonThreatDistributionPresets[initialMaxNonThreats] }; }
+  });
+
+  // State for "include at least one non-threat" checkbox
+  const [requireAtLeastOneNonThreat, setRequireAtLeastOneNonThreat] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("libraryRequireAtLeastOneNonThreat");
+      return saved ? JSON.parse(saved) : false;
+    } catch { return false; }
+  });
+
+  // Auto-set distribution preset when maxThreats changes (only on first load or preset change)
+  useEffect(() => {
+    setThreatDistribution((prev) => {
+      const preset = threatDistributionPresets[maxThreats];
+      if (!preset) return prev;
+      // Only apply preset if the current distribution doesn't look user-customized
+      // Check if the current values match any known preset
+      const isCurrentPreset = Object.values(threatDistributionPresets).some(
+        (p) => JSON.stringify(p) === JSON.stringify(prev)
+      );
+      if (isCurrentPreset) {
+        return { ...preset };
+      }
+      return prev;
+    });
+  }, [maxThreats]);
+
+  // Auto-set distribution preset when maxNonThreats changes (only on first load or preset change)
+  useEffect(() => {
+    setNonThreatDistribution((prev) => {
+      const preset = nonThreatDistributionPresets[maxNonThreats];
+      if (!preset) return prev;
+      // Only apply preset if the current distribution doesn't look user-customized
+      // Check if the current values match any known preset
+      const isCurrentPreset = Object.values(nonThreatDistributionPresets).some(
+        (p) => JSON.stringify(p) === JSON.stringify(prev)
+      );
+      if (isCurrentPreset) {
+        return { ...preset };
+      }
+      return prev;
+    });
+  }, [maxNonThreats]);
+
   const [combinations, setCombinations] = useState<CombinatorialResult[]>(() => {
     try {
       const cached = sessionStorage.getItem("collageCombinations");
@@ -485,14 +575,41 @@ export default function LibraryPage() {
     // Use setTimeout to allow UI to update before blocking
     await new Promise(resolve => setTimeout(resolve, 50));
 
+    // Fetch previously-saved layout IDs so the synthesized ID sequence continues
+    // from the highest counter instead of restarting at 00001 each run.
+    let existingIds: string[] = [];
     try {
-      const density = (localStorage.getItem("densityPreset") as "empty" | "few" | "filled") || "filled";
+      const savedRes = await fetch(`${API_BASE_URL}/api/saved-layouts/ids`);
+      if (savedRes.ok) {
+        const savedData = await savedRes.json();
+        if (savedData.ok && Array.isArray(savedData.ids)) {
+          existingIds = savedData.ids;
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch saved layout IDs, continuing with session-only IDs:", err);
+    }
+
+    try {
+      // Build threat distribution: only include counts up to maxThreats
+      const effectiveThreatDist: Record<number, number> = {};
+      for (let i = 1; i <= maxThreats; i++) {
+        effectiveThreatDist[i] = threatDistribution[i] ?? 0;
+      }
+      // Build non-threat distribution: only include counts up to maxNonThreats
+      const effectiveNonThreatDist: Record<number, number> = {};
+      for (let i = 1; i <= maxNonThreats; i++) {
+        effectiveNonThreatDist[i] = nonThreatDistribution[i] ?? 0;
+      }
       const { results, failures: genFailures } = generateCombinations(
         selectedBags,
         selectedThreats,
         selectedOthers,
         kValue,
-        density
+        effectiveThreatDist,
+        effectiveNonThreatDist,
+        requireAtLeastOneNonThreat,
+        existingIds
       );
 
       setCombinations(results);
@@ -509,12 +626,37 @@ export default function LibraryPage() {
     } finally {
       setIsGenerating(false);
     }
-  }, [selectedItems, categorizedItems, kValue, combinations, failures]);
+  }, [selectedItems, categorizedItems, kValue, maxThreats, threatDistribution, maxNonThreats, nonThreatDistribution, requireAtLeastOneNonThreat]);
 
   // Persist K value
   useEffect(() => {
     localStorage.setItem("libraryKValue", String(kValue));
   }, [kValue]);
+
+  // Persist maxThreats
+  useEffect(() => {
+    localStorage.setItem("libraryMaxThreats", String(maxThreats));
+  }, [maxThreats]);
+
+  // Persist threat distribution
+  useEffect(() => {
+    localStorage.setItem("libraryThreatDistribution", JSON.stringify(threatDistribution));
+  }, [threatDistribution]);
+
+  // Persist maxNonThreats
+  useEffect(() => {
+    localStorage.setItem("libraryMaxNonThreats", String(maxNonThreats));
+  }, [maxNonThreats]);
+
+  // Persist non-threat distribution
+  useEffect(() => {
+    localStorage.setItem("libraryNonThreatDistribution", JSON.stringify(nonThreatDistribution));
+  }, [nonThreatDistribution]);
+
+  // Persist requireAtLeastOneNonThreat
+  useEffect(() => {
+    localStorage.setItem("libraryRequireAtLeastOneNonThreat", JSON.stringify(requireAtLeastOneNonThreat));
+  }, [requireAtLeastOneNonThreat]);
 
   // Persist combinations and failures to sessionStorage
   useEffect(() => {
@@ -534,6 +676,23 @@ export default function LibraryPage() {
   const displayedItems = getDisplayItems();
   const activeCategoryConfig = getCategoryConfig(activeCategory);
   const totalCategoryItemsCount = Object.values(subcategoriesData).flat().length;
+
+  // Calculate selected non-threat count for conditional UI rendering
+  const selectedNonThreatCount = Array.from(selectedItems).filter(itemId => {
+    for (const subcats of Object.values(categorizedItems)) {
+      for (const items of Object.values(subcats as Record<string, Item[]>)) {
+        const match = (items as Item[]).find((item) => item.id === itemId);
+        if (match) {
+          const normalizedCategory = normalizeCategoryName(match.category);
+          if (normalizedCategory !== "bags" && normalizedCategory !== "threats") {
+            return true;
+          }
+          return false;
+        }
+      }
+    }
+    return false;
+  }).length;
 
   const notifIcon = (type: NotificationType) => {
     if (type === "success") return <CheckCircle2 size={16} className="text-green-400 shrink-0" />;
@@ -616,12 +775,24 @@ export default function LibraryPage() {
         onGenerateCollage={handleGenerateCollage}
         kValue={kValue}
         setKValue={setKValue}
+        maxThreats={maxThreats}
+        setMaxThreats={setMaxThreats}
+        threatDistribution={threatDistribution}
+        setThreatDistribution={setThreatDistribution}
+        maxNonThreats={maxNonThreats}
+        setMaxNonThreats={setMaxNonThreats}
+        nonThreatDistribution={nonThreatDistribution}
+        setNonThreatDistribution={setNonThreatDistribution}
+        selectedNonThreatCount={selectedNonThreatCount}
+        requireAtLeastOneNonThreat={requireAtLeastOneNonThreat}
+        setRequireAtLeastOneNonThreat={setRequireAtLeastOneNonThreat}
         isGenerating={isGenerating}
         generationProgress={generationProgress}
         onGenerate={handleGenerate}
         hasCombinations={combinations.length > 0}
       />
 
+      {/* editingItem modal, notifications, confirmDialog, ValidRegionEditor, AddSubcategoryModal */}
       {editingItem && editDraft && (
         <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4 py-6">
           <div className="w-full max-w-3xl rounded-3xl bg-panel border border-border shadow-2xl overflow-hidden">

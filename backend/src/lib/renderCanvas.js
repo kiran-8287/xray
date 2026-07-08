@@ -188,7 +188,7 @@ function applyAffineTransform(
  * Async helper that loads raw pixel arrays and performs per‑pixel attenuation calculation.
  * Returns a PNG buffer of the composited scene.
  */
-export async function renderSceneAsync(objects, width = 800, height = 600) {
+export async function renderSceneAsync(objects, width = 800, height = 600, energyType = "highenrgy") {
   // Initialize density buffer with 0 (air)
   const densityBuffer = new Float32Array(width * height);
 
@@ -202,8 +202,12 @@ export async function renderSceneAsync(objects, width = 800, height = 600) {
     let srcHeight = 0;
     
     // Try pixel data first (from raw .dump.pgm / .tip processing)
-    const pixelDataFilename = obj.pixel_data_path || null;
+    let pixelDataFilename = obj.pixel_data_path || null;
     if (pixelDataFilename) {
+      // If low energy requested, replace the folder prefix from highenrgy to lowenergy
+      if (energyType === "lowenergy") {
+        pixelDataFilename = pixelDataFilename.replace(/^highenrgy[\\/]/, "lowenergy/");
+      }
       const pixelData = await loadPixelData(pixelDataFilename);
       if (pixelData) {
         srcArray = getPixelArray(pixelData);
