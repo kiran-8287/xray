@@ -1,5 +1,5 @@
-import React from "react";
-import { Check, CheckCircle2, Edit3, Trash2 } from "lucide-react";
+import React, { memo, useRef, useEffect } from "react";
+import { Check, Edit3, Trash2 } from "lucide-react";
 import type { Item } from "../../types/library";
 import { getCategoryConfig } from "../../config/categories";
 
@@ -24,9 +24,9 @@ function parseValidRegionPoints(validRegionPoints: any) {
 }
 
 function ThumbnailWithRegion({ src, validRegionPoints, alt }: { src: string; validRegionPoints: any; alt: string }) {
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -84,7 +84,7 @@ interface ItemCardProps {
   onDelete: () => void;
 }
 
-export default function ItemCard({
+const ItemCard = memo(function ItemCard({
   item,
   isSelected,
   onSelect,
@@ -196,4 +196,6 @@ export default function ItemCard({
       </div>
     </div>
   );
-}
+});
+
+export default ItemCard;

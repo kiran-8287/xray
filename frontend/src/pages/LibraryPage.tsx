@@ -13,7 +13,7 @@ const LIBRARIES = LIBRARIES_UI;
 
 import SimpleLibrarySidebar from "../components/library/SimpleLibrarySidebar";
 import LibraryToolbar from "../components/library/LibraryToolbar";
-import ItemCard from "../components/library/ItemCard";
+import VirtualizedItemGrid from "../components/library/VirtualizedItemGrid";
 import SelectionTray from "../components/library/SelectionTray";
 import ValidRegionEditor from "../components/upload/ValidRegionEditor";
 
@@ -736,34 +736,31 @@ export default function LibraryPage() {
             setSearchQuery={setSearchQuery}
           />
 
-          <div className="flex-1 overflow-y-auto p-5">
+          <div className="flex-1 overflow-hidden">
             {displayedItems.length === 0 ? (
-              <div className="text-center py-24 bg-panel rounded-2xl border border-border shadow-card">
-                <div className="w-16 h-16 bg-surface rounded-full flex items-center justify-center mx-auto mb-4 border border-border">
-                  <Image size={28} className="text-muted/40" />
+              <div className="h-full overflow-y-auto p-5">
+                <div className="text-center py-24 bg-panel rounded-2xl border border-border shadow-card">
+                  <div className="w-16 h-16 bg-surface rounded-full flex items-center justify-center mx-auto mb-4 border border-border">
+                    <Image size={28} className="text-muted/40" />
+                  </div>
+                  <h3 className="text-base font-semibold text-ink mb-1">No items found</h3>
+                  <p className="text-sm text-muted">
+                    {searchQuery ? "Try refining your search keyword." : "Upload scanned items to get started."}
+                  </p>
                 </div>
-                <h3 className="text-base font-semibold text-ink mb-1">No items found</h3>
-                <p className="text-sm text-muted">
-                  {searchQuery ? "Try refining your search keyword." : "Upload scanned items to get started."}
-                </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                {displayedItems.map((item) => (
-                  <ItemCard
-                    key={item.id}
-                    item={item}
-                    isSelected={selectedItems.has(item.id)}
-                    onSelect={() => toggleItemSelection(item.id)}
-                    onOpen={() => openItemDetail(item)}
-                    onEditRegion={() => {
-                      setEditingRegionItem(item);
-                      setIsValidRegionEditorOpen(true);
-                    }}
-                    onDelete={() => handleDeleteItem(item.id)}
-                  />
-                ))}
-              </div>
+              <VirtualizedItemGrid
+                items={displayedItems}
+                selectedItems={selectedItems}
+                onSelect={toggleItemSelection}
+                onOpen={openItemDetail}
+                onEditRegion={(item) => {
+                  setEditingRegionItem(item);
+                  setIsValidRegionEditorOpen(true);
+                }}
+                onDelete={handleDeleteItem}
+              />
             )}
           </div>
         </main>
