@@ -632,7 +632,10 @@ export default function SavedPage() {
                   {layouts.map((layout, idx) => {
                     const objects = getObjects(layout);
                     const bagObj = objects.find(o => (o.library || "").toLowerCase().includes("bag"));
-                    const threatObjs = objects.filter(o => (o.library || "").toLowerCase().includes("threat"));
+                    const threatObjs = objects.filter(o => {
+                      const lib = (o.library || "").toLowerCase();
+                      return lib.includes("threat") && !lib.includes("non");
+                    });
                     const nonThreatObjs = objects.filter(o => (o.library || "").toLowerCase().includes("non-threat"));
                     const bagName = bagObj?.id || bagObj?.name || "—";
                     const threatNames = threatObjs.map(t => t.id || t.name).filter(Boolean).join(", ") || "—";

@@ -248,9 +248,10 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
 
 // Helper to normalize category name into exactly three main categories
 function normalizeCategory(cat) {
-    const normalized = (cat || "").toLowerCase();
+    const normalized = (cat || "").toLowerCase().trim();
+    // Match non-threat first before 'threat' to prevent 'non-threat' matching 'threat'
+    if (/^non[- ]?threat/.test(normalized)) return "non-threats";
     if (normalized.includes("bag")) return "bags";
-    if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) return "non-threats";
     if (normalized.includes("threat") || normalized.includes("electronic") || normalized === "electronics") return "threats";
     return "non-threats";
 }

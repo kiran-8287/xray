@@ -211,9 +211,9 @@ export function isCustomSubcategory(categorySlug: string, subcategorySlug: strin
 // Normalize category names to standard slugs
 export function normalizeCategoryName(cat: string): string {
   const normalized = (cat || "").toLowerCase().trim();
-  if (normalized === "non-threats" || normalized === "non-threat" || normalized.includes("non threat")) {
-    return "non-threats";
-  }
+  // Match non-threat first before 'threat' to prevent 'non-threat' matching 'threat'
+  // Covers: non-threats, non-threat, nonthreats, nonthreat, non threat, non threats
+  if (/^non[- ]?threat/.test(normalized)) return "non-threats";
   if (normalized.includes("bag")) return "bags";
   if (normalized.includes("threat") || normalized.includes("electronic") || normalized === "electronics") return "threats";
   return "non-threats";
