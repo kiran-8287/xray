@@ -541,7 +541,7 @@ export default function LibraryPage() {
   };
 
   // K-combinations generation handler with Web Worker
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(async (): Promise<{ results: CombinatorialResult[]; failures: FailureLog[] }> => {
     const selectedBags: Item[] = [];
     const selectedThreats: Item[] = [];
     const selectedOthers: Item[] = [];
@@ -604,34 +604,40 @@ export default function LibraryPage() {
       });
       workerRef.current = worker;
 
-      worker.onmessage = (event) => {
-        const response = event.data;
-        
-        if (response.type === "progress") {
-          setGenerationProgress(response.message || "Generating...");
-        } else if (response.type === "result") {
-          setCombinations(response.results || []);
-          setFailures(response.failures || []);
-          setGenerationProgress(response.message || "Generation complete");
-          setTimeout(() => setGenerationProgress(""), 3000);
-          setIsGenerating(false);
-          worker.terminate();
-        } else if (response.type === "error") {
-          console.error("Worker error:", response.error);
+      // Create a promise that resolves when the worker finishes
+      const workerPromise = new Promise<{ results: CombinatorialResult[]; failures: FailureLog[] }>((resolve, reject) => {
+        worker.onmessage = (event) => {
+          const response = event.data;
+          
+          if (response.type === "progress") {
+            setGenerationProgress(response.message || "Generating...");
+          } else if (response.type === "result") {
+            setCombinations(response.results || []);
+            setFailures(response.failures || []);
+            setGenerationProgress(response.message || "Generation complete");
+            setTimeout(() => setGenerationProgress(""), 3000);
+            setIsGenerating(false);
+            worker.terminate();
+            resolve({ results: response.results || [], failures: response.failures || [] });
+          } else if (response.type === "error") {
+            console.error("Worker error:", response.error);
+            setGenerationProgress("Error generating combinations. Check console for details.");
+            setTimeout(() => setGenerationProgress(""), 5000);
+            setIsGenerating(false);
+            worker.terminate();
+            reject(new Error(response.error || "Worker error"));
+          }
+        };
+
+        worker.onerror = (error) => {
+          console.error("Worker error:", error);
           setGenerationProgress("Error generating combinations. Check console for details.");
           setTimeout(() => setGenerationProgress(""), 5000);
           setIsGenerating(false);
           worker.terminate();
-        }
-      };
-
-      worker.onerror = (error) => {
-        console.error("Worker error:", error);
-        setGenerationProgress("Error generating combinations. Check console for details.");
-        setTimeout(() => setGenerationProgress(""), 5000);
-        setIsGenerating(false);
-        worker.terminate();
-      };
+          reject(new Error("Worker error"));
+        };
+      });
 
       // Send data to worker
       worker.postMessage({
@@ -646,7 +652,7 @@ export default function LibraryPage() {
         existingIds,
       });
 
-      return { results: [], failures: [] }; // Will be set by worker
+      return await workerPromise;
     } catch (err) {
       console.error("Generation error:", err);
       setGenerationProgress("Error generating combinations. Check console for details.");
