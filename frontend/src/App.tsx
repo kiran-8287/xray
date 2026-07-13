@@ -12,6 +12,11 @@ import { useEffect } from "react";
 
 // Register Service Worker for offline support and image caching
 export function registerServiceWorker() {
+  // Skip service worker registration in development mode to avoid 404 errors
+  if (import.meta.env.DEV) {
+    console.log('[App] Skipping Service Worker registration in development mode');
+    return;
+  }
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js')
@@ -19,7 +24,7 @@ export function registerServiceWorker() {
           console.log('[App] Service Worker registered:', registration.scope);
         })
         .catch((error) => {
-          console.error('[App] Service Worker registration failed:', error);
+          console.error('[App] Service Worker registration failed:', error.message || error);
         });
     });
   }

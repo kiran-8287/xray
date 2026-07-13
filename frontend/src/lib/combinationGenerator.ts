@@ -694,7 +694,7 @@ function generateThreatPlacements(
 }
 
 /**
- * Generate unique clean combos (no threat) for a bag.
+* Generate unique clean combos (no threat) for a bag.
  * Uniqueness comes from non-threat subsets and their positions/rotations.
  */
 function generateCleanCombinations(
@@ -819,6 +819,17 @@ export function generateCombinations(
 ): GenerationResult {
   if (bags.length === 0) return { results: [], failures: [] };
   if (k <= 0) return { results: [], failures: [] };
+
+  // Validate distributions - ensure they have at least one non-zero value
+  const hasValidThreatDist = Object.values(threatDistribution).some(v => v > 0);
+  const hasValidNonThreatDist = Object.values(nonThreatDistribution).some(v => v > 0);
+  
+  if (!hasValidThreatDist && threats.length > 0) {
+    threatDistribution = { 1: 25, 2: 25, 3: 25, 4: 25 };
+  }
+  if (!hasValidNonThreatDist && nonThreats.length > 0) {
+    nonThreatDistribution = { 1: 25, 2: 25, 3: 25, 4: 25 };
+  }
 
   const results: CombinatorialResult[] = [];
   const failures: FailureLog[] = [];

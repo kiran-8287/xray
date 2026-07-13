@@ -178,4 +178,5 @@ async function cacheImages(urls) {
   console.log(`[SW] Cached ${urls.length} images`);
 }
 
-export {};
+
+
