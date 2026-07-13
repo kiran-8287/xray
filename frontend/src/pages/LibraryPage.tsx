@@ -238,14 +238,21 @@ export default function LibraryPage() {
         return;
       }
 
-      const res = await fetch(`${API_BASE_URL}/api/items/categorized`);
+      // Request paginated data - 1000 items per page for smooth virtualization
+      const res = await fetch(`${API_BASE_URL}/api/items/categorized?limit=1000`);
       const data = await res.json();
       if (data.ok) {
         const merged = normalizeCategorizedItems(data.categorized);
         setCategorizedItems(merged);
         if (!Object.keys(merged).includes(activeCategory)) {
-          setActiveCategory(Object.keys(merged)[0] || "bars");
+          setActiveCategory(Object.keys(merged)[0] || "bags");
           setActiveSubcategory("all");
+        }
+        
+        // Show notification if library is large
+        const totalItems = data.pagination?.totalItems || 0;
+        if (totalItems > 1000) {
+          showNotification("info", `Library loaded: ${totalItems} items total. Showing first 1000.`, 6000);
         }
       }
     } catch (err) {

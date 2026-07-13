@@ -126,13 +126,13 @@ const ItemCard = memo(function ItemCard({
       <div className="relative aspect-square bg-surface flex items-center justify-center p-4 overflow-hidden">
         {item.category === "bags" && item.valid_region_points && item.valid_region_points.length > 0 ? (
           <ThumbnailWithRegion
-            src={`http://localhost:8080/data/library_images/${item.filepath}`}
+            src={`http://localhost:8080/data/thumbnails/${item.id}.png`}
             validRegionPoints={item.valid_region_points}
             alt={item.filename}
           />
         ) : (
           <ImageWithPlaceholder
-            src={`http://localhost:8080/data/library_images/${item.filepath}`}
+            src={`http://localhost:8080/data/thumbnails/${item.id}.png`}
             alt={item.filename}
             className="max-w-full max-h-full object-contain"
           />

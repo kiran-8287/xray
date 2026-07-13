@@ -707,12 +707,12 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       return;
                     }
 
-                    // Apply tags
+                    // Apply tags (merge with existing tags)
                     const copy = [...staged];
                     indicesToUpdate.forEach(idx => {
                       copy[idx] = {
                         ...copy[idx],
-                        tags: [...tagsToApply]
+                        tags: [...new Set([...copy[idx].tags || [], ...tagsToApply])]
                       };
                     });
                     setStaged(copy);
@@ -766,7 +766,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             {staged.map((s, idx) => {
               const file = s.file as File;
               const preview = s.preProcessed
-                ? `http://localhost:8080/data/library_images/${s.preGeneratedFilepath}`
+                ? `http://localhost:8080/data/thumbnails/${s.itemId}.png`
                 : URL.createObjectURL(file);
               const isBags = s.category === "bags";
               const inlineSubOptions = getInlineSubcategoryOptions(s.category);
@@ -1003,15 +1003,15 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             <h3 className="text-lg font-semibold mb-4">Edit: {(editDraft.file as File).name}</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <img
-                  src={
-                    editDraft.preProcessed
-                      ? `http://localhost:8080/data/library_images/${editDraft.preGeneratedFilepath}`
-                      : URL.createObjectURL(editDraft.file as File)
-                  }
-                  alt={(editDraft.file as File).name}
-                  className="w-full h-56 object-contain bg-surface border border-border rounded"
-                />
+                  <img
+                    src={
+                      editDraft.preProcessed
+                        ? `http://localhost:8080/data/thumbnails/${editDraft.itemId}.png`
+                        : URL.createObjectURL(editDraft.file as File)
+                    }
+                    alt={(editDraft.file as File).name}
+                    className="w-full h-56 object-contain bg-surface border border-border rounded"
+                  />
               </div>
               <div>
                 <label className="text-xs text-muted">Category</label>

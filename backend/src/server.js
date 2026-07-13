@@ -43,6 +43,7 @@ const collageImagesRoot = path.resolve(__dirname, "../data/collage_images");
 const collageHighRoot = path.resolve(collageImagesRoot, "high");
 const collageLowRoot = path.resolve(collageImagesRoot, "low");
 const pixelDataRoot = path.resolve(__dirname, "../data/pixel_data");
+const thumbnailRoot = path.resolve(__dirname, "../data/thumbnails");
 
 // Ensure directories exist
 await fs.mkdir(exportsRoot, { recursive: true });
@@ -51,9 +52,34 @@ await fs.mkdir(collageImagesRoot, { recursive: true });
 await fs.mkdir(collageHighRoot, { recursive: true });
 await fs.mkdir(collageLowRoot, { recursive: true });
 await fs.mkdir(pixelDataRoot, { recursive: true });
+await fs.mkdir(thumbnailRoot, { recursive: true });
 
 // Serve static files from data directory
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
+
+// Helper function to generate thumbnail
+async function generateThumbnail(sourcePath, destPath, size = 200) {
+  try {
+    const image = await Jimp.read(sourcePath);
+    const aspectRatio = image.bitmap.width / image.bitmap.height;
+    
+    let width, height;
+    if (aspectRatio > 1) {
+      width = size;
+      height = Math.round(size / aspectRatio);
+    } else {
+      height = size;
+      width = Math.round(size * aspectRatio);
+    }
+    
+    image.resize(width, height);
+    await image.writeAsync(destPath);
+    return { width, height };
+  } catch (err) {
+    console.error(`Failed to generate thumbnail for ${sourcePath}:`, err);
+    return null;
+  }
+}
 
 // Multer setup for file uploads (use actual filenames, no UUID)
 const storage = multer.diskStorage({
@@ -175,11 +201,15 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         }
 
         // 3. Save file buffers to temp files and dispatch to worker pool
-        const pool = new WorkerPool(4);
+        // Use larger worker pool for large batches (4-8 workers based on file count)
+        const workerCount = Math.min(8, Math.max(4, Math.ceil(nonDuplicates.length / 100)));
+        const pool = new WorkerPool(workerCount);
         let processedCount = 0;
         let failedCount = 0;
         const tempDir = path.resolve(__dirname, "../data/temp");
         await fs.mkdir(tempDir, { recursive: true });
+        
+        console.log(`[process-raw-files] Using ${workerCount} workers for ${nonDuplicates.length} files`);
 
         for (const { file, itemId, fileType } of nonDuplicates) {
             // Write buffer to temp file
@@ -256,14 +286,30 @@ function normalizeCategory(cat) {
     return "non-threats";
 }
 
-// Get all items organized by category and subcategory
-app.get("/api/items/categorized", async (_req, res) => {
+// Get all items organized by category and subcategory (with pagination)
+app.get("/api/items/categorized", async (req, res) => {
   try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 1000));
+    const categoryFilter = req.query.category || null;
+    
     const items = await getItems();
+    
+    // Normalize and categorize all items
     const categorized = {};
+    const categoryCounts = {};
     
     for (const item of items) {
       const normalizedCategory = normalizeCategory(item.category);
+      
+      // Count items per category
+      categoryCounts[normalizedCategory] = (categoryCounts[normalizedCategory] || 0) + 1;
+      
+      // Skip if filtering by category and doesn't match
+      if (categoryFilter && normalizedCategory !== categoryFilter) {
+        continue;
+      }
+      
       if (!categorized[normalizedCategory]) {
         categorized[normalizedCategory] = {};
       }
@@ -283,7 +329,40 @@ app.get("/api/items/categorized", async (_req, res) => {
       categorized[normalizedCategory][subcat].push(item);
     }
     
-    res.json({ ok: true, categorized });
+    // Apply pagination to each subcategory
+    const paginatedCategorized = {};
+    let totalItems = 0;
+    
+    for (const [category, subcats] of Object.entries(categorized)) {
+      if (categoryFilter && category !== categoryFilter) {
+        continue;
+      }
+      
+      paginatedCategorized[category] = {};
+      
+      for (const [subcat, subcatItems] of Object.entries(subcats)) {
+        const startIdx = (page - 1) * limit;
+        const endIdx = startIdx + limit;
+        const paginatedItems = subcatItems.slice(startIdx, endIdx);
+        
+        if (paginatedItems.length > 0) {
+          paginatedCategorized[category][subcat] = paginatedItems;
+          totalItems += paginatedItems.length;
+        }
+      }
+    }
+    
+    res.json({ 
+      ok: true, 
+      categorized: paginatedCategorized,
+      pagination: {
+        page,
+        limit,
+        totalItems,
+        totalCategories: Object.keys(categoryCounts).length,
+        categoryCounts
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: String(err) });
@@ -520,9 +599,16 @@ app.delete('/api/custom-subcategories/:category/:slug', async (req, res) => {
     }
 });
 
-// Upload endpoint
+// Upload endpoint - supports large batches (2k-5k files)
 app.post("/api/upload", upload.array("images"), async (req, res) => {
-    try {
+  // Increase timeout for large uploads (30 minutes)
+  req.setTimeout(1800000, () => {
+    if (!res.headersSent) {
+      res.status(408).json({ ok: false, error: "Upload timeout. Please try again with a smaller batch." });
+    }
+  });
+  
+  try {
         const files = req.files || [];
         // Optional metadata: JSON string or object keyed by original filename
         let metadataArray = [];
@@ -562,17 +648,14 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
 
             // Classify by filename prefix only
             const filename = file.originalname.toLowerCase();
-            let category, subcategory, pixel_value;
+            let category, subcategory;
 
             if (filename.startsWith("bag")) {
                 category = "bags";
-                pixel_value = 42000 + Math.floor(Math.random() * 10000);
             } else if (filename.startsWith("threat")) {
                 category = "threats";
-                pixel_value = 10000 + Math.floor(Math.random() * 10000);
             } else {
                 category = "non-threats";
-                pixel_value = 32767;
             }
             const parsed = parseFilename(file.originalname);
             subcategory = parsed.subcategory;
@@ -592,6 +675,10 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
                 const loadedImg = await Jimp.read(savedFilePath);
                 width = loadedImg.bitmap.width;
                 height = loadedImg.bitmap.height;
+                
+                // Generate thumbnail for library grid
+                const thumbnailPath = path.join(thumbnailRoot, `${itemId}.png`);
+                await generateThumbnail(savedFilePath, thumbnailPath, 200);
             } catch (dimErr) {
                 console.warn("Warning: could not detect image dimensions for", file.filename, dimErr);
             }
@@ -604,7 +691,6 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
                 category,
                 subcategory,
                 name,
-                pixel_value,
                 width,
                 height,
                 polygon_json: fileMeta.polygon_json || null,
@@ -674,7 +760,6 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
                         category,
                         subcategory,
                         name: metaItemId,
-                        pixel_value: category === "bags" ? 42000 + Math.floor(Math.random() * 10000) : 32767,
                         width: m.width || 512,
                         height: m.height || 512,
                         pixel_data_path: m.pixelDataFilename || null,
@@ -826,6 +911,66 @@ app.delete("/api/items/:id/valid-region", async (req, res) => {
         res.json({ ok: true });
     } catch (err) {
         console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Get pixel data for an item (for frontend rendering with full 16-bit precision)
+app.get("/api/items/:id/pixel-data", async (req, res) => {
+    try {
+        const item = await getItemById(req.params.id);
+        if (!item) {
+            return res.status(404).json({ ok: false, error: "Item not found" });
+        }
+
+        const energyType = req.query.energy || "highenrgy";
+        let pixelDataFilename = item.pixel_data_path;
+
+        if (!pixelDataFilename) {
+            return res.status(404).json({ ok: false, error: "No pixel data path for this item" });
+        }
+
+        // If low energy requested, replace the folder prefix
+        if (energyType === "lowenergy") {
+            pixelDataFilename = pixelDataFilename.replace(/^highenrgy[\\/]/, "lowenergy/");
+        }
+
+        const fullPath = path.join(pixelDataRoot, pixelDataFilename);
+        try {
+            await fs.access(fullPath);
+        } catch {
+            return res.status(404).json({ ok: false, error: `Pixel data file not found: ${pixelDataFilename}` });
+        }
+
+        // Read .npz via Python subprocess
+        const { spawn } = await import('node:child_process');
+        const readNpzScript = path.join(__dirname, 'lib', 'read_npz.py');
+        
+        const pngBuffer = await new Promise((resolve, reject) => {
+            const proc = spawn('python', [readNpzScript, '--npz-path', fullPath], { cwd: __dirname });
+            let stdout = '';
+            let stderr = '';
+            proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+            proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+            proc.on('close', (code) => {
+                const lines = stdout.trim().split('\n').filter(Boolean);
+                const lastLine = lines[lines.length - 1] || '';
+                if (code === 0 && lastLine) {
+                    try {
+                        const parsed = JSON.parse(lastLine);
+                        if (parsed.status === 'error') reject(new Error(parsed.reason));
+                        else resolve(parsed);
+                    } catch { reject(new Error(`Invalid JSON from Python: ${lastLine}`)); }
+                } else {
+                    reject(new Error(stderr.trim() || lastLine || 'Python process failed'));
+                }
+            });
+            proc.on('error', (err) => reject(new Error(`Failed to start Python: ${err.message}`)));
+        });
+
+        res.json({ ok: true, pixel_data: pngBuffer.pixel_data, width: pngBuffer.width, height: pngBuffer.height });
+    } catch (err) {
+        console.error("[pixel-data] Error:", err);
         res.status(500).json({ ok: false, error: String(err) });
     }
 });
