@@ -25,6 +25,51 @@ export default function UploadPage() {
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [streamErrors, setStreamErrors] = useState<{ id: string; reason: string }[]>([]);
 
+  // Clean up orphaned pre-processed files on page load
+  useEffect(() => {
+    const cleanupOrphanedFiles = async () => {
+      const orphanedItems = sessionStorage.getItem('orphanedPreprocessedItems');
+      if (orphanedItems) {
+        try {
+          const itemIds = JSON.parse(orphanedItems);
+          // Clean up each orphaned item
+          await Promise.all(
+            itemIds.map((itemId: string) =>
+              fetch(`http://localhost:8080/api/temp-files/${itemId}`, {
+                method: 'DELETE',
+              }).catch(err => console.error('Failed to cleanup orphaned files:', err))
+            )
+          );
+        } catch (err) {
+          console.error('Error parsing orphaned items:', err);
+        }
+        // Clear session storage
+        sessionStorage.removeItem('orphanedPreprocessedItems');
+      }
+    };
+
+    cleanupOrphanedFiles();
+  }, []);
+
+  // Warn user before leaving page if there are staged items
+  useEffect(() => {
+    const hasUnsavedChanges = staged.length > 0 || files.length > 0;
+    
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [staged.length, files.length]);
+
   const handleFilesSelected = (newFiles: File[]) => {
     // Check if any of the new files are raw files
     const hasRawFiles = newFiles.some(
@@ -69,7 +114,6 @@ export default function UploadPage() {
 
     setProcessing(true);
     setProcessingProgress({ n: 0, total: files.length });
-    console.log(`[frontend] Starting raw file processing for ${files.length} files`);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/process-raw-files`, {
@@ -102,14 +146,12 @@ export default function UploadPage() {
           try {
             msg = JSON.parse(line);
           } catch {
-            console.warn("Malformed NDJSON line:", line);
             continue;
           }
 
           if (msg.status === "done") {
             completed++;
             setProcessingProgress({ n: completed, total: files.length });
-            console.log(`[frontend] Received done: ${msg.id} (${msg.fileType}) ${msg.width}x${msg.height} — staged count: ${completed}`);
 
             // Append to staged panel immediately
             setStaged((prev) => {
@@ -119,6 +161,7 @@ export default function UploadPage() {
                 subcategory: "",
                 valid_region_points: null,
                 preProcessed: true,
+                filepath: msg.filepath,
                 preGeneratedFilepath: msg.filepath,
                 fileType: msg.fileType,
                 itemId: msg.id,
@@ -126,15 +169,20 @@ export default function UploadPage() {
                 width: msg.width,
                 height: msg.height,
               }];
-              console.log(`[frontend] staged updated: now ${next.length} items`);
+              
+              // Track pre-processed item in session storage
+              const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
+              if (!orphanedItems.includes(msg.id)) {
+                orphanedItems.push(msg.id);
+                sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(orphanedItems));
+              }
+              
               return next;
             });
           } else if (msg.status === "error") {
             errors++;
-            console.log(`[frontend] Received error: ${msg.id} — ${msg.reason}`);
             setStreamErrors((prev) => [...prev, { id: msg.id, reason: msg.reason }]);
           } else if (msg.status === "complete") {
-            console.log(`[frontend] Stream complete. Total: ${msg.total}, Processed: ${msg.processed}, Duplicates: ${msg.duplicates}, Failed: ${msg.failed}`);
             setProcessing(false);
             setProcessingProgress(null);
             if (msg.duplicates > 0) {
@@ -146,12 +194,10 @@ export default function UploadPage() {
 
       // If stream ended without a "complete" line
       if (processing) {
-        console.log(`[frontend] Stream ended without complete line. Staged: ${completed}, Errors: ${errors}`);
         setProcessing(false);
         setProcessingProgress(null);
       }
-    } catch (err) {
-      console.error("processRawFiles error:", err);
+    } catch {
       setProcessing(false);
       setProcessingProgress(null);
     }
@@ -250,6 +296,8 @@ export default function UploadPage() {
           }
           setTimeout(() => {
             clearAll();
+            // Clear orphaned items tracking on successful upload
+            sessionStorage.removeItem('orphanedPreprocessedItems');
           }, 1000);
         }
       } else {

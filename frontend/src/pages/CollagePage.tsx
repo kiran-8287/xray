@@ -137,6 +137,12 @@ export default function CollagePage() {
     imageUrl: string | null;
   }>({ status: "idle", message: "", imageUrl: null });
 
+  // Save location modal state
+  const [showSaveLocationModal, setShowSaveLocationModal] = useState(false);
+  const [saveLocationOption, setSaveLocationOption] = useState<"default" | "custom">("default");
+  const [customOutputPath, setCustomOutputPath] = useState("");
+  const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "single" | "bulk"; saveImages?: boolean } | null>(null);
+
   // Whenever new data arrives via location state, persist it
   useEffect(() => {
     if (!locationState || !locationState.selectedBags || locationState.selectedBags.length === 0) {
@@ -213,6 +219,14 @@ export default function CollagePage() {
   const handleSaveImage = async () => {
     if (!selectedCombination) return;
 
+    // Show save location modal first
+    setPendingSaveAction({ type: "single" });
+    setShowSaveLocationModal(true);
+  };
+
+  const executeSaveImage = async (outputPath?: string) => {
+    if (!selectedCombination) return;
+
     setSaveImageState({ status: "saving", message: "Rendering high & low energy images...", imageUrl: null });
 
     try {
@@ -223,6 +237,7 @@ export default function CollagePage() {
         body: JSON.stringify({
           objects: selectedCombination.objects,
           name: selectedCombination.id,
+          outputPath: outputPath || undefined,
         }),
       });
 
@@ -247,6 +262,14 @@ export default function CollagePage() {
   };
 
   const handleBulkSave = async (saveImages: boolean = false) => {
+    // If saving images, show the save location modal first
+    if (saveImages) {
+      setShowBulkSaveModal(false);
+      setPendingSaveAction({ type: "bulk", saveImages });
+      setShowSaveLocationModal(true);
+      return;
+    }
+
     setShowBulkSaveModal(false);
     setBulkSaveState({ status: "saving", message: "Saving all workspaces...", savedCount: 0 });
     let savedCount = 0;
@@ -363,8 +386,158 @@ export default function CollagePage() {
           failedCount++;
         }
 
+        setBulkSaveState(prev => ({
+          ...prev,
+          message: `Saving workspaces... (${savedCount}/${combinations.length})`,
+          savedCount
+        }));
+      }
+      
+      setBulkSaveState({
+        status: "success",
+        message: `Successfully saved ${savedCount} workspace${savedCount !== 1 ? "s" : ""}!${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
+        savedCount
+      });
+      
+      // Reset collage state after successful bulk save
+      setCombinations([]);
+      setFailures([]);
+      setSelectedBags([]);
+      setSelectedThreats([]);
+      setSelectedOthers([]);
+      setCurrentPage(0);
+      
+      // Clear persisted storage
+      try {
+        sessionStorage.removeItem("collageCombinations");
+        sessionStorage.removeItem("collageFailures");
+        localStorage.removeItem("selectedBags");
+        localStorage.removeItem("selectedThreats");
+        localStorage.removeItem("selectedOthers");
+      } catch (e) {
+        console.error("Error clearing storage after bulk save:", e);
+      }
+    } catch (err) {
+      console.error(err);
+      setBulkSaveState({
+        status: "error",
+        message: "Failed to bulk save workspaces. Please verify backend is running.",
+        savedCount
+      });
+    }
+  };
+
+  const executeBulkSave = async (outputPath?: string) => {
+    if (!pendingSaveAction?.saveImages) return;
+    
+    setShowSaveLocationModal(false);
+    setBulkSaveState({ status: "saving", message: "Saving all workspaces...", savedCount: 0 });
+    let savedCount = 0;
+    let failedCount = 0;
+    
+    try {
+      for (const comb of combinations) {
+        // Generate auto-annotation from workspace contents
+        const threatNames = comb.threats && comb.threats.length > 0 ? comb.threats.map(t => t.name) : [];
+        const otherNames = comb.others.map(o => o.name);
+        const allObjects = [...threatNames, ...otherNames];
+        const annotation = `${comb.bag.name}${allObjects.length > 0 ? ` containing ${allObjects.join(", ")}` : ""}`;
+        
+        // Find the bag's top-left corner (first corner of its rectangle)
+        const bagObject = comb.objects.find((o: any) => o.library === "bag");
+        let validRegionPolygon: any[] = [];
+        
+        if (bagObject) {
+          try {
+            if (bagObject.polygonOutline) {
+              validRegionPolygon = getTransformedPolygon(
+                { x: bagObject.transform.x, y: bagObject.transform.y },
+                { width: bagObject.transform.width, height: bagObject.transform.height },
+                bagObject.transform.rotation,
+                bagObject.polygonOutline
+              );
+            }
+          } catch (e) {
+            console.error("Error getting valid region:", e);
+          }
+        }
+        
+        // Separate objects into bag, threats, and non-threats
+        const bagObj = bagObject ? {
+          id: bagObject.id,
+          subcategory: bagObject.subcategory ? bagObject.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
+          filepath: bagObject.filepath,
+          center: { x: bagObject.transform.x, y: bagObject.transform.y },
+          size: { width: bagObject.transform.width, height: bagObject.transform.height },
+          originalPixelValue: bagObject.originalPixelValue,
+          currentPixelValue: bagObject.currentPixelValue,
+          oldPixelValue: bagObject.oldPixelValue,
+          polygonOutline: bagObject.polygonOutline,
+          validRegionPolygon,
+          layer: bagObject.layer,
+          tags: bagObject.tags || [],
+        } : null;
+
+        const threats = comb.objects
+          .filter((o: any) => o.library === "threat")
+          .map((obj: any) => ({
+            id: obj.id,
+            subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
+            filepath: obj.filepath,
+            center: { x: obj.transform.x, y: obj.transform.y },
+            size: { width: obj.transform.width, height: obj.transform.height },
+            rotation: obj.transform.rotation,
+            originalPixelValue: obj.originalPixelValue,
+            currentPixelValue: obj.currentPixelValue,
+            oldPixelValue: obj.oldPixelValue,
+            layer: obj.layer,
+          }));
+
+        const nonThreats = comb.objects
+          .filter((o: any) => o.library !== "bag" && o.library !== "threat")
+          .map((obj: any) => ({
+            id: obj.id,
+            subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
+            filepath: obj.filepath,
+            center: { x: obj.transform.x, y: obj.transform.y },
+            size: { width: obj.transform.width, height: obj.transform.height },
+            rotation: obj.transform.rotation,
+            originalPixelValue: obj.originalPixelValue,
+            currentPixelValue: obj.currentPixelValue,
+            oldPixelValue: obj.oldPixelValue,
+            layer: obj.layer,
+          }));
+
+        const layout_json = {
+          threat_count: threats.length,
+          non_threat_count: nonThreats.length,
+          objects: {
+            bag: bagObj,
+            threats,
+            "non-threats": nonThreats,
+          },
+          createdAt: new Date().toISOString(),
+        };
+        
+        const response = await fetch("http://localhost:8080/api/saved-layouts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: comb.id,
+            name: annotation,
+            filepath: null,
+            layout_json,
+          }),
+        });
+
+        if (response.ok) {
+          savedCount++;
+        } else {
+          failedCount++;
+        }
+
         // Also save both high and low energy rendered images if requested
-        if (saveImages && response.ok) {
+        if (outputPath && response.ok) {
           try {
             await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
               method: "POST",
@@ -372,6 +545,7 @@ export default function CollagePage() {
               body: JSON.stringify({
                 objects: comb.objects,
                 name: comb.id,
+                outputPath,
               }),
             });
           } catch (err) {
@@ -418,6 +592,23 @@ export default function CollagePage() {
         savedCount
       });
     }
+  };
+
+  const handleSaveLocationConfirm = () => {
+    if (!pendingSaveAction) return;
+
+    const outputPath = saveLocationOption === "custom" ? customOutputPath.trim() : undefined;
+
+    if (pendingSaveAction.type === "single") {
+      executeSaveImage(outputPath);
+    } else if (pendingSaveAction.type === "bulk") {
+      executeBulkSave(outputPath);
+    }
+
+    setPendingSaveAction(null);
+    setCustomOutputPath("");
+    setSaveLocationOption("default");
+    setShowSaveLocationModal(false);
   };
 
   // Pagination
@@ -482,6 +673,131 @@ export default function CollagePage() {
                   >
                     Cancel
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Save Location Modal */}
+          {showSaveLocationModal && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+              <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => {
+                setShowSaveLocationModal(false);
+                setPendingSaveAction(null);
+              }} />
+              <div className="relative z-[10000] w-full max-w-md bg-white rounded-2xl shadow-lg border border-border p-6">
+                <h3 className="text-base font-semibold text-ink mb-2">Choose Save Location</h3>
+                <p className="text-sm text-muted mb-5">
+                  Select where you want to save the collage images:
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => setSaveLocationOption("default")}
+                    className={`w-full px-4 py-3 rounded-xl border-2 font-semibold text-sm transition-all cursor-pointer text-left ${
+                      saveLocationOption === "default"
+                        ? "border-accent bg-accent/5 text-ink"
+                        : "border-border bg-panel text-ink hover:border-muted"
+                    }`}
+                  >
+                    <span className="block text-base mb-0.5">Default Location</span>
+                    <span className="block text-xs text-muted font-normal">
+                      Save to backend/data/collage_images (current location)
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setSaveLocationOption("custom")}
+                    className={`w-full px-4 py-3 rounded-xl border-2 font-semibold text-sm transition-all cursor-pointer text-left ${
+                      saveLocationOption === "custom"
+                        ? "border-accent bg-accent/5 text-ink"
+                        : "border-border bg-panel text-ink hover:border-muted"
+                    }`}
+                  >
+                    <span className="block text-base mb-0.5">Custom Location</span>
+                    <span className="block text-xs text-muted font-normal">
+                      Choose a custom directory path
+                    </span>
+                  </button>
+
+                  {saveLocationOption === "custom" && (
+                    <div className="mt-2">
+                      <label className="block text-xs font-medium text-ink mb-1.5">
+                        Output Directory Path
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={customOutputPath}
+                          onChange={(e) => setCustomOutputPath(e.target.value)}
+                          placeholder="e.g., Desktop, Documents, or D:/MyFolder"
+                          className="flex-1 px-3 py-2 rounded-lg border border-border bg-surface text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+                          autoFocus
+                        />
+                        <button
+                          onClick={async () => {
+                            // Try modern File System Access API first (Chrome/Edge)
+                            if ('showDirectoryPicker' in window) {
+                              try {
+                                const dirHandle = await (window as any).showDirectoryPicker();
+                                setCustomOutputPath(dirHandle.name);
+                              } catch (err) {
+                                console.error('Directory picker error:', err);
+                                // Fallback to file input
+                                document.getElementById('directory-picker')?.click();
+                              }
+                            } else {
+                              // Fallback for browsers without File System Access API
+                              document.getElementById('directory-picker')?.click();
+                            }
+                          }}
+                          className="px-4 py-2 rounded-lg border border-border bg-panel hover:bg-surface text-ink font-medium text-sm transition-all cursor-pointer flex items-center gap-2"
+                          title="Select directory"
+                        >
+                          <FolderOpen size={16} />
+                          Browse
+                        </button>
+                        <input
+                          id="directory-picker"
+                          type="file"
+                          onChange={(e) => {
+                            const files = e.target.files;
+                            if (files && files.length > 0) {
+                              // Get the directory path from the selected file
+                              const filePath = files[0].webkitRelativePath || files[0].name;
+                              // Extract directory (remove filename, keep the folder path)
+                              const lastSlash = filePath.lastIndexOf('/');
+                              const dirPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : filePath;
+                              setCustomOutputPath(dirPath);
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </div>
+                      <p className="text-xs text-muted mt-1.5">
+                        <strong>Tip:</strong> Click "Browse" to select a folder using your system's file picker, or type the folder name/path manually (e.g., "Desktop").
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={() => {
+                        setShowSaveLocationModal(false);
+                        setPendingSaveAction(null);
+                        setCustomOutputPath("");
+                        setSaveLocationOption("default");
+                      }}
+                      className="flex-1 px-4 py-2.5 rounded-xl text-muted font-semibold text-sm hover:text-ink transition-all cursor-pointer border border-border"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSaveLocationConfirm}
+                      disabled={saveLocationOption === "custom" && !customOutputPath.trim()}
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-500 text-white font-semibold text-sm hover:shadow-btn-hover transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Continue
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

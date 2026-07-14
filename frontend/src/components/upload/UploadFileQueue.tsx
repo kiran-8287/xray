@@ -362,6 +362,22 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   };
 
   function removeIndex(idx: number) {
+    const itemToRemove = staged[idx];
+    
+    // If it's a pre-processed item, clean up the generated files
+    if (itemToRemove?.preProcessed && itemToRemove?.itemId) {
+      fetch(`http://localhost:8080/api/temp-files/${itemToRemove.itemId}`, {
+        method: 'DELETE',
+      }).catch(err => {
+        console.error('Failed to delete temp files:', err);
+      });
+      
+      // Remove from session storage tracking
+      const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
+      const filtered = orphanedItems.filter((id: string) => id !== itemToRemove.itemId);
+      sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(filtered));
+    }
+    
     const copy = [...staged];
     copy.splice(idx, 1);
     setStaged(copy);
@@ -766,7 +782,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             {staged.map((s, idx) => {
               const file = s.file as File;
               const preview = s.preProcessed
-                ? `http://localhost:8080/data/thumbnails/${s.itemId}.png`
+                ? `http://localhost:8080/data/library_images/${s.filepath}`
                 : URL.createObjectURL(file);
               const isBags = s.category === "bags";
               const inlineSubOptions = getInlineSubcategoryOptions(s.category);
@@ -983,6 +999,24 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
               if (selectedForMass.has(idx)) selectedSet.add(idx);
             });
             if (selectedSet.size === 0) return;
+            
+            // Clean up pre-processed items being deleted
+            const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
+            const itemsToDelete = staged.filter((_, idx) => selectedSet.has(idx));
+            const preProcessedIds = itemsToDelete
+              .filter(item => item.preProcessed && item.itemId)
+              .map(item => item.itemId);
+            
+            // Clean up files and update session storage
+            preProcessedIds.forEach(itemId => {
+              fetch(`http://localhost:8080/api/temp-files/${itemId}`, {
+                method: 'DELETE',
+              }).catch(err => console.error('Failed to delete temp files:', err));
+            });
+            
+            const updatedOrphanedItems = orphanedItems.filter((id: string) => !preProcessedIds.includes(id));
+            sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(updatedOrphanedItems));
+            
             const newStaged = staged.filter((_, idx) => !selectedSet.has(idx));
             const newFiles = files.filter((_, idx) => !selectedSet.has(idx));
             setStaged(newStaged);
@@ -1006,7 +1040,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   <img
                     src={
                       editDraft.preProcessed
-                        ? `http://localhost:8080/data/thumbnails/${editDraft.itemId}.png`
+                        ? `http://localhost:8080/data/library_images/${editDraft.preGeneratedFilepath}`
                         : URL.createObjectURL(editDraft.file as File)
                     }
                     alt={(editDraft.file as File).name}
