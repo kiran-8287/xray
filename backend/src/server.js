@@ -1076,18 +1076,28 @@ app.post("/api/render-and-save-collage-both", async (req, res) => {
         let highEnergyDir, lowEnergyDir;
         
         if (outputPath && typeof outputPath === 'string') {
-            // Sanitize and validate the custom path
-            const sanitizedPath = outputPath.trim().replace(/[<>:"|?*]/g, '_');
+            // Sanitize: only strip truly invalid filename characters, NOT colons (valid in Windows drive letters)
+            const sanitizedPath = outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '');
             
-            // Prevent directory traversal attacks
-            if (sanitizedPath.includes('..') || sanitizedPath.startsWith('/') || sanitizedPath.startsWith('\\')) {
-                return res.status(400).json({ ok: false, error: "Invalid output path. Please provide a relative directory path." });
+            // Prevent directory traversal attacks using resolved normalized path
+            const resolvedProjectRoot = path.resolve(__dirname, '..');
+            
+            // If it's NOT an absolute Windows path (e.g., C:\Users\...), check it stays within project
+            if (!path.isAbsolute(sanitizedPath)) {
+                // Resolve relative to project's data directory
+                const customCollageRoot = path.resolve(resolvedProjectRoot, 'data', sanitizedPath, 'collage_images');
+                highEnergyDir = path.resolve(customCollageRoot, 'high');
+                lowEnergyDir = path.resolve(customCollageRoot, 'low');
+            } else {
+                // Absolute Windows path (e.g., C:\Users\saikiran\Desktop) — use directly
+                // Check for directory traversal within the absolute path
+                if (sanitizedPath.includes('..')) {
+                    return res.status(400).json({ ok: false, error: "Invalid output path. Directory traversal is not allowed." });
+                }
+                const customCollageRoot = path.resolve(sanitizedPath, 'collage_images');
+                highEnergyDir = path.resolve(customCollageRoot, 'high');
+                lowEnergyDir = path.resolve(customCollageRoot, 'low');
             }
-            
-            // Create custom directory structure
-            const customCollageRoot = path.resolve(sanitizedPath, 'collage_images');
-            highEnergyDir = path.resolve(customCollageRoot, 'high');
-            lowEnergyDir = path.resolve(customCollageRoot, 'low');
             
             // Ensure directories exist
             await fs.mkdir(highEnergyDir, { recursive: true });
@@ -1112,14 +1122,27 @@ app.post("/api/render-and-save-collage-both", async (req, res) => {
         await fs.writeFile(path.join(lowEnergyDir, filename), lowPngBuffer);
 
         // Determine the URL path based on whether custom or default
-        const urlPathPrefix = outputPath ? `/data/${outputPath.replace(/\\/g, '/')}/collage_images` : `/data/collage_images`;
+        let isAbsolutePath = false;
+        let customCollageRootForUrl;
+        if (outputPath && typeof outputPath === 'string') {
+            const sanitizedPath = outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '');
+            isAbsolutePath = path.isAbsolute(sanitizedPath);
+            if (!isAbsolutePath) {
+                customCollageRootForUrl = `${outputPath.replace(/\\/g, '/')}/collage_images`;
+            }
+        }
+
+        const urlPathPrefix = isAbsolutePath ? null : (outputPath ? `/data/${customCollageRootForUrl}` : `/data/collage_images`);
 
         res.json({
             ok: true,
             filename,
-            high_url: `${urlPathPrefix}/high/${filename}`,
-            low_url: `${urlPathPrefix}/low/${filename}`,
+            high_url: urlPathPrefix ? `${urlPathPrefix}/high/${filename}` : null,
+            low_url: urlPathPrefix ? `${urlPathPrefix}/low/${filename}` : null,
             outputPath: outputPath || 'backend/data/collage_images',
+            savedTo: (outputPath && path.isAbsolute(outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '')))
+                ? path.resolve(outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, ''), 'collage_images')
+                : undefined
         });
     } catch (err) {
         console.error("[render-and-save-collage-both] Error:", err);

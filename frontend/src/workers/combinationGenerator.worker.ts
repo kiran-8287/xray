@@ -41,10 +41,10 @@ self.onmessage = (event: MessageEvent<CombinationWorkerRequest>) => {
       message: `Generating ${data.kValue} combinations...`,
     } as CombinationWorkerResponse);
 
-    // Use setTimeout to allow progress message to be sent
-    setTimeout(() => {
+    // Use setTimeout to allow progress message to be sent, then await async generation
+    setTimeout(async () => {
       try {
-        const { results, failures } = generateCombinations(
+        const { results, failures } = await generateCombinations(
           data.selectedBags,
           data.selectedThreats,
           data.selectedOthers,

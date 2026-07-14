@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Loader2, CheckCircle2, XCircle, Grid3X3, ChevronLeft, ChevronRight, X, FolderOpen, Download, Edit3 } from "lucide-react";
 import { IoMdPhotos } from "react-icons/io";
@@ -141,6 +141,7 @@ export default function CollagePage() {
   const [showSaveLocationModal, setShowSaveLocationModal] = useState(false);
   const [saveLocationOption, setSaveLocationOption] = useState<"default" | "custom">("default");
   const [customOutputPath, setCustomOutputPath] = useState("");
+  const [selectedDirHandle, setSelectedDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "single" | "bulk"; saveImages?: boolean } | null>(null);
 
   // Whenever new data arrives via location state, persist it
@@ -216,6 +217,26 @@ export default function CollagePage() {
     setSaveImageState({ status: "idle", message: "", imageUrl: null });
   };
 
+  // Helper: save rendered PNG blobs to the user's selected folder using File System Access API
+  async function saveBlobsToFolder(highBlob: Blob, lowBlob: Blob, filename: string, dirHandle: FileSystemDirectoryHandle) {
+    // Create collage_images/high/ and collage_images/low/ structure
+    const collageDir = await dirHandle.getDirectoryHandle('collage_images', { create: true });
+    const highDir = await collageDir.getDirectoryHandle('high', { create: true });
+    const lowDir = await collageDir.getDirectoryHandle('low', { create: true });
+
+    // Write high energy image
+    const highFile = await highDir.getFileHandle(filename, { create: true });
+    const highWritable = await highFile.createWritable();
+    await highWritable.write(highBlob);
+    await highWritable.close();
+
+    // Write low energy image
+    const lowFile = await lowDir.getFileHandle(filename, { create: true });
+    const lowWritable = await lowFile.createWritable();
+    await lowWritable.write(lowBlob);
+    await lowWritable.close();
+  }
+
   const handleSaveImage = async () => {
     if (!selectedCombination) return;
 
@@ -224,33 +245,78 @@ export default function CollagePage() {
     setShowSaveLocationModal(true);
   };
 
-  const executeSaveImage = async (outputPath?: string) => {
+  const executeSaveImage = async (outputPath?: string, dirHandle?: FileSystemDirectoryHandle | null) => {
     if (!selectedCombination) return;
 
     setSaveImageState({ status: "saving", message: "Rendering high & low energy images...", imageUrl: null });
 
     try {
-      // Save BOTH high and low energy images using the combined endpoint
-      const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          objects: selectedCombination.objects,
-          name: selectedCombination.id,
-          outputPath: outputPath || undefined,
-        }),
-      });
+      if (dirHandle) {
+        // Browser folder selected via Browse — save to backend default first, then copy to user's folder
+        // Step 1: Render to default location on backend
+        const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            objects: selectedCombination.objects,
+            name: selectedCombination.id,
+            // Don't send outputPath — backend saves to default
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error("Failed to render images");
+        if (!response.ok) {
+          throw new Error("Failed to render images");
+        }
+
+        const data = await response.json();
+        const safeName = selectedCombination.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+        const filename = `${safeName}.png`;
+
+        // Step 2: Fetch the rendered PNGs as blobs
+        const highUrl = `${API_BASE_URL}${data.high_url}`;
+        const lowUrl = `${API_BASE_URL}${data.low_url}`;
+        
+        const [highRes, lowRes] = await Promise.all([
+          fetch(highUrl),
+          fetch(lowUrl)
+        ]);
+        
+        const [highBlob, lowBlob] = await Promise.all([
+          highRes.blob(),
+          lowRes.blob()
+        ]);
+
+        // Step 3: Write blobs to user's selected folder
+        await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
+
+        setSaveImageState({
+          status: "success",
+          message: `High & low energy images saved to selected folder!`,
+          imageUrl: data.high_url,
+        });
+      } else {
+        // No browser folder handle — send outputPath to backend as before
+        const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            objects: selectedCombination.objects,
+            name: selectedCombination.id,
+            outputPath: outputPath || undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to render images");
+        }
+
+        const data = await response.json();
+        setSaveImageState({
+          status: "success",
+          message: `High & low energy images saved!`,
+          imageUrl: data.high_url,
+        });
       }
-
-      const data = await response.json();
-      setSaveImageState({
-        status: "success",
-        message: `High & low energy images saved!`,
-        imageUrl: data.high_url,
-      });
     } catch (err) {
       console.error("Error saving images:", err);
       setSaveImageState({
@@ -427,7 +493,7 @@ export default function CollagePage() {
     }
   };
 
-  const executeBulkSave = async (outputPath?: string) => {
+  const executeBulkSave = async (outputPath?: string, dirHandle?: FileSystemDirectoryHandle | null) => {
     if (!pendingSaveAction?.saveImages) return;
     
     setShowSaveLocationModal(false);
@@ -537,17 +603,34 @@ export default function CollagePage() {
         }
 
         // Also save both high and low energy rendered images if requested
-        if (outputPath && response.ok) {
+        if (response.ok) {
           try {
-            await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+            // Use dirHandle if available (browser file API), otherwise outputPath (backend saves directly)
+            const renderRes = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 objects: comb.objects,
                 name: comb.id,
-                outputPath,
+                outputPath: dirHandle ? undefined : (outputPath || undefined),
               }),
             });
+            
+            if (dirHandle && renderRes.ok) {
+              const renderData = await renderRes.json();
+              const safeName = comb.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+              const filename = `${safeName}.png`;
+              
+              // Fetch blobs from backend default location
+              const [highRes, lowRes] = await Promise.all([
+                fetch(`${API_BASE_URL}${renderData.high_url}`),
+                fetch(`${API_BASE_URL}${renderData.low_url}`)
+              ]);
+              const [highBlob, lowBlob] = await Promise.all([highRes.blob(), lowRes.blob()]);
+              
+              // Write to user's folder
+              await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
+            }
           } catch (err) {
             console.error(`Error saving images for ${comb.id}:`, err);
           }
@@ -597,18 +680,23 @@ export default function CollagePage() {
   const handleSaveLocationConfirm = () => {
     if (!pendingSaveAction) return;
 
+    // Capture the directory handle BEFORE any state resets
+    const dirHandle = selectedDirHandle;
     const outputPath = saveLocationOption === "custom" ? customOutputPath.trim() : undefined;
 
-    if (pendingSaveAction.type === "single") {
-      executeSaveImage(outputPath);
-    } else if (pendingSaveAction.type === "bulk") {
-      executeBulkSave(outputPath);
-    }
-
+    // Close modal and reset state first
     setPendingSaveAction(null);
     setCustomOutputPath("");
     setSaveLocationOption("default");
+    setSelectedDirHandle(null);
     setShowSaveLocationModal(false);
+
+    // Then execute save with captured values
+    if (pendingSaveAction.type === "single") {
+      executeSaveImage(outputPath, dirHandle);
+    } else if (pendingSaveAction.type === "bulk") {
+      executeBulkSave(outputPath, dirHandle);
+    }
   };
 
   // Pagination
@@ -721,60 +809,26 @@ export default function CollagePage() {
                   {saveLocationOption === "custom" && (
                     <div className="mt-2">
                       <label className="block text-xs font-medium text-ink mb-1.5">
-                        Output Directory Path
+                        Full Folder Path
                       </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={customOutputPath}
-                          onChange={(e) => setCustomOutputPath(e.target.value)}
-                          placeholder="e.g., Desktop, Documents, or D:/MyFolder"
-                          className="flex-1 px-3 py-2 rounded-lg border border-border bg-surface text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
-                          autoFocus
-                        />
-                        <button
-                          onClick={async () => {
-                            // Try modern File System Access API first (Chrome/Edge)
-                            if ('showDirectoryPicker' in window) {
-                              try {
-                                const dirHandle = await (window as any).showDirectoryPicker();
-                                setCustomOutputPath(dirHandle.name);
-                              } catch (err) {
-                                console.error('Directory picker error:', err);
-                                // Fallback to file input
-                                document.getElementById('directory-picker')?.click();
-                              }
-                            } else {
-                              // Fallback for browsers without File System Access API
-                              document.getElementById('directory-picker')?.click();
-                            }
-                          }}
-                          className="px-4 py-2 rounded-lg border border-border bg-panel hover:bg-surface text-ink font-medium text-sm transition-all cursor-pointer flex items-center gap-2"
-                          title="Select directory"
-                        >
-                          <FolderOpen size={16} />
-                          Browse
-                        </button>
-                        <input
-                          id="directory-picker"
-                          type="file"
-                          onChange={(e) => {
-                            const files = e.target.files;
-                            if (files && files.length > 0) {
-                              // Get the directory path from the selected file
-                              const filePath = files[0].webkitRelativePath || files[0].name;
-                              // Extract directory (remove filename, keep the folder path)
-                              const lastSlash = filePath.lastIndexOf('/');
-                              const dirPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : filePath;
-                              setCustomOutputPath(dirPath);
-                            }
-                          }}
-                          className="hidden"
-                        />
+                      <input
+                        type="text"
+                        value={customOutputPath}
+                        onChange={(e) => setCustomOutputPath(e.target.value)}
+                        placeholder="C:\path\to\your\folder"
+                        className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+                        autoFocus
+                      />
+                      <div className="mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200">
+                        <p className="text-xs text-amber-800">
+                          Creates <code className="text-xs bg-amber-100 px-1 rounded">collage_images/high/</code> and <code className="text-xs bg-amber-100 px-1 rounded">collage_images/low/</code> at the given path.
+                        </p>
                       </div>
-                      <p className="text-xs text-muted mt-1.5">
-                        <strong>Tip:</strong> Click "Browse" to select a folder using your system's file picker, or type the folder name/path manually (e.g., "Desktop").
-                      </p>
+                      {customOutputPath && (
+                        <div className="mt-1.5 text-xs text-emerald-700">
+                          ✅ Will save to: {customOutputPath.replace(/\\$|\/$/, '')}\collage_images\high\ and ...\low\
+                        </div>
+                      )}
                     </div>
                   )}
 
