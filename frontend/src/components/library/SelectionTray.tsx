@@ -21,6 +21,8 @@ interface SelectionTrayProps {
   generationProgress: string;
   onGenerate: () => void;
   hasCombinations: boolean;
+  hasIncompleteSelection: boolean;
+  incompleteSelectionMessage: string;
 }
 
 const THREAT_LABELS: Record<number, string> = {
@@ -58,6 +60,8 @@ export default function SelectionTray({
   generationProgress,
   onGenerate,
   hasCombinations,
+  hasIncompleteSelection,
+  incompleteSelectionMessage,
 }: SelectionTrayProps) {
   if (selectedCount === 0) return null;
 
@@ -72,6 +76,15 @@ export default function SelectionTray({
     if (isNaN(val) || val < 0) return;
     setNonThreatDistribution({ ...nonThreatDistribution, [key]: Math.min(val, 100) });
   };
+
+  // Calculate total percentages
+  const threatDistributionTotal = Object.keys(threatDistribution).reduce((sum, k) => sum + (threatDistribution[parseInt(k)] || 0), 0);
+  const nonThreatDistributionTotal = Object.keys(nonThreatDistribution).reduce((sum, k) => sum + (nonThreatDistribution[parseInt(k)] || 0), 0);
+  
+  // Check if distributions are valid (must total 100% when there are selected items)
+  const hasValidThreatDistribution = selectedCount === 0 || threatDistributionTotal === 100;
+  const hasValidNonThreatDistribution = selectedCount === 0 || selectedNonThreatCount === 0 || nonThreatDistributionTotal === 100;
+  const hasValidDistribution = hasValidThreatDistribution && hasValidNonThreatDistribution;
 
   return (
     <div className="flex-shrink-0 bg-panel/95 backdrop-blur-sm border-t border-border px-6 py-3 flex items-center gap-4 shadow-[0_-4px_20px_rgba(27,35,51,0.08)] z-30">
@@ -135,6 +148,9 @@ export default function SelectionTray({
             <span className="text-[11px] text-muted">%</span>
           </div>
         ))}
+        <div className={`text-[10px] font-medium ml-1 ${threatDistributionTotal === 100 ? 'text-green-600' : 'text-rose-600'}`}>
+          Total: {threatDistributionTotal}%
+        </div>
 
         {/* Non-threat distribution controls - only show when non-threats are selected */}
         {selectedNonThreatCount > 0 && (
@@ -172,6 +188,9 @@ export default function SelectionTray({
                 <span className="text-[11px] text-muted">%</span>
               </div>
             ))}
+            <div className={`text-[10px] font-medium ml-1 ${nonThreatDistributionTotal === 100 ? 'text-green-600' : 'text-rose-600'}`}>
+              Total: {nonThreatDistributionTotal}%
+            </div>
 
             {/* Include at least one non-threat checkbox */}
             <label className="flex items-center gap-1.5 cursor-pointer">
@@ -200,7 +219,12 @@ export default function SelectionTray({
       </button>
       <button
         onClick={onGenerateCollage}
-        disabled={selectedCount === 0}
+        disabled={selectedCount === 0 || hasIncompleteSelection || !hasValidDistribution}
+        title={
+          hasIncompleteSelection ? incompleteSelectionMessage :
+          !hasValidDistribution ? "Distribution percentages must total 100%" :
+          ""
+        }
         className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Generate Collage

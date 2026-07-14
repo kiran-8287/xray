@@ -55,13 +55,17 @@ export default function CanvasArea({
       canvas.width = bagImageDimensions.width;
       canvas.height = bagImageDimensions.height;
     }
-    drawXRayComposite(canvas, objects, onImagesLoadedRef.current);
+    (async () => {
+      await drawXRayComposite(canvas!, objects, onImagesLoadedRef.current);
+    })();
   }, [objects, bagImageDimensions]);
 
   onImagesLoadedRef.current = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    drawXRayComposite(canvas, objects, onImagesLoadedRef.current);
+    (async () => {
+      await drawXRayComposite(canvas!, objects!, onImagesLoadedRef.current);
+    })();
   };
 
   return (

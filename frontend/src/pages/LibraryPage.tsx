@@ -47,6 +47,7 @@ export default function LibraryPage() {
   const [addingSubcategoryFor, setAddingSubcategoryFor] = useState<string>("");
   
   const notifCounter = React.useRef(0);
+  const hasShownBagsOnlyNotification = React.useRef(false);
 
   // K-combinations state
   const [kValue, setKValue] = useState<number>(() => {
@@ -59,15 +60,15 @@ export default function LibraryPage() {
   const threatDistributionPresets: Record<number, Record<number, number>> = {
     1: { 1: 100 },
     2: { 1: 60, 2: 40 },
-    3: { 1: 60, 2: 30, 3: 10 },
-    4: { 1: 60, 2: 20, 3: 10, 4: 10 },
+    3: { 1: 50, 2: 30, 3: 20 },
+    4: { 1: 40, 2: 30, 3: 20, 4: 10 },
   };
 
   const nonThreatDistributionPresets: Record<number, Record<number, number>> = {
     1: { 1: 100 },
     2: { 1: 60, 2: 40 },
-    3: { 1: 60, 2: 30, 3: 10 },
-    4: { 1: 60, 2: 20, 3: 10, 4: 10 },
+    3: { 1: 50, 2: 30, 3: 20 },
+    4: { 1: 40, 2: 30, 3: 20, 4: 10 },
   };
 
   // Compute initial maxThreats first so defaultDist can use it
@@ -112,38 +113,20 @@ export default function LibraryPage() {
     } catch { return false; }
   });
 
-  // Auto-set distribution preset when maxThreats changes (only on first load or preset change)
+  // Auto-set distribution preset when maxThreats changes
   useEffect(() => {
-    setThreatDistribution((prev) => {
-      const preset = threatDistributionPresets[maxThreats];
-      if (!preset) return prev;
-      // Only apply preset if the current distribution doesn't look user-customized
-      // Check if the current values match any known preset
-      const isCurrentPreset = Object.values(threatDistributionPresets).some(
-        (p) => JSON.stringify(p) === JSON.stringify(prev)
-      );
-      if (isCurrentPreset) {
-        return { ...preset };
-      }
-      return prev;
-    });
+    const preset = threatDistributionPresets[maxThreats];
+    if (preset) {
+      setThreatDistribution({ ...preset });
+    }
   }, [maxThreats]);
 
-  // Auto-set distribution preset when maxNonThreats changes (only on first load or preset change)
+  // Auto-set distribution preset when maxNonThreats changes
   useEffect(() => {
-    setNonThreatDistribution((prev) => {
-      const preset = nonThreatDistributionPresets[maxNonThreats];
-      if (!preset) return prev;
-      // Only apply preset if the current distribution doesn't look user-customized
-      // Check if the current values match any known preset
-      const isCurrentPreset = Object.values(nonThreatDistributionPresets).some(
-        (p) => JSON.stringify(p) === JSON.stringify(prev)
-      );
-      if (isCurrentPreset) {
-        return { ...preset };
-      }
-      return prev;
-    });
+    const preset = nonThreatDistributionPresets[maxNonThreats];
+    if (preset) {
+      setNonThreatDistribution({ ...preset });
+    }
   }, [maxNonThreats]);
 
   const [combinations, setCombinations] = useState<CombinatorialResult[]>(() => {
@@ -238,14 +221,21 @@ export default function LibraryPage() {
         return;
       }
 
-      const res = await fetch(`${API_BASE_URL}/api/items/categorized`);
+      // Request paginated data - 1000 items per page for smooth virtualization
+      const res = await fetch(`${API_BASE_URL}/api/items/categorized?limit=1000`);
       const data = await res.json();
       if (data.ok) {
         const merged = normalizeCategorizedItems(data.categorized);
         setCategorizedItems(merged);
         if (!Object.keys(merged).includes(activeCategory)) {
-          setActiveCategory(Object.keys(merged)[0] || "bars");
+          setActiveCategory(Object.keys(merged)[0] || "bags");
           setActiveSubcategory("all");
+        }
+        
+        // Show notification if library is large
+        const totalItems = data.pagination?.totalItems || 0;
+        if (totalItems > 1000) {
+          showNotification("info", `Library loaded: ${totalItems} items total. Showing first 1000.`, 6000);
         }
       }
     } catch (err) {
@@ -737,6 +727,62 @@ export default function LibraryPage() {
     return false;
   }).length;
 
+  // Calculate selected threat count for validation
+  const selectedThreatCount = Array.from(selectedItems).filter(itemId => {
+    for (const subcats of Object.values(categorizedItems)) {
+      for (const items of Object.values(subcats as Record<string, Item[]>)) {
+        const match = (items as Item[]).find((item) => item.id === itemId);
+        if (match) {
+          const normalizedCategory = normalizeCategoryName(match.category);
+          if (normalizedCategory === "threats") {
+            return true;
+          }
+          return false;
+        }
+      }
+    }
+    return false;
+  }).length;
+
+  // Calculate selected bag count for validation
+  const selectedBagCount = Array.from(selectedItems).filter(itemId => {
+    for (const subcats of Object.values(categorizedItems)) {
+      for (const items of Object.values(subcats as Record<string, Item[]>)) {
+        const match = (items as Item[]).find((item) => item.id === itemId);
+        if (match) {
+          const normalizedCategory = normalizeCategoryName(match.category);
+          if (normalizedCategory === "bags") {
+            return true;
+          }
+          return false;
+        }
+      }
+    }
+    return false;
+  }).length;
+
+  // Check if selection is incomplete (needs bag + at least one threat)
+  const hasIncompleteSelection = selectedItems.size > 0 && (selectedBagCount === 0 || selectedThreatCount === 0);
+
+  const getIncompleteSelectionMessage = () => {
+    if (selectedItems.size === 0) return "";
+    if (selectedBagCount === 0) return "Please select at least one bag item to generate a collage.";
+    if (selectedThreatCount === 0) return "Please select at least one threat item to generate a collage.";
+    return "";
+  };
+
+  const incompleteSelectionMessage = getIncompleteSelectionMessage();
+
+  // Show notification when selection is incomplete (only once per transition)
+  useEffect(() => {
+    if (hasIncompleteSelection && !hasShownBagsOnlyNotification.current) {
+      hasShownBagsOnlyNotification.current = true;
+      showNotification("warning", incompleteSelectionMessage, 4000);
+    } else if (!hasIncompleteSelection) {
+      hasShownBagsOnlyNotification.current = false;
+    }
+  }, [hasIncompleteSelection, incompleteSelectionMessage, showNotification]);
+
   const notifIcon = (type: NotificationType) => {
     if (type === "success") return <CheckCircle2 size={16} className="text-green-400 shrink-0" />;
     if (type === "error") return <XCircle size={16} className="text-red-400 shrink-0" />;
@@ -830,6 +876,8 @@ export default function LibraryPage() {
         generationProgress={generationProgress}
         onGenerate={handleGenerate}
         hasCombinations={combinations.length > 0}
+        hasIncompleteSelection={hasIncompleteSelection}
+        incompleteSelectionMessage={incompleteSelectionMessage}
       />
 
       {/* editingItem modal, notifications, confirmDialog, ValidRegionEditor, AddSubcategoryModal */}

@@ -55,6 +55,9 @@ await fs.mkdir(pixelDataRoot, { recursive: true });
 // Serve static files from data directory
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
 
+// Note: Thumbnails are no longer generated separately. 
+// The frontend uses library_images directly for display.
+
 // Multer setup for file uploads (use actual filenames, no UUID)
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -141,25 +144,19 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         let duplicateCount = 0;
 
         const files = req.files || [];
-        console.log(`[process-raw-files] Received ${files.length} files`);
         for (const file of files) {
             const itemId = deriveItemId(file.originalname);
             const fileType = classifyFileType(file.originalname);
             if (!fileType) {
-                // Skip files that are neither .dump.pgm nor .tip
-                console.log(`[process-raw-files] Skipping unrecognized file: ${file.originalname}`);
                 continue;
             }
 
             if (existingIds.has(itemId)) {
                 duplicateCount++;
-                console.log(`[process-raw-files] Duplicate skipped: ${itemId}`);
             } else {
                 nonDuplicates.push({ file, itemId, fileType });
-                console.log(`[process-raw-files] Queued: ${itemId} (${fileType})`);
             }
         }
-        console.log(`[process-raw-files] Summary: ${nonDuplicates.length} to process, ${duplicateCount} duplicates`);
 
         // If no non-duplicate files, send complete line immediately
         if (nonDuplicates.length === 0) {
@@ -175,11 +172,14 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         }
 
         // 3. Save file buffers to temp files and dispatch to worker pool
-        const pool = new WorkerPool(4);
+        // Use larger worker pool for large batches (4-8 workers based on file count)
+        const workerCount = Math.min(8, Math.max(4, Math.ceil(nonDuplicates.length / 100)));
+        const pool = new WorkerPool(workerCount);
         let processedCount = 0;
         let failedCount = 0;
         const tempDir = path.resolve(__dirname, "../data/temp");
         await fs.mkdir(tempDir, { recursive: true });
+        
 
         for (const { file, itemId, fileType } of nonDuplicates) {
             // Write buffer to temp file
@@ -194,19 +194,16 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
                     pixelDataDir: pixelDataRoot,
                     libraryImagesDir: libraryImagesRoot,
                 },
-                (result) => {
+                async (result) => {
                     // Write NDJSON line immediately — flush to stream
                     const line = JSON.stringify(result);
                     res.write(line + "\n");
-                    console.log(`[process-raw-files] NDJSON sent: ${line}`);
 
                     if (result.status === "done") {
                         processedCount++;
-                        console.log(`[process-raw-files] Done: ${result.id} (${result.fileType}) ${result.width}x${result.height}`);
                     }
                     if (result.status === "error") {
                         failedCount++;
-                        console.log(`[process-raw-files] Error: ${result.id} — ${result.reason}`);
                     }
 
                     // Clean up temp file asynchronously
@@ -216,9 +213,7 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         }
 
         // 4. Wait for all tasks to complete
-        console.log(`[process-raw-files] Waiting for ${nonDuplicates.length} tasks to complete...`);
         await pool.drain();
-        console.log(`[process-raw-files] All tasks done. Processed: ${processedCount}, Failed: ${failedCount}`);
 
         // 5. Write the complete summary line
         const summary = {
@@ -230,11 +225,9 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         };
         const summaryLine = JSON.stringify(summary);
         res.write(summaryLine + "\n");
-        console.log(`[process-raw-files] Summary sent: ${summaryLine}`);
         res.end();
 
     } catch (err) {
-        console.error("process-raw-files error:", err);
         if (!res.headersSent) {
             res.status(500).json({ ok: false, error: err.message });
         } else {
@@ -256,14 +249,30 @@ function normalizeCategory(cat) {
     return "non-threats";
 }
 
-// Get all items organized by category and subcategory
-app.get("/api/items/categorized", async (_req, res) => {
+// Get all items organized by category and subcategory (with pagination)
+app.get("/api/items/categorized", async (req, res) => {
   try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 1000));
+    const categoryFilter = req.query.category || null;
+    
     const items = await getItems();
+    
+    // Normalize and categorize all items
     const categorized = {};
+    const categoryCounts = {};
     
     for (const item of items) {
       const normalizedCategory = normalizeCategory(item.category);
+      
+      // Count items per category
+      categoryCounts[normalizedCategory] = (categoryCounts[normalizedCategory] || 0) + 1;
+      
+      // Skip if filtering by category and doesn't match
+      if (categoryFilter && normalizedCategory !== categoryFilter) {
+        continue;
+      }
+      
       if (!categorized[normalizedCategory]) {
         categorized[normalizedCategory] = {};
       }
@@ -283,7 +292,40 @@ app.get("/api/items/categorized", async (_req, res) => {
       categorized[normalizedCategory][subcat].push(item);
     }
     
-    res.json({ ok: true, categorized });
+    // Apply pagination to each subcategory
+    const paginatedCategorized = {};
+    let totalItems = 0;
+    
+    for (const [category, subcats] of Object.entries(categorized)) {
+      if (categoryFilter && category !== categoryFilter) {
+        continue;
+      }
+      
+      paginatedCategorized[category] = {};
+      
+      for (const [subcat, subcatItems] of Object.entries(subcats)) {
+        const startIdx = (page - 1) * limit;
+        const endIdx = startIdx + limit;
+        const paginatedItems = subcatItems.slice(startIdx, endIdx);
+        
+        if (paginatedItems.length > 0) {
+          paginatedCategorized[category][subcat] = paginatedItems;
+          totalItems += paginatedItems.length;
+        }
+      }
+    }
+    
+    res.json({ 
+      ok: true, 
+      categorized: paginatedCategorized,
+      pagination: {
+        page,
+        limit,
+        totalItems,
+        totalCategories: Object.keys(categoryCounts).length,
+        categoryCounts
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: String(err) });
@@ -520,9 +562,16 @@ app.delete('/api/custom-subcategories/:category/:slug', async (req, res) => {
     }
 });
 
-// Upload endpoint
+// Upload endpoint - supports large batches (2k-5k files)
 app.post("/api/upload", upload.array("images"), async (req, res) => {
-    try {
+  // Increase timeout for large uploads (30 minutes)
+  req.setTimeout(1800000, () => {
+    if (!res.headersSent) {
+      res.status(408).json({ ok: false, error: "Upload timeout. Please try again with a smaller batch." });
+    }
+  });
+  
+  try {
         const files = req.files || [];
         // Optional metadata: JSON string or object keyed by original filename
         let metadataArray = [];
@@ -562,17 +611,14 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
 
             // Classify by filename prefix only
             const filename = file.originalname.toLowerCase();
-            let category, subcategory, pixel_value;
+            let category, subcategory;
 
             if (filename.startsWith("bag")) {
                 category = "bags";
-                pixel_value = 42000 + Math.floor(Math.random() * 10000);
             } else if (filename.startsWith("threat")) {
                 category = "threats";
-                pixel_value = 10000 + Math.floor(Math.random() * 10000);
             } else {
                 category = "non-threats";
-                pixel_value = 32767;
             }
             const parsed = parseFilename(file.originalname);
             subcategory = parsed.subcategory;
@@ -604,7 +650,6 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
                 category,
                 subcategory,
                 name,
-                pixel_value,
                 width,
                 height,
                 polygon_json: fileMeta.polygon_json || null,
@@ -674,7 +719,6 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
                         category,
                         subcategory,
                         name: metaItemId,
-                        pixel_value: category === "bags" ? 42000 + Math.floor(Math.random() * 10000) : 32767,
                         width: m.width || 512,
                         height: m.height || 512,
                         pixel_data_path: m.pixelDataFilename || null,
@@ -762,6 +806,55 @@ app.delete("/api/items/:id", async (req, res) => {
     }
 });
 
+// Delete temporary files for pre-processed items (before they're uploaded to library)
+app.delete("/api/temp-files/:itemId", async (req, res) => {
+    try {
+        const { itemId } = req.params;
+        const errors = [];
+        
+        // Delete library image
+        const imagePath = path.join(libraryImagesRoot, `${itemId}.png`);
+        try {
+            await fs.unlink(imagePath);
+        } catch (err) {
+            // File might not exist, that's okay
+            if (err.code !== 'ENOENT') {
+                errors.push(`Failed to delete image: ${err}`);
+            }
+        }
+        
+        // Delete pixel data files (both high and low energy)
+        const highEnergyPath = path.join(pixelDataRoot, "highenrgy", `${itemId}.npz`);
+        const lowEnergyPath = path.join(pixelDataRoot, "lowenergy", `${itemId}.npz`);
+        
+        try {
+            await fs.unlink(highEnergyPath);
+        } catch (err) {
+            if (err.code !== 'ENOENT') {
+                errors.push(`Failed to delete high energy pixel data: ${err}`);
+            }
+        }
+        
+        try {
+            await fs.unlink(lowEnergyPath);
+        } catch (err) {
+            if (err.code !== 'ENOENT') {
+                errors.push(`Failed to delete low energy pixel data: ${err}`);
+            }
+        }
+        
+        if (errors.length > 0) {
+            console.error("Errors during temp file cleanup:", errors);
+            return res.status(500).json({ ok: false, error: errors.join(", ") });
+        }
+        
+        res.json({ ok: true, message: "Temporary files deleted successfully" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
 // Auto-generate valid region from raw pixel data (for pre-upload staged items)
 app.post("/api/auto-valid-region", async (req, res) => {
     try {
@@ -780,11 +873,7 @@ app.post("/api/auto-valid-region", async (req, res) => {
             return res.status(404).json({ ok: false, error: `Pixel data file not found: ${pixelDataPath}` });
         }
 
-        console.log(`[auto-valid-region] Processing staged item: ${itemId} from ${fullPath}`);
-        
         const result = await generateValidRegion(fullPath);
-        
-        console.log(`[auto-valid-region] Success: ${itemId} - ${result.points.length} points (${result.width}x${result.height}, ${result.pixelCount} pixels)`);
 
         res.json({
             ok: true,
@@ -826,6 +915,66 @@ app.delete("/api/items/:id/valid-region", async (req, res) => {
         res.json({ ok: true });
     } catch (err) {
         console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Get pixel data for an item (for frontend rendering with full 16-bit precision)
+app.get("/api/items/:id/pixel-data", async (req, res) => {
+    try {
+        const item = await getItemById(req.params.id);
+        if (!item) {
+            return res.status(404).json({ ok: false, error: "Item not found" });
+        }
+
+        const energyType = req.query.energy || "highenrgy";
+        let pixelDataFilename = item.pixel_data_path;
+
+        if (!pixelDataFilename) {
+            return res.status(404).json({ ok: false, error: "No pixel data path for this item" });
+        }
+
+        // If low energy requested, replace the folder prefix
+        if (energyType === "lowenergy") {
+            pixelDataFilename = pixelDataFilename.replace(/^highenrgy[\\/]/, "lowenergy/");
+        }
+
+        const fullPath = path.join(pixelDataRoot, pixelDataFilename);
+        try {
+            await fs.access(fullPath);
+        } catch {
+            return res.status(404).json({ ok: false, error: `Pixel data file not found: ${pixelDataFilename}` });
+        }
+
+        // Read .npz via Python subprocess
+        const { spawn } = await import('node:child_process');
+        const readNpzScript = path.join(__dirname, 'lib', 'read_npz.py');
+        
+        const pngBuffer = await new Promise((resolve, reject) => {
+            const proc = spawn('python', [readNpzScript, '--npz-path', fullPath], { cwd: __dirname });
+            let stdout = '';
+            let stderr = '';
+            proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+            proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+            proc.on('close', (code) => {
+                const lines = stdout.trim().split('\n').filter(Boolean);
+                const lastLine = lines[lines.length - 1] || '';
+                if (code === 0 && lastLine) {
+                    try {
+                        const parsed = JSON.parse(lastLine);
+                        if (parsed.status === 'error') reject(new Error(parsed.reason));
+                        else resolve(parsed);
+                    } catch { reject(new Error(`Invalid JSON from Python: ${lastLine}`)); }
+                } else {
+                    reject(new Error(stderr.trim() || lastLine || 'Python process failed'));
+                }
+            });
+            proc.on('error', (err) => reject(new Error(`Failed to start Python: ${err.message}`)));
+        });
+
+        res.json({ ok: true, pixel_data: pngBuffer.pixel_data, width: pngBuffer.width, height: pngBuffer.height });
+    } catch (err) {
+        console.error("[pixel-data] Error:", err);
         res.status(500).json({ ok: false, error: String(err) });
     }
 });
@@ -885,7 +1034,7 @@ app.post("/api/render-and-save-collage", async (req, res) => {
         const filename = `${safeName}.png`;
         const outputPath = path.join(energyDir, filename);
 
-        console.log(`[render-and-save-collage] Rendering scene "${name}" (${energyType}) → ${filename}`);
+        // Rendering scene
 
         // Enrich objects with pixel_data_path from items database (frontend objects lack this)
         const enrichedObjects = await enrichObjectsWithPixelData(objects);
@@ -896,7 +1045,7 @@ app.post("/api/render-and-save-collage", async (req, res) => {
         // Write to disk
         await fs.writeFile(outputPath, pngBuffer);
 
-        console.log(`[render-and-save-collage] Saved: ${filename} (${pngBuffer.length} bytes)`);
+        // Saved successfully
 
         res.json({
             ok: true,
@@ -912,7 +1061,7 @@ app.post("/api/render-and-save-collage", async (req, res) => {
 // Render and save BOTH high-energy and low-energy collage images at once
 app.post("/api/render-and-save-collage-both", async (req, res) => {
     try {
-        const { objects, name } = req.body;
+        const { objects, name, outputPath } = req.body;
         if (!objects || !Array.isArray(objects) || objects.length === 0) {
             return res.status(400).json({ ok: false, error: "Missing or invalid objects array" });
         }
@@ -923,26 +1072,77 @@ app.post("/api/render-and-save-collage-both", async (req, res) => {
         const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
         const filename = `${safeName}.png`;
 
-        console.log(`[render-and-save-collage-both] Rendering BOTH energies for "${name}"`);
+        // Determine output directory
+        let highEnergyDir, lowEnergyDir;
+        
+        if (outputPath && typeof outputPath === 'string') {
+            // Sanitize: only strip truly invalid filename characters, NOT colons (valid in Windows drive letters)
+            const sanitizedPath = outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '');
+            
+            // Prevent directory traversal attacks using resolved normalized path
+            const resolvedProjectRoot = path.resolve(__dirname, '..');
+            
+            // If it's NOT an absolute Windows path (e.g., C:\Users\...), check it stays within project
+            if (!path.isAbsolute(sanitizedPath)) {
+                // Resolve relative to project's data directory
+                const customCollageRoot = path.resolve(resolvedProjectRoot, 'data', sanitizedPath, 'collage_images');
+                highEnergyDir = path.resolve(customCollageRoot, 'high');
+                lowEnergyDir = path.resolve(customCollageRoot, 'low');
+            } else {
+                // Absolute Windows path (e.g., C:\Users\saikiran\Desktop) — use directly
+                // Check for directory traversal within the absolute path
+                if (sanitizedPath.includes('..')) {
+                    return res.status(400).json({ ok: false, error: "Invalid output path. Directory traversal is not allowed." });
+                }
+                const customCollageRoot = path.resolve(sanitizedPath, 'collage_images');
+                highEnergyDir = path.resolve(customCollageRoot, 'high');
+                lowEnergyDir = path.resolve(customCollageRoot, 'low');
+            }
+            
+            // Ensure directories exist
+            await fs.mkdir(highEnergyDir, { recursive: true });
+            await fs.mkdir(lowEnergyDir, { recursive: true });
+        } else {
+            // Use default directories
+            highEnergyDir = collageHighRoot;
+            lowEnergyDir = collageLowRoot;
+        }
+
+        // Rendering both energies
 
         // Enrich objects with pixel_data_path from items database (frontend objects lack this)
         const enrichedObjects = await enrichObjectsWithPixelData(objects);
 
         // Render high energy
         const highPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "highenrgy");
-        await fs.writeFile(path.join(collageHighRoot, filename), highPngBuffer);
-        console.log(`[render-and-save-collage-both] High saved: ${filename} (${highPngBuffer.length} bytes)`);
+        await fs.writeFile(path.join(highEnergyDir, filename), highPngBuffer);
 
         // Render low energy
         const lowPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "lowenergy");
-        await fs.writeFile(path.join(collageLowRoot, filename), lowPngBuffer);
-        console.log(`[render-and-save-collage-both] Low saved: ${filename} (${lowPngBuffer.length} bytes)`);
+        await fs.writeFile(path.join(lowEnergyDir, filename), lowPngBuffer);
+
+        // Determine the URL path based on whether custom or default
+        let isAbsolutePath = false;
+        let customCollageRootForUrl;
+        if (outputPath && typeof outputPath === 'string') {
+            const sanitizedPath = outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '');
+            isAbsolutePath = path.isAbsolute(sanitizedPath);
+            if (!isAbsolutePath) {
+                customCollageRootForUrl = `${outputPath.replace(/\\/g, '/')}/collage_images`;
+            }
+        }
+
+        const urlPathPrefix = isAbsolutePath ? null : (outputPath ? `/data/${customCollageRootForUrl}` : `/data/collage_images`);
 
         res.json({
             ok: true,
             filename,
-            high_url: `/data/collage_images/high/${filename}`,
-            low_url: `/data/collage_images/low/${filename}`,
+            high_url: urlPathPrefix ? `${urlPathPrefix}/high/${filename}` : null,
+            low_url: urlPathPrefix ? `${urlPathPrefix}/low/${filename}` : null,
+            outputPath: outputPath || 'backend/data/collage_images',
+            savedTo: (outputPath && path.isAbsolute(outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '')))
+                ? path.resolve(outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, ''), 'collage_images')
+                : undefined
         });
     } catch (err) {
         console.error("[render-and-save-collage-both] Error:", err);
@@ -1028,7 +1228,7 @@ app.post('/api/render-preview', async (req, res) => {
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;
 
 app.listen(port, () => {
-    console.log(`[backend] listening on http://localhost:${port}`);
+    // Server started
 });
 
 export default app;

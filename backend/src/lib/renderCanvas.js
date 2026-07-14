@@ -255,11 +255,6 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
       rotation
     );
     
-    // Get attenuation coefficient
-    const pixelVal = typeof obj.originalPixelValue === 'number' 
-      ? obj.originalPixelValue 
-      : (typeof obj.pixel_value === 'number' ? obj.pixel_value : 32767);
-    
     // Update density buffer
     for (let i = 0; i < transformedData.length; i++) {
       const val = transformedData[i];

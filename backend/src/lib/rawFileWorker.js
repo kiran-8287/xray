@@ -87,8 +87,6 @@ function runPythonScript(filePath, itemId, fileType, pixelDataDir, libraryImages
 parentPort.on("message", async (task) => {
   const { filePath, itemId, fileType, pixelDataDir, libraryImagesDir } = task;
 
-  console.log(`[worker] Starting task: ${itemId} (${fileType})`);
-
   try {
     const resultJson = await runPythonScript(
       filePath,
@@ -98,12 +96,9 @@ parentPort.on("message", async (task) => {
       libraryImagesDir
     );
 
-    console.log(`[worker] Python output for ${itemId}: ${resultJson}`);
     const result = JSON.parse(resultJson);
     parentPort.postMessage(result);
-    console.log(`[worker] Posted result for ${itemId}: ${result.status}`);
   } catch (err) {
-    console.error(`[worker] Error for ${itemId}:`, err.message);
     parentPort.postMessage({
       status: "error",
       id: itemId,

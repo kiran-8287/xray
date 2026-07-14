@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Loader2, CheckCircle2, XCircle, Grid3X3, ChevronLeft, ChevronRight, X, FolderOpen, Download, Edit3 } from "lucide-react";
 import { IoMdPhotos } from "react-icons/io";
@@ -137,6 +137,13 @@ export default function CollagePage() {
     imageUrl: string | null;
   }>({ status: "idle", message: "", imageUrl: null });
 
+  // Save location modal state
+  const [showSaveLocationModal, setShowSaveLocationModal] = useState(false);
+  const [saveLocationOption, setSaveLocationOption] = useState<"default" | "custom">("default");
+  const [customOutputPath, setCustomOutputPath] = useState("");
+  const [selectedDirHandle, setSelectedDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "single" | "bulk"; saveImages?: boolean } | null>(null);
+
   // Whenever new data arrives via location state, persist it
   useEffect(() => {
     if (!locationState || !locationState.selectedBags || locationState.selectedBags.length === 0) {
@@ -210,32 +217,106 @@ export default function CollagePage() {
     setSaveImageState({ status: "idle", message: "", imageUrl: null });
   };
 
+  // Helper: save rendered PNG blobs to the user's selected folder using File System Access API
+  async function saveBlobsToFolder(highBlob: Blob, lowBlob: Blob, filename: string, dirHandle: FileSystemDirectoryHandle) {
+    // Create collage_images/high/ and collage_images/low/ structure
+    const collageDir = await dirHandle.getDirectoryHandle('collage_images', { create: true });
+    const highDir = await collageDir.getDirectoryHandle('high', { create: true });
+    const lowDir = await collageDir.getDirectoryHandle('low', { create: true });
+
+    // Write high energy image
+    const highFile = await highDir.getFileHandle(filename, { create: true });
+    const highWritable = await highFile.createWritable();
+    await highWritable.write(highBlob);
+    await highWritable.close();
+
+    // Write low energy image
+    const lowFile = await lowDir.getFileHandle(filename, { create: true });
+    const lowWritable = await lowFile.createWritable();
+    await lowWritable.write(lowBlob);
+    await lowWritable.close();
+  }
+
   const handleSaveImage = async () => {
+    if (!selectedCombination) return;
+
+    // Show save location modal first
+    setPendingSaveAction({ type: "single" });
+    setShowSaveLocationModal(true);
+  };
+
+  const executeSaveImage = async (outputPath?: string, dirHandle?: FileSystemDirectoryHandle | null) => {
     if (!selectedCombination) return;
 
     setSaveImageState({ status: "saving", message: "Rendering high & low energy images...", imageUrl: null });
 
     try {
-      // Save BOTH high and low energy images using the combined endpoint
-      const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          objects: selectedCombination.objects,
-          name: selectedCombination.id,
-        }),
-      });
+      if (dirHandle) {
+        // Browser folder selected via Browse — save to backend default first, then copy to user's folder
+        // Step 1: Render to default location on backend
+        const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            objects: selectedCombination.objects,
+            name: selectedCombination.id,
+            // Don't send outputPath — backend saves to default
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error("Failed to render images");
+        if (!response.ok) {
+          throw new Error("Failed to render images");
+        }
+
+        const data = await response.json();
+        const safeName = selectedCombination.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+        const filename = `${safeName}.png`;
+
+        // Step 2: Fetch the rendered PNGs as blobs
+        const highUrl = `${API_BASE_URL}${data.high_url}`;
+        const lowUrl = `${API_BASE_URL}${data.low_url}`;
+        
+        const [highRes, lowRes] = await Promise.all([
+          fetch(highUrl),
+          fetch(lowUrl)
+        ]);
+        
+        const [highBlob, lowBlob] = await Promise.all([
+          highRes.blob(),
+          lowRes.blob()
+        ]);
+
+        // Step 3: Write blobs to user's selected folder
+        await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
+
+        setSaveImageState({
+          status: "success",
+          message: `High & low energy images saved to selected folder!`,
+          imageUrl: data.high_url,
+        });
+      } else {
+        // No browser folder handle — send outputPath to backend as before
+        const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            objects: selectedCombination.objects,
+            name: selectedCombination.id,
+            outputPath: outputPath || undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to render images");
+        }
+
+        const data = await response.json();
+        setSaveImageState({
+          status: "success",
+          message: `High & low energy images saved!`,
+          imageUrl: data.high_url,
+        });
       }
-
-      const data = await response.json();
-      setSaveImageState({
-        status: "success",
-        message: `High & low energy images saved!`,
-        imageUrl: data.high_url,
-      });
     } catch (err) {
       console.error("Error saving images:", err);
       setSaveImageState({
@@ -247,6 +328,14 @@ export default function CollagePage() {
   };
 
   const handleBulkSave = async (saveImages: boolean = false) => {
+    // If saving images, show the save location modal first
+    if (saveImages) {
+      setShowBulkSaveModal(false);
+      setPendingSaveAction({ type: "bulk", saveImages });
+      setShowSaveLocationModal(true);
+      return;
+    }
+
     setShowBulkSaveModal(false);
     setBulkSaveState({ status: "saving", message: "Saving all workspaces...", savedCount: 0 });
     let savedCount = 0;
@@ -363,17 +452,185 @@ export default function CollagePage() {
           failedCount++;
         }
 
-        // Also save both high and low energy rendered images if requested
-        if (saveImages && response.ok) {
+        setBulkSaveState(prev => ({
+          ...prev,
+          message: `Saving workspaces... (${savedCount}/${combinations.length})`,
+          savedCount
+        }));
+      }
+      
+      setBulkSaveState({
+        status: "success",
+        message: `Successfully saved ${savedCount} workspace${savedCount !== 1 ? "s" : ""}!${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
+        savedCount
+      });
+      
+      // Reset collage state after successful bulk save
+      setCombinations([]);
+      setFailures([]);
+      setSelectedBags([]);
+      setSelectedThreats([]);
+      setSelectedOthers([]);
+      setCurrentPage(0);
+      
+      // Clear persisted storage
+      try {
+        sessionStorage.removeItem("collageCombinations");
+        sessionStorage.removeItem("collageFailures");
+        localStorage.removeItem("selectedBags");
+        localStorage.removeItem("selectedThreats");
+        localStorage.removeItem("selectedOthers");
+      } catch (e) {
+        console.error("Error clearing storage after bulk save:", e);
+      }
+    } catch (err) {
+      console.error(err);
+      setBulkSaveState({
+        status: "error",
+        message: "Failed to bulk save workspaces. Please verify backend is running.",
+        savedCount
+      });
+    }
+  };
+
+  const executeBulkSave = async (outputPath?: string, dirHandle?: FileSystemDirectoryHandle | null) => {
+    if (!pendingSaveAction?.saveImages) return;
+    
+    setShowSaveLocationModal(false);
+    setBulkSaveState({ status: "saving", message: "Saving all workspaces...", savedCount: 0 });
+    let savedCount = 0;
+    let failedCount = 0;
+    
+    try {
+      for (const comb of combinations) {
+        // Generate auto-annotation from workspace contents
+        const threatNames = comb.threats && comb.threats.length > 0 ? comb.threats.map(t => t.name) : [];
+        const otherNames = comb.others.map(o => o.name);
+        const allObjects = [...threatNames, ...otherNames];
+        const annotation = `${comb.bag.name}${allObjects.length > 0 ? ` containing ${allObjects.join(", ")}` : ""}`;
+        
+        // Find the bag's top-left corner (first corner of its rectangle)
+        const bagObject = comb.objects.find((o: any) => o.library === "bag");
+        let validRegionPolygon: any[] = [];
+        
+        if (bagObject) {
           try {
-            await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+            if (bagObject.polygonOutline) {
+              validRegionPolygon = getTransformedPolygon(
+                { x: bagObject.transform.x, y: bagObject.transform.y },
+                { width: bagObject.transform.width, height: bagObject.transform.height },
+                bagObject.transform.rotation,
+                bagObject.polygonOutline
+              );
+            }
+          } catch (e) {
+            console.error("Error getting valid region:", e);
+          }
+        }
+        
+        // Separate objects into bag, threats, and non-threats
+        const bagObj = bagObject ? {
+          id: bagObject.id,
+          subcategory: bagObject.subcategory ? bagObject.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
+          filepath: bagObject.filepath,
+          center: { x: bagObject.transform.x, y: bagObject.transform.y },
+          size: { width: bagObject.transform.width, height: bagObject.transform.height },
+          originalPixelValue: bagObject.originalPixelValue,
+          currentPixelValue: bagObject.currentPixelValue,
+          oldPixelValue: bagObject.oldPixelValue,
+          polygonOutline: bagObject.polygonOutline,
+          validRegionPolygon,
+          layer: bagObject.layer,
+          tags: bagObject.tags || [],
+        } : null;
+
+        const threats = comb.objects
+          .filter((o: any) => o.library === "threat")
+          .map((obj: any) => ({
+            id: obj.id,
+            subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
+            filepath: obj.filepath,
+            center: { x: obj.transform.x, y: obj.transform.y },
+            size: { width: obj.transform.width, height: obj.transform.height },
+            rotation: obj.transform.rotation,
+            originalPixelValue: obj.originalPixelValue,
+            currentPixelValue: obj.currentPixelValue,
+            oldPixelValue: obj.oldPixelValue,
+            layer: obj.layer,
+          }));
+
+        const nonThreats = comb.objects
+          .filter((o: any) => o.library !== "bag" && o.library !== "threat")
+          .map((obj: any) => ({
+            id: obj.id,
+            subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
+            filepath: obj.filepath,
+            center: { x: obj.transform.x, y: obj.transform.y },
+            size: { width: obj.transform.width, height: obj.transform.height },
+            rotation: obj.transform.rotation,
+            originalPixelValue: obj.originalPixelValue,
+            currentPixelValue: obj.currentPixelValue,
+            oldPixelValue: obj.oldPixelValue,
+            layer: obj.layer,
+          }));
+
+        const layout_json = {
+          threat_count: threats.length,
+          non_threat_count: nonThreats.length,
+          objects: {
+            bag: bagObj,
+            threats,
+            "non-threats": nonThreats,
+          },
+          createdAt: new Date().toISOString(),
+        };
+        
+        const response = await fetch("http://localhost:8080/api/saved-layouts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: comb.id,
+            name: annotation,
+            filepath: null,
+            layout_json,
+          }),
+        });
+
+        if (response.ok) {
+          savedCount++;
+        } else {
+          failedCount++;
+        }
+
+        // Also save both high and low energy rendered images if requested
+        if (response.ok) {
+          try {
+            // Use dirHandle if available (browser file API), otherwise outputPath (backend saves directly)
+            const renderRes = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 objects: comb.objects,
                 name: comb.id,
+                outputPath: dirHandle ? undefined : (outputPath || undefined),
               }),
             });
+            
+            if (dirHandle && renderRes.ok) {
+              const renderData = await renderRes.json();
+              const safeName = comb.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+              const filename = `${safeName}.png`;
+              
+              // Fetch blobs from backend default location
+              const [highRes, lowRes] = await Promise.all([
+                fetch(`${API_BASE_URL}${renderData.high_url}`),
+                fetch(`${API_BASE_URL}${renderData.low_url}`)
+              ]);
+              const [highBlob, lowBlob] = await Promise.all([highRes.blob(), lowRes.blob()]);
+              
+              // Write to user's folder
+              await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
+            }
           } catch (err) {
             console.error(`Error saving images for ${comb.id}:`, err);
           }
@@ -417,6 +674,28 @@ export default function CollagePage() {
         message: "Failed to bulk save workspaces. Please verify backend is running.",
         savedCount
       });
+    }
+  };
+
+  const handleSaveLocationConfirm = () => {
+    if (!pendingSaveAction) return;
+
+    // Capture the directory handle BEFORE any state resets
+    const dirHandle = selectedDirHandle;
+    const outputPath = saveLocationOption === "custom" ? customOutputPath.trim() : undefined;
+
+    // Close modal and reset state first
+    setPendingSaveAction(null);
+    setCustomOutputPath("");
+    setSaveLocationOption("default");
+    setSelectedDirHandle(null);
+    setShowSaveLocationModal(false);
+
+    // Then execute save with captured values
+    if (pendingSaveAction.type === "single") {
+      executeSaveImage(outputPath, dirHandle);
+    } else if (pendingSaveAction.type === "bulk") {
+      executeBulkSave(outputPath, dirHandle);
     }
   };
 
@@ -482,6 +761,97 @@ export default function CollagePage() {
                   >
                     Cancel
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Save Location Modal */}
+          {showSaveLocationModal && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+              <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => {
+                setShowSaveLocationModal(false);
+                setPendingSaveAction(null);
+              }} />
+              <div className="relative z-[10000] w-full max-w-md bg-white rounded-2xl shadow-lg border border-border p-6">
+                <h3 className="text-base font-semibold text-ink mb-2">Choose Save Location</h3>
+                <p className="text-sm text-muted mb-5">
+                  Select where you want to save the collage images:
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => setSaveLocationOption("default")}
+                    className={`w-full px-4 py-3 rounded-xl border-2 font-semibold text-sm transition-all cursor-pointer text-left ${
+                      saveLocationOption === "default"
+                        ? "border-accent bg-accent/5 text-ink"
+                        : "border-border bg-panel text-ink hover:border-muted"
+                    }`}
+                  >
+                    <span className="block text-base mb-0.5">Default Location</span>
+                    <span className="block text-xs text-muted font-normal">
+                      Save to backend/data/collage_images (current location)
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setSaveLocationOption("custom")}
+                    className={`w-full px-4 py-3 rounded-xl border-2 font-semibold text-sm transition-all cursor-pointer text-left ${
+                      saveLocationOption === "custom"
+                        ? "border-accent bg-accent/5 text-ink"
+                        : "border-border bg-panel text-ink hover:border-muted"
+                    }`}
+                  >
+                    <span className="block text-base mb-0.5">Custom Location</span>
+                    <span className="block text-xs text-muted font-normal">
+                      Choose a custom directory path
+                    </span>
+                  </button>
+
+                  {saveLocationOption === "custom" && (
+                    <div className="mt-2">
+                      <label className="block text-xs font-medium text-ink mb-1.5">
+                        Full Folder Path
+                      </label>
+                      <input
+                        type="text"
+                        value={customOutputPath}
+                        onChange={(e) => setCustomOutputPath(e.target.value)}
+                        placeholder="C:\path\to\your\folder"
+                        className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+                        autoFocus
+                      />
+                      <div className="mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200">
+                        <p className="text-xs text-amber-800">
+                          Creates <code className="text-xs bg-amber-100 px-1 rounded">collage_images/high/</code> and <code className="text-xs bg-amber-100 px-1 rounded">collage_images/low/</code> at the given path.
+                        </p>
+                      </div>
+                      {customOutputPath && (
+                        <div className="mt-1.5 text-xs text-emerald-700">
+                          ✅ Will save to: {customOutputPath.replace(/\\$|\/$/, '')}\collage_images\high\ and ...\low\
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={() => {
+                        setShowSaveLocationModal(false);
+                        setPendingSaveAction(null);
+                        setCustomOutputPath("");
+                        setSaveLocationOption("default");
+                      }}
+                      className="flex-1 px-4 py-2.5 rounded-xl text-muted font-semibold text-sm hover:text-ink transition-all cursor-pointer border border-border"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSaveLocationConfirm}
+                      disabled={saveLocationOption === "custom" && !customOutputPath.trim()}
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-500 text-white font-semibold text-sm hover:shadow-btn-hover transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Continue
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

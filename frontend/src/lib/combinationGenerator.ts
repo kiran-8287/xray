@@ -12,6 +12,10 @@ import type { Point } from "../types/geometry";
 const CANVAS_W = 800;
 const CANVAS_H = 600;
 
+// Performance optimization: Cache for transformed valid regions
+const validRegionCache = new Map<string, Point[]>();
+const CACHE_MAX_SIZE = 100;
+
 function parseOutline(item: Item): { x: number; y: number }[] | undefined {
   if (item.valid_region_points) {
     const raw = typeof item.valid_region_points === "string"
@@ -140,6 +144,39 @@ function shuffleArray<T>(arr: T[]): T[] {
   return a;
 }
 
+// Performance optimization: Get cached valid region
+function getCachedValidRegion(bagObj: SceneObject): Point[] {
+  const cacheKey = `${bagObj.id}_${bagObj.transform.width}_${bagObj.transform.height}_${bagObj.transform.rotation}`;
+  
+  if (validRegionCache.has(cacheKey)) {
+    return validRegionCache.get(cacheKey)!;
+  }
+  
+  const region = getTransformedValidRegion(bagObj);
+  
+  // Limit cache size
+  if (validRegionCache.size >= CACHE_MAX_SIZE) {
+    const firstKey = validRegionCache.keys().next().value;
+    if (firstKey) validRegionCache.delete(firstKey);
+  }
+  
+  validRegionCache.set(cacheKey, region);
+  return region;
+}
+
+// Performance optimization: Fast bounding box overlap check
+function fastBoundingBoxOverlap(
+  x1: number, y1: number, w1: number, h1: number,
+  x2: number, y2: number, w2: number, h2: number
+): boolean {
+  return !(
+    x1 + w1 / 2 < x2 - w2 / 2 ||
+    x1 - w1 / 2 > x2 + w2 / 2 ||
+    y1 + h1 / 2 < y2 - h2 / 2 ||
+    y1 - h1 / 2 > y2 + h2 / 2
+  );
+}
+
 /**
  * Try to place a threat inside a bag at a given position and rotation.
  */
@@ -165,12 +202,13 @@ function tryPlaceThreat(
 /**
  * Try to place non-threat items inside a bag, avoiding overlap with threats and each other.
  * Returns array of {x, y, rotation} if all placed, null otherwise.
+ * OPTIMIZED: Reduced max attempts and added fast bounding box pre-check.
  */
 function tryPlaceNonThreats(
   items: Item[],
   bagObj: SceneObject,
   threatObjs: SceneObject[],
-  maxAttempts: number = 50
+  maxAttempts: number = 30
 ): { x: number; y: number; rotation: number }[] | null {
   const positions: { x: number; y: number; rotation: number }[] = [];
 
@@ -180,9 +218,21 @@ function tryPlaceNonThreats(
     const h = item.height ? Math.round(item.height) : 80;
 
     let placed = false;
+    // OPTIMIZATION: Reduced max attempts from 50 to 30
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const pos = getRandomPositionInContainer(w, h, bagObj, outline);
       if (!pos) continue;
+      
+      // OPTIMIZATION: Fast bounding box check before expensive polygon test
+      let overlapsThreat = false;
+      for (const threatObj of threatObjs) {
+        if (fastBoundingBoxOverlap(pos.x, pos.y, w, h, threatObj.transform.x, threatObj.transform.y, threatObj.transform.width, threatObj.transform.height)) {
+          overlapsThreat = true;
+          break;
+        }
+      }
+      if (overlapsThreat) continue;
+
       const testObj: SceneObject = {
         id: "temp",
         name: item.name,
@@ -200,33 +250,36 @@ function tryPlaceNonThreats(
       // Check if inside bag
       if (!isObjectInsideContainer(testObj, bagObj)) continue;
 
-      // Check overlap with any threat
-      let overlapsThreat = false;
+      // Full overlap check with threats (only if bounding box overlapped)
+      let fullOverlapsThreat = false;
       for (const threatObj of threatObjs) {
         if (doObjectsOverlap(testObj, threatObj)) {
-          overlapsThreat = true;
+          fullOverlapsThreat = true;
           break;
         }
       }
-      if (overlapsThreat) continue;
+      if (fullOverlapsThreat) continue;
 
       // Check overlap with already placed non-threats
       let overlapsExisting = false;
-      for (const existingPos of positions) {
-        const existingObj: SceneObject = {
-          id: "existing",
-          name: "",
-          library: "non-threat",
-          originalPixelValue: 0,
-          currentPixelValue: 0,
-          oldPixelValue: null,
-          stencilId: "item",
-          transform: { x: existingPos.x, y: existingPos.y, width: w, height: h, rotation: existingPos.rotation },
-          layer: 0,
-        };
-        if (doObjectsOverlap(testObj, existingObj)) {
-          overlapsExisting = true;
-          break;
+      for (let i = 0; i < positions.length; i++) {
+        const existingPos = positions[i];
+        if (fastBoundingBoxOverlap(pos.x, pos.y, w, h, existingPos.x, existingPos.y, w, h)) {
+          const existingObj: SceneObject = {
+            id: "existing",
+            name: "",
+            library: "non-threat",
+            originalPixelValue: 0,
+            currentPixelValue: 0,
+            oldPixelValue: null,
+            stencilId: "item",
+            transform: { x: existingPos.x, y: existingPos.y, width: w, height: h, rotation: existingPos.rotation },
+            layer: 0,
+          };
+          if (doObjectsOverlap(testObj, existingObj)) {
+            overlapsExisting = true;
+            break;
+          }
         }
       }
       if (overlapsExisting) continue;
@@ -244,32 +297,32 @@ function tryPlaceNonThreats(
 
 /**
  * Build a shuffled list of position+rotation candidates for a threat inside a bag.
- * Uses a quantized grid of positions inside the bag's valid region, adds random
- * samples if the grid is sparse, forms the Cartesian product with rotation angles,
- * then shuffles the full candidate list.
+ * OPTIMIZED: Reduced grid density and rotation steps for faster generation.
  */
 function buildPositionRotationCandidates(
   bagObj: SceneObject,
   threat: Item,
   target: number
 ): { x: number; y: number; rotation: number }[] {
-  const validRegion: Point[] = getTransformedValidRegion(bagObj) || [];
+  const validRegion: Point[] = getCachedValidRegion(bagObj) || [];
 
   let minX = 0, maxX = 0, minY = 0, maxY = 0;
   if (validRegion.length >= 3) {
     minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
-    validRegion.forEach((p: Point) => {
+    for (let i = 0; i < validRegion.length; i++) {
+      const p = validRegion[i];
       if (p.x < minX) minX = p.x;
       if (p.x > maxX) maxX = p.x;
       if (p.y < minY) minY = p.y;
       if (p.y > maxY) maxY = p.y;
-    });
+    }
   }
 
   const threatW = threat.width ? Math.round(threat.width) : 120;
   const threatH = threat.height ? Math.round(threat.height) : 60;
 
-  const gridStep = Math.max(threatW, threatH) * 0.6;
+  // OPTIMIZATION: Increased grid step to reduce candidates (was 0.6, now 0.8)
+  const gridStep = Math.max(threatW, threatH) * 0.8;
   const positionCandidates: { x: number; y: number }[] = [];
 
   if (validRegion.length >= 3) {
@@ -280,23 +333,25 @@ function buildPositionRotationCandidates(
     }
   }
 
-  // If grid produced too few candidates, add random ones to expand search
-  const requiredRandom = Math.max(0, target * 10 - positionCandidates.length);
+  // OPTIMIZATION: Reduced random candidates (was target * 10, now target * 5)
+  const requiredRandom = Math.max(0, target * 5 - positionCandidates.length);
   for (let i = 0; i < requiredRandom; i++) {
     const rx = minX + threatW / 2 + Math.random() * Math.max(0, maxX - minX - threatW);
     const ry = minY + threatH / 2 + Math.random() * Math.max(0, maxY - minY - threatH);
     positionCandidates.push({ x: rx, y: ry });
   }
 
-  // Rotation angles: choose a reasonable step depending on target size
-  const rotationStep = target <= 12 ? 30 : target <= 24 ? 15 : target <= 72 ? 10 : 5;
+  // OPTIMIZATION: Fewer rotation angles (increased step size)
+  const rotationStep = target <= 12 ? 45 : target <= 24 ? 30 : target <= 72 ? 20 : 15;
   const rotationAngles: number[] = [];
   for (let angle = 0; angle < 360; angle += rotationStep) rotationAngles.push(angle);
 
   // Cartesian product of positions × rotations
   const candidates: { x: number; y: number; rotation: number }[] = [];
-  for (const p of positionCandidates) {
-    for (const r of rotationAngles) {
+  for (let i = 0; i < positionCandidates.length; i++) {
+    const p = positionCandidates[i];
+    for (let j = 0; j < rotationAngles.length; j++) {
+      const r = rotationAngles[j];
       candidates.push({ x: p.x, y: p.y, rotation: r });
     }
   }
@@ -304,11 +359,13 @@ function buildPositionRotationCandidates(
   // Shuffle candidates using Fisher-Yates
   for (let i = candidates.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    const temp = candidates[i];
+    candidates[i] = candidates[j];
+    candidates[j] = temp;
   }
 
-  // Cap the number of candidates to avoid excessive memory usage in extreme cases.
-  const MAX_CANDIDATES = Math.max(1000, target * 200, 5000);
+  // OPTIMIZATION: Reduced MAX_CANDIDATES (was 5000, now 2000)
+  const MAX_CANDIDATES = Math.max(500, target * 100, 2000);
   if (candidates.length > MAX_CANDIDATES) {
     return candidates.slice(0, MAX_CANDIDATES);
   }
@@ -320,6 +377,7 @@ function buildPositionRotationCandidates(
  * Generate unique placements for a single threat inside a bag.
  * Used for multi-threat combos where each threat is placed independently.
  * Tracks used placements across a shared set.
+ * OPTIMIZED: Reduced max attempts and added early termination.
  */
 function generateSingleThreatPlacement(
   bag: Item,
@@ -329,9 +387,10 @@ function generateSingleThreatPlacement(
   usedPlacements: Set<string>
 ): { x: number; y: number; rotation: number } | null {
   const candidates = buildPositionRotationCandidates(bagObj, threat, target);
-  const maxAttempts = Math.max(target * 100, 2000);
+  // OPTIMIZATION: Reduced max attempts (was target * 100, 2000, now target * 50, 1000)
+  const maxAttempts = Math.min(candidates.length, Math.max(target * 50, 1000));
 
-  for (let idx = 0; idx < candidates.length && idx < maxAttempts; idx++) {
+  for (let idx = 0; idx < maxAttempts; idx++) {
     const cand = candidates[idx];
     const pos = { x: cand.x, y: cand.y };
     const rotation = cand.rotation;
@@ -448,7 +507,8 @@ function generateMultiThreatPlacements(
     usedPlacementsMap.set(t.id, new Set<string>());
   }
 
-  const maxAttempts = Math.max(target * 200, 2000);
+  // OPTIMIZATION: Reduced max attempts (was target * 200, 2000, now target * 100, 1000)
+  const maxAttempts = Math.min(5000, Math.max(target * 100, 1000));
 
   for (let attempt = 0; attempt < maxAttempts && results.length < target; attempt++) {
     // Pick threat count based on percentage distribution
@@ -600,7 +660,8 @@ function generateThreatPlacements(
   const bagObj = createBagSceneObject(bag);
 
   const candidates = buildPositionRotationCandidates(bagObj, threat, target);
-  const maxAttempts = Math.max(target * 100, 2000);
+  // OPTIMIZATION: Reduced max attempts (was target * 100, 2000, now target * 50, 1000)
+  const maxAttempts = Math.min(candidates.length, Math.max(target * 50, 1000));
 
   for (let idx = 0; idx < candidates.length && results.length < target && idx < maxAttempts; idx++) {
     const cand = candidates[idx];
@@ -694,7 +755,7 @@ function generateThreatPlacements(
 }
 
 /**
-* Generate unique clean combos (no threat) for a bag.
+ * Generate unique clean combos (no threat) for a bag.
  * Uniqueness comes from non-threat subsets and their positions/rotations.
  */
 function generateCleanCombinations(
@@ -710,7 +771,8 @@ function generateCleanCombinations(
   const usedIds = globalUsedIds ?? new Set<string>();
   const bagObj = createBagSceneObject(bag);
 
-  const maxAttempts = Math.max(target * 50, 1000);
+  // OPTIMIZATION: Reduced max attempts (was target * 50, 1000, now target * 30, 500)
+  const maxAttempts = Math.min(3000, Math.max(target * 30, 500));
 
   for (let attempt = 0; attempt < maxAttempts && results.length < target; attempt++) {
     // Select non-threat subset based on distribution
@@ -807,7 +869,7 @@ function generateCleanCombinations(
  * @param requireAtLeastOneNonThreat - If true, ensures every combination has at least one non-threat
  * @returns GenerationResult with results array and failures array
  */
-export function generateCombinations(
+export async function generateCombinations(
   bags: Item[],
   threats: Item[],
   nonThreats: Item[],
@@ -816,7 +878,7 @@ export function generateCombinations(
   nonThreatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 },
   requireAtLeastOneNonThreat: boolean = false,
   existingIds: string[] = []
-): GenerationResult {
+): Promise<GenerationResult> {
   if (bags.length === 0) return { results: [], failures: [] };
   if (k <= 0) return { results: [], failures: [] };
 
@@ -956,7 +1018,7 @@ export function generateCombinations(
   }
 
   let consecutiveFailures = 0;
-  const maxConsecutiveFailures = bagEntries.length * 5;
+  const maxConsecutiveFailures = bagEntries.length * 3;
 
   while (results.length < k && consecutiveFailures < maxConsecutiveFailures) {
     const entry = selectWeightedBag();
@@ -966,10 +1028,21 @@ export function generateCombinations(
     if (combo) {
       results.push(combo);
       consecutiveFailures = 0;
+      
+      // OPTIMIZATION: Yield to UI every 50 combinations to prevent freezing
+      if (results.length % 50 === 0) {
+        // Allow React to update UI
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
     } else {
       consecutiveFailures++;
     }
   }
 
   return { results, failures };
+}
+
+// Clear cache function for testing or when needed
+export function clearCombinationCache() {
+  validRegionCache.clear();
 }
