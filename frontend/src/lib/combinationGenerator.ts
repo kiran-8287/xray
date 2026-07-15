@@ -374,23 +374,27 @@ function buildPositionRotationCandidates(
 }
 
 /**
- * Generate unique placements for a single threat inside a bag.
- * Used for multi-threat combos where each threat is placed independently.
- * Tracks used placements across a shared set.
- * OPTIMIZED: Reduced max attempts and added early termination.
+ * Generate a placement for a single threat inside a bag.
+ * Tries non-overlapping first (10 attempts), then falls back to overlapping.
+ * Tracks positions per bag+threat to ensure uniqueness within same bag.
  */
 function generateSingleThreatPlacement(
   bag: Item,
   threat: Item,
   bagObj: SceneObject,
-  target: number,
-  usedPlacements: Set<string>
+  bagId: string,
+  bagThreatPositions: Map<string, Set<string>>,
+  existingThreats: SceneObject[] = []
 ): { x: number; y: number; rotation: number } | null {
-  const candidates = buildPositionRotationCandidates(bagObj, threat, target);
-  // OPTIMIZATION: Reduced max attempts (was target * 100, 2000, now target * 50, 1000)
-  const maxAttempts = Math.min(candidates.length, Math.max(target * 50, 1000));
+  const candidates = buildPositionRotationCandidates(bagObj, threat, 10);
+  const maxAttempts = Math.min(candidates.length, 100);
 
-  for (let idx = 0; idx < maxAttempts; idx++) {
+  // Get tracking key for this bag+threat combination
+  const trackingKey = `${bagId}_${threat.id}`;
+  const usedPositions = bagThreatPositions.get(trackingKey) || new Set<string>();
+  
+  // Phase 1: Try non-overlapping (check against existing threats)
+  for (let idx = 0; idx < Math.min(maxAttempts, 10); idx++) {
     const cand = candidates[idx];
     const pos = { x: cand.x, y: cand.y };
     const rotation = cand.rotation;
@@ -398,11 +402,54 @@ function generateSingleThreatPlacement(
     // Check if this placement is valid
     if (!tryPlaceThreat(threat, bagObj, pos.x, pos.y, rotation)) continue;
 
-    // Check uniqueness
-    const hash = placementHash(threat.id, pos.x, pos.y, rotation);
-    if (usedPlacements.has(hash)) continue;
+    // Check overlap with existing threats
+    const testObj = createThreatSceneObject(threat, pos.x, pos.y, rotation, 1);
+    let overlaps = false;
+    for (const existing of existingThreats) {
+      if (doObjectsOverlap(testObj, existing)) {
+        overlaps = true;
+        break;
+      }
+    }
+    if (overlaps) continue;
 
-    usedPlacements.add(hash);
+    // Check if position already used for this bag+threat
+    const posHash = `${Math.round(pos.x)}_${Math.round(pos.y)}_${rotation}`;
+    if (usedPositions.has(posHash)) continue;
+
+    // Track this position
+    usedPositions.add(posHash);
+    if (usedPositions.size > 50) {
+      // Remove oldest entry (FIFO) to keep memory bounded
+      const firstHash = usedPositions.values().next().value;
+      if (firstHash) usedPositions.delete(firstHash);
+    }
+    bagThreatPositions.set(trackingKey, usedPositions);
+
+    return { x: pos.x, y: pos.y, rotation };
+  }
+
+  // Phase 2: Fallback to overlapping (no overlap checks)
+  for (let idx = 10; idx < maxAttempts; idx++) {
+    const cand = candidates[idx];
+    const pos = { x: cand.x, y: cand.y };
+    const rotation = cand.rotation;
+
+    // Check if this placement is valid
+    if (!tryPlaceThreat(threat, bagObj, pos.x, pos.y, rotation)) continue;
+
+    // Check if position already used for this bag+threat
+    const posHash = `${Math.round(pos.x)}_${Math.round(pos.y)}_${rotation}`;
+    if (usedPositions.has(posHash)) continue;
+
+    // Track this position
+    usedPositions.add(posHash);
+    if (usedPositions.size > 50) {
+      const firstHash = usedPositions.values().next().value;
+      if (firstHash) usedPositions.delete(firstHash);
+    }
+    bagThreatPositions.set(trackingKey, usedPositions);
+
     return { x: pos.x, y: pos.y, rotation };
   }
 
@@ -484,15 +531,14 @@ function pickNonThreatCountByDistribution(
 }
 
 /**
- * Generate a multi-threat combo: pick 1-4 random threats based on distribution,
- * place all inside bag without overlapping each other, then add non-threats.
+ * Generate a multi-threat combo with tolerance-based distribution.
+ * Places threats with position tracking and overlap fallback.
  */
 function generateMultiThreatPlacements(
   bag: Item,
   threats: Item[],
-  target: number,
+  targetByCount: Record<number, { min: number; target: number; max: number }>,
   nonThreats: Item[],
-  threatDistribution: Record<number, number>,
   nonThreatDistribution: Record<number, number>,
   requireAtLeastOneNonThreat: boolean = false,
   globalUsedIds?: Set<string>
@@ -501,56 +547,55 @@ function generateMultiThreatPlacements(
   const usedIds = globalUsedIds ?? new Set<string>();
   const bagObj = createBagSceneObject(bag);
 
-  // Track used placements per threat type to ensure diversity
-  const usedPlacementsMap = new Map<string, Set<string>>();
-  for (const t of threats) {
-    usedPlacementsMap.set(t.id, new Set<string>());
-  }
+  // Calculate total target
+  const totalTarget = Object.values(targetByCount).reduce((sum, bounds) => sum + bounds.target, 0);
+  
+  // OPTIMIZATION: More attempts since overlap is allowed (much higher success rate)
+  const maxAttempts = Math.min(5000, Math.max(totalTarget * 5, 1000));
 
-  // OPTIMIZATION: Reduced max attempts (was target * 200, 2000, now target * 100, 1000)
-  const maxAttempts = Math.min(5000, Math.max(target * 100, 1000));
+  for (let attempt = 0; attempt < maxAttempts && results.length < totalTarget; attempt++) {
+    // Pick threat count based on remaining targets
+    const remainingTargets: { count: number; remaining: number }[] = [];
+    for (const [count, bounds] of Object.entries(targetByCount)) {
+      const countNum = parseInt(count);
+      const currentCount = results.filter(r => r.threats.length === countNum).length;
+      const remaining = bounds.max - currentCount;
+      if (remaining > 0) {
+        remainingTargets.push({ count: countNum, remaining });
+      }
+    }
 
-  for (let attempt = 0; attempt < maxAttempts && results.length < target; attempt++) {
-    // Pick threat count based on percentage distribution
-    const threatCount = pickThreatCountByDistribution(threatDistribution, threats.length);
-    const selectedThreats = shuffleArray(threats).slice(0, threatCount);
+    if (remainingTargets.length === 0) break;
 
-    // Try to place all selected threats without overlap
+    // Weighted random selection based on remaining targets
+    const totalRemaining = remainingTargets.reduce((sum, rt) => sum + rt.remaining, 0);
+    const random = Math.random() * totalRemaining;
+    let cumulative = 0;
+    let selectedCount = remainingTargets[0].count;
+    for (const rt of remainingTargets) {
+      cumulative += rt.remaining;
+      if (random <= cumulative) {
+        selectedCount = rt.count;
+        break;
+      }
+    }
+
+    const selectedThreats = shuffleArray(threats).slice(0, selectedCount);
+
+    // Try to place all selected threats (NO overlap checks - overlap allowed!)
     const placedThreats: { item: Item; x: number; y: number; rotation: number }[] = [];
     let placementFailed = false;
 
+    // Track positions for this bag+threat combination
+    const bagThreatPositions = new Map<string, Set<string>>();
+    const threatObjs: SceneObject[] = []; // Create empty array first
+    
     for (const threat of selectedThreats) {
       const placement = generateSingleThreatPlacement(
-        bag, threat, bagObj, target,
-        usedPlacementsMap.get(threat.id)!
+        bag, threat, bagObj, bag.id, bagThreatPositions, threatObjs
       );
 
       if (!placement) {
-        placementFailed = true;
-        break;
-      }
-
-      // Check overlap with already-placed threats
-      const testObj: SceneObject = createThreatSceneObject(
-        threat, placement.x, placement.y, placement.rotation, 1
-      );
-
-      let overlapsOtherThreat = false;
-      for (const placed of placedThreats) {
-        const otherObj = createThreatSceneObject(
-          placed.item, placed.x, placed.y, placed.rotation, 1
-        );
-        if (doObjectsOverlap(testObj, otherObj)) {
-          overlapsOtherThreat = true;
-          break;
-        }
-      }
-
-      if (overlapsOtherThreat) {
-        // Remove the placement hash we just added since it didn't work out
-        usedPlacementsMap.get(threat.id)!.delete(
-          placementHash(threat.id, placement.x, placement.y, placement.rotation)
-        );
         placementFailed = true;
         break;
       }
@@ -560,10 +605,11 @@ function generateMultiThreatPlacements(
 
     if (placementFailed) continue;
 
-    // Create threat scene objects
-    const threatObjs: SceneObject[] = placedThreats.map((pt, i) =>
-      createThreatSceneObject(pt.item, pt.x, pt.y, pt.rotation, i + 1)
-    );
+    // Create threat scene objects after all placed
+    for (let i = 0; i < placedThreats.length; i++) {
+      const pt = placedThreats[i];
+      threatObjs.push(createThreatSceneObject(pt.item, pt.x, pt.y, pt.rotation, i + 1));
+    }
 
     // Select and place non-threats based on distribution
     let nonThreatPositions: { x: number; y: number; rotation: number }[] | null = [];
@@ -615,7 +661,7 @@ function generateMultiThreatPlacements(
 
   // Determine failure
   let failure: FailureLog | null = null;
-  if (results.length < target) {
+  if (results.length < totalTarget) {
     if (results.length === 0) {
       failure = {
         bagName: bag.name,
@@ -623,7 +669,7 @@ function generateMultiThreatPlacements(
         threatName: threats.map(t => t.name).join(", "),
         threatId: threats.map(t => t.id).join(","),
         reason: `No multi-threat combination could be placed in bag "${bag.name}"`,
-        expected: target,
+        expected: totalTarget,
         actual: 0,
       };
     } else {
@@ -632,8 +678,8 @@ function generateMultiThreatPlacements(
         bagId: bag.id,
         threatName: threats.map(t => t.name).join(", "),
         threatId: threats.map(t => t.id).join(","),
-        reason: `Only ${results.length} of ${target} multi-threat combos found for bag "${bag.name}"`,
-        expected: target,
+        reason: `Only ${results.length} of ${totalTarget} multi-threat combos found for bag "${bag.name}"`,
+        expected: totalTarget,
         actual: results.length,
       };
     }
@@ -973,12 +1019,28 @@ export async function generateCombinations(
 
     if (threats.length > 0) {
       // Multi-threat mode: generate threats per combo based on distribution
+      // Calculate target counts for each threat count based on distribution
+      const targetByCount: Record<number, { min: number; target: number; max: number }> = {};
+      const totalWeight = Object.values(threatDistribution).reduce((sum, w) => sum + w, 0);
+      const tolerance = 0.05;
+      
+      for (const [count, weight] of Object.entries(threatDistribution)) {
+        const countNum = parseInt(count);
+        if (countNum <= threats.length && weight > 0) {
+          const target = Math.round((weight / totalWeight) * 1);
+          targetByCount[countNum] = {
+            min: Math.max(0, Math.floor(target * (1 - tolerance))),
+            target: target,
+            max: Math.ceil(target * (1 + tolerance))
+          };
+        }
+      }
+
       const { results: placements, failure } = generateMultiThreatPlacements(
         entry.bag,
         threats,
-        1,
+        targetByCount,
         nonThreats,
-        threatDistribution,
         nonThreatDistribution,
         requireAtLeastOneNonThreat,
         usedIds
@@ -1017,25 +1079,319 @@ export async function generateCombinations(
     }
   }
 
-  let consecutiveFailures = 0;
+  /**
+   * Adaptive generation loop:
+   * Instead of batching per threat count (which drops remaining capacity on failure),
+   * we use a single unified loop that tracks remaining targets per threat count.
+   * When a threat count fails too many consecutive times, its remaining target
+   * is redistributed to other threat counts proportionally.
+   */
   const maxConsecutiveFailures = bagEntries.length * 3;
 
-  while (results.length < k && consecutiveFailures < maxConsecutiveFailures) {
-    const entry = selectWeightedBag();
-    if (!entry) break;
+  // Pre-calculate target distribution with tolerance (5%)
+  const targetByCount: Record<number, { min: number; target: number; max: number }> = {};
+  const distributionWeights: Record<number, number> = {};
+  if (threats.length > 0) {
+    const totalWeight = Object.values(threatDistribution).reduce((sum, w) => sum + w, 0);
+    const tolerance = 0.05; // 5% tolerance
+    
+    // Calculate targets with min/max bounds
+    const targets: { count: number; min: number; target: number; max: number; weight: number }[] = [];
+    for (const [count, weight] of Object.entries(threatDistribution)) {
+      const countNum = parseInt(count);
+      if (countNum <= threats.length && weight > 0) {
+        const target = Math.round((weight / totalWeight) * k);
+        targets.push({
+          count: countNum,
+          min: Math.max(0, Math.floor(target * (1 - tolerance))),
+          target: target,
+          max: Math.ceil(target * (1 + tolerance)),
+          weight
+        });
+      }
+    }
 
-    const combo = tryGenerateOne(entry);
-    if (combo) {
-      results.push(combo);
-      consecutiveFailures = 0;
+    // Convert to records
+    for (const t of targets) {
+      if (t.target > 0) {
+        targetByCount[t.count] = { min: t.min, target: t.target, max: t.max };
+        distributionWeights[t.count] = t.weight;
+      }
+    }
+  }
+
+  // If we have threats with distribution targets, use adaptive unified loop.
+  // Otherwise, fall back to the original linear loop (clean combos).
+  if (threats.length > 0 && Object.keys(targetByCount).length > 0) {
+    // Track remaining targets per threat count (starts at max, capped to fill k)
+    let remainingByCount: Record<number, number> = {};
+    let totalRemaining = 0;
+    
+    // Calculate initial total of all maxes
+    let totalMax = 0;
+    for (const bounds of Object.values(targetByCount)) {
+      totalMax += bounds.max;
+    }
+    
+    // Scale down if total max exceeds k (cap each proportionally)
+    const scale = Math.min(1, k / totalMax);
+    for (const [countStr, bounds] of Object.entries(targetByCount)) {
+      const countNum = parseInt(countStr);
+      const capped = Math.min(bounds.max, Math.max(bounds.min || 0, Math.round(bounds.max * scale)));
+      remainingByCount[countNum] = capped;
+      totalRemaining += capped;
+    }
+    
+    // If after scaling we're below k, add remaining capacity proportionally
+    if (totalRemaining < k && Object.keys(remainingByCount).length > 0) {
+      const deficit = k - totalRemaining;
+      const totalWeight = Object.values(distributionWeights).reduce((s, w) => s + w, 0);
+      // Distribute deficit proportionally by original weight
+      const counts = Object.keys(remainingByCount).map(Number);
+      for (const countNum of counts) {
+        const weight = distributionWeights[countNum] || 0;
+        const extra = Math.round((weight / totalWeight) * deficit);
+        remainingByCount[countNum] += extra;
+        totalRemaining += extra;
+      }
+      // Final adjust to hit exactly k (trim from highest weighted count)
+      if (totalRemaining > k) {
+        const sorted = counts.sort((a, b) => (distributionWeights[b] || 0) - (distributionWeights[a] || 0));
+        for (const countNum of sorted) {
+          const excess = totalRemaining - k;
+          const canRemove = Math.min(excess, remainingByCount[countNum] - (targetByCount[countNum]?.min || 0));
+          if (canRemove > 0) {
+            remainingByCount[countNum] -= canRemove;
+            totalRemaining -= canRemove;
+          }
+          if (totalRemaining <= k) break;
+        }
+      }
+    }
+
+    // Track consecutive failures per threat count for adaptive redistribution
+    const consecutiveFailuresByCount: Record<number, number> = {};
+    const exhaustedCount = new Set<number>();
+    const maxConsecutivePerCount = Math.max(10, Math.ceil(k / 10)); // adaptive threshold
+    
+    // Main adaptive generation loop
+    let attemptsWithoutProgress = 0;
+    const maxAttemptsWithoutProgress = Math.min(5000, Math.max(k * 3, 1000));
+    
+    while (results.length < k && totalRemaining > 0 && attemptsWithoutProgress < maxAttemptsWithoutProgress) {
+      attemptsWithoutProgress++;
       
-      // OPTIMIZATION: Yield to UI every 50 combinations to prevent freezing
+      // Pick a bag
+      const entry = selectWeightedBag();
+      if (!entry) break;
+      
+      if (!entry.hasValidRegion) {
+        entry.isExhausted = true;
+        continue;
+      }
+      
+      // Pick threat count weighted by remaining targets × distribution weight
+      const activeCounts = Object.keys(remainingByCount)
+        .map(Number)
+        .filter(c => !exhaustedCount.has(c) && (remainingByCount[c] || 0) > 0);
+      
+      if (activeCounts.length === 0) break;
+      
+      // Weighted selection: higher weight = higher chance
+      let selectionTotalWeight = 0;
+      const selectionWeights: { count: number; weight: number; cumulative: number }[] = [];
+      for (const countNum of activeCounts) {
+        const remaining = remainingByCount[countNum] || 0;
+        const distWeight = distributionWeights[countNum] || 1;
+        // Weight by both remaining need and original distribution preference
+        const weight = remaining * distWeight;
+        selectionTotalWeight += weight;
+        selectionWeights.push({
+          count: countNum,
+          weight,
+          cumulative: selectionTotalWeight
+        });
+      }
+      
+      const selectionRandom = Math.random() * selectionTotalWeight;
+      let selectedCount = activeCounts[0];
+      for (const sw of selectionWeights) {
+        if (selectionRandom <= sw.cumulative) {
+          selectedCount = sw.count;
+          break;
+        }
+      }
+      
+      // Try to generate one combo with this threat count
+      const selectedThreats = shuffleArray(threats).slice(0, selectedCount);
+      const bagObj = createBagSceneObject(entry.bag);
+      
+      // Place threats with position tracking
+      const placedThreats: { item: Item; x: number; y: number; rotation: number }[] = [];
+      let placementFailed = false;
+      
+      // Track positions for this bag+threat combination
+      const bagThreatPositions = new Map<string, Set<string>>();
+      const threatObjs: SceneObject[] = [];
+      
+      for (const threat of selectedThreats) {
+        const placement = generateSingleThreatPlacement(
+          entry.bag, threat, bagObj, entry.bag.id, bagThreatPositions, threatObjs
+        );
+        
+        if (!placement) {
+          placementFailed = true;
+          break;
+        }
+        
+        placedThreats.push({ item: threat, ...placement });
+      }
+      
+      if (placementFailed) {
+        // Track consecutive failure for this threat count
+        consecutiveFailuresByCount[selectedCount] = (consecutiveFailuresByCount[selectedCount] || 0) + 1;
+        
+        // If too many consecutive failures, redistribute this count's remaining to others
+        if (consecutiveFailuresByCount[selectedCount] >= maxConsecutivePerCount && !exhaustedCount.has(selectedCount)) {
+          exhaustedCount.add(selectedCount);
+          const failedRemaining = remainingByCount[selectedCount] || 0;
+          delete remainingByCount[selectedCount];
+          totalRemaining -= failedRemaining;
+          
+          // Redistribute to other active counts proportionally
+          if (failedRemaining > 0 && activeCounts.length > 1) {
+            const otherCounts = activeCounts.filter(c => c !== selectedCount);
+            const otherTotalWeight = otherCounts.reduce((s, c) => s + (distributionWeights[c] || 1), 0);
+            if (otherTotalWeight > 0) {
+              for (const otherCount of otherCounts) {
+                const share = Math.round((failedRemaining * (distributionWeights[otherCount] || 1)) / otherTotalWeight);
+                if (share > 0) {
+                  remainingByCount[otherCount] = (remainingByCount[otherCount] || 0) + share;
+                  totalRemaining += share;
+                }
+              }
+              // Ensure total stays consistent
+              if (totalRemaining > k - results.length) {
+                const excess = totalRemaining - (k - results.length);
+                // Trim from highest remaining
+                const sortedOthers = [...otherCounts].sort((a, b) => (remainingByCount[b] || 0) - (remainingByCount[a] || 0));
+                let trimmed = 0;
+                for (const c of sortedOthers) {
+                  const canTrim = Math.min(excess - trimmed, remainingByCount[c] || 0);
+                  if (canTrim > 0) {
+                    remainingByCount[c] = (remainingByCount[c] || 0) - canTrim;
+                    totalRemaining -= canTrim;
+                    trimmed += canTrim;
+                  }
+                  if (trimmed >= excess) break;
+                }
+              }
+            }
+            
+            // Log redistribution as a failure
+            const failureKey = `${entry.bag.id}-redistribute-${selectedCount}`;
+            if (!seenFailures.has(failureKey)) {
+              seenFailures.add(failureKey);
+              failures.push({
+                bagName: entry.bag.name,
+                bagId: entry.bag.id,
+                threatName: threats.map(t => t.name).join(", "),
+                threatId: threats.map(t => t.id).join(","),
+                reason: `Redistributed ${failedRemaining} remaining combos from ${selectedCount}-threat count to other counts (too many consecutive failures)`,
+                expected: failedRemaining,
+                actual: 0,
+              });
+            }
+          }
+        }
+        continue;
+      }
+      
+      // Create threat scene objects after all placed
+      for (let i = 0; i < placedThreats.length; i++) {
+        const pt = placedThreats[i];
+        threatObjs.push(createThreatSceneObject(pt.item, pt.x, pt.y, pt.rotation, i + 1));
+      }
+      
+      // Select and place non-threats
+      let nonThreatPositions: { x: number; y: number; rotation: number }[] | null = [];
+      let selectedNonThreats: Item[] = [];
+      
+      if (nonThreats.length > 0) {
+        const nonThreatCount = pickNonThreatCountByDistribution(nonThreatDistribution, nonThreats.length, requireAtLeastOneNonThreat);
+        selectedNonThreats = shuffleArray(nonThreats).slice(0, nonThreatCount);
+      }
+      
+      if (selectedNonThreats.length > 0) {
+        nonThreatPositions = tryPlaceNonThreats(selectedNonThreats, bagObj, threatObjs);
+        if (!nonThreatPositions) {
+          // Non-threat placement failed — this is a placement failure for this count too
+          consecutiveFailuresByCount[selectedCount] = (consecutiveFailuresByCount[selectedCount] || 0) + 1;
+          continue;
+        }
+      }
+      
+      // Build the result
+      const objects: SceneObject[] = [bagObj];
+      let layer = 1;
+      
+      selectedNonThreats.forEach((item, idx) => {
+        const ntObj = createNonThreatSceneObject(
+          item,
+          nonThreatPositions![idx].x,
+          nonThreatPositions![idx].y,
+          nonThreatPositions![idx].rotation,
+          layer++
+        );
+        objects.push(ntObj);
+      });
+      
+      for (const tObj of threatObjs) {
+        objects.push({ ...tObj, layer: layer++ });
+      }
+      
+      // Generate unique synthesized ID
+      const generatedId = generateSynthesizedId(entry.bag.id, Array.from(usedIds));
+      usedIds.add(generatedId.id);
+      
+      results.push({
+        id: generatedId.id,
+        bag: entry.bag,
+        threats: placedThreats.map(pt => pt.item),
+        others: selectedNonThreats,
+        objects,
+      });
+      
+      // Success: decrement remaining for this count
+      remainingByCount[selectedCount] = (remainingByCount[selectedCount] || 0) - 1;
+      totalRemaining--;
+      entry.usageCount++;
+      attemptsWithoutProgress = 0;
+      consecutiveFailuresByCount[selectedCount] = 0;
+      
+      // Yield to UI every 50 combinations
       if (results.length % 50 === 0) {
-        // Allow React to update UI
         await new Promise(resolve => setTimeout(resolve, 0));
       }
-    } else {
-      consecutiveFailures++;
+    }
+  } else {
+    // Fallback to original logic if no threats or no distribution
+    let consecutiveFailures = 0;
+    while (results.length < k && consecutiveFailures < maxConsecutiveFailures) {
+      const entry = selectWeightedBag();
+      if (!entry) break;
+
+      const combo = tryGenerateOne(entry);
+      if (combo) {
+        results.push(combo);
+        consecutiveFailures = 0;
+        
+        if (results.length % 50 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+      } else {
+        consecutiveFailures++;
+      }
     }
   }
 
