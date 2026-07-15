@@ -4,6 +4,7 @@ import { Image, AlertTriangle, CheckCircle2, X, XCircle, Trash2, Loader2 } from 
 import type { Item, CategorizedItems } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import { API_BASE_URL } from "../config/api";
+import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 import { getCategoryConfig, normalizeCategoryName, normalizeCategorizedItems, LIBRARIES_UI, getLibrarySubcategories, clearCustomSubcategoriesCache } from "../config/categories";
 import AddSubcategoryModal from "../components/common/AddSubcategoryModal";
 
@@ -222,7 +223,7 @@ export default function LibraryPage() {
       }
 
       // Request paginated data - 1000 items per page for smooth virtualization
-      const res = await fetch(`${API_BASE_URL}/api/items/categorized?limit=1000`);
+      const res = await fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?limit=1000`);
       const data = await res.json();
       if (data.ok) {
         const merged = normalizeCategorizedItems(data.categorized);
@@ -405,7 +406,7 @@ export default function LibraryPage() {
   const handleAddCustomSubcategory = async (name: string): Promise<void> => {
     if (!addingSubcategoryFor) return;
     
-    const res = await fetch('/api/custom-subcategories', {
+    const res = await fetch(`${API_BASE_URL}/api/custom-subcategories`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ category: addingSubcategoryFor, name }),

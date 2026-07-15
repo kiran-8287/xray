@@ -29,7 +29,7 @@ export async function fetchPixelData(itemId: string, energyType: string = "highe
 }
 
 export function getLoadedImage(filepath: string, onLoad: () => void): HTMLImageElement | null {
-  const url = `http://localhost:8080/data/library_images/${filepath}`;
+  const url = `${API_BASE_URL}/data/library_images/${filepath}`;
   if (imgCache.has(url)) {
     const cached = imgCache.get(url)!;
     if (cached.complete && cached.naturalWidth > 0) return cached;
@@ -297,7 +297,7 @@ export function computeObjectStats(
     if (!obj.filepath) continue;
 
     // Load the image for this object
-    const url = `http://localhost:8080/data/library_images/${obj.filepath}`;
+    const url = `${API_BASE_URL}/data/library_images/${obj.filepath}`;
     const img = imgCache.get(url);
     if (!img || !img.complete || img.naturalWidth === 0) continue;
 

@@ -1,9 +1,11 @@
+import { API_BASE_URL } from "../config/api";
+
 /**
  * Loads an image and returns its natural dimensions
  */
 export function loadImageDimensions(filepath: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
-    const url = `http://localhost:8080/data/library_images/${filepath}`;
+    const url = `${API_BASE_URL}/data/library_images/${filepath}`;
     const img = new Image();
     img.crossOrigin = "anonymous";
     

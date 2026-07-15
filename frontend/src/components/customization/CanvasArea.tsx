@@ -3,11 +3,12 @@ import { RotateCw, GripVertical } from "lucide-react";
 import type { SceneObject } from "../../types/customization";
 import { getTransformedValidRegion } from "../../lib/customizationHelpers";
 import { drawXRayComposite, imgCache } from "../../lib/xrayRenderer";
+import { API_BASE_URL } from "../../config/api";
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
 
-const IMAGE_BASE_URL = "http://localhost:8080/data/library_images/";
+const IMAGE_BASE_URL = `${API_BASE_URL}/data/library_images/`;
 
 interface CanvasAreaProps {
   canvasDivRef: React.RefObject<HTMLDivElement>;

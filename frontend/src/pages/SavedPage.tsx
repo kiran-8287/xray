@@ -1,6 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check, Loader2 } from "lucide-react";
 import { getLibrarySubcategories } from "../config/categories";
+import { API_BASE_URL } from "../config/api";
+import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 
 interface SavedLayout {
   id: string;
@@ -37,8 +39,8 @@ interface PaginationInfo {
   totalPages: number;
 }
 
-const IMAGE_BASE_URL = "http://localhost:8080/data/library_images/";
-const API_BASE = "http://localhost:8080";
+const IMAGE_BASE_URL = `${API_BASE_URL}/data/library_images/`;
+const API_BASE = API_BASE_URL;
 
 // Bag subcategories for filter dropdown
 const BAG_SUBCATEGORIES = getLibrarySubcategories("bags");
@@ -106,7 +108,7 @@ function SavedLayoutPreview({ layoutJson }: { layoutJson: any }) {
 
     return () => {
       cancelled = true;
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      if (previewUrl && previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
     };
   }, [layoutJson]);
 
@@ -434,7 +436,7 @@ export default function SavedPage() {
       // Filter logic mode
       params.set('filterLogic', filterLogic);
 
-      const res = await fetch(`${API_BASE}/api/saved-layouts/filtered?${params}`);
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/filtered?${params}`);
       const data = await res.json();
       if (data.ok) {
         setLayouts(data.layouts);
@@ -578,9 +580,9 @@ export default function SavedPage() {
             </div>
           )}
 
-          {/* Threat Filter Logic Segmented Control */}
+          {/* Filter Logic Segmented Control (applies to both threats and tags) */}
           <div>
-            <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Threat Filter Logic</label>
+            <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter Logic (Threats & Tags)</label>
             <div className="inline-flex items-center rounded-lg border border-border bg-white p-1">
               <button
                 onClick={() => setFilterLogic('or')}
@@ -589,7 +591,7 @@ export default function SavedPage() {
                     ? 'bg-accent text-white shadow-sm'
                     : 'text-muted hover:text-ink hover:bg-surface'
                 }`}
-                title="Show layouts with ANY selected threat"
+                title="Show layouts with ANY selected threat or tag"
               >
                 OR
               </button>
@@ -600,14 +602,14 @@ export default function SavedPage() {
                     ? 'bg-accent text-white shadow-sm'
                     : 'text-muted hover:text-ink hover:bg-surface'
                 }`}
-                title="Show layouts with ALL selected threats together"
+                title="Show layouts with ALL selected threats and tags together"
               >
                 AND
               </button>
             </div>
             <p className="text-[10px] text-muted mt-1">
-              {filterLogic === 'or' && 'Shows selected bag(s) with ANY one of the selected threats (backpack+gun OR backpack+knife)'}
-              {filterLogic === 'and' && 'Shows selected bag(s) with ALL selected threats together (backpack+gun+knife)'}
+              {filterLogic === 'or' && 'Shows layouts with ANY selected threat or tag (backpack+gun OR backpack+knife)'}
+              {filterLogic === 'and' && 'Shows layouts with ALL selected threats and tags together (backpack+gun+knife)'}
             </p>
           </div>
 
@@ -835,7 +837,7 @@ export default function SavedPage() {
                                       </div>
                                     )}
                                      {/* Show tags for bag objects */}
-                                     {(obj.library || "").toLowerCase() === "bag" && obj.tags && obj.tags.length > 0 && (
+                                     {(obj.library || "").toLowerCase().includes("bag") && obj.tags && obj.tags.length > 0 && (
                                        <div className="mt-2 pt-2 border-t border-border">
                                          <div className="text-[10px] text-muted mb-1 font-medium">Tags:</div>
                                          <div className="flex flex-wrap gap-1">

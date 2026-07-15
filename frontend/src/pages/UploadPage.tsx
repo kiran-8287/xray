@@ -35,7 +35,7 @@ export default function UploadPage() {
           // Clean up each orphaned item
           await Promise.all(
             itemIds.map((itemId: string) =>
-              fetch(`http://localhost:8080/api/temp-files/${itemId}`, {
+              fetch(`${API_BASE_URL}/api/temp-files/${itemId}`, {
                 method: 'DELETE',
               }).catch(err => console.error('Failed to cleanup orphaned files:', err))
             )
@@ -71,8 +71,28 @@ export default function UploadPage() {
   }, [staged.length, files.length]);
 
   const handleFilesSelected = (newFiles: File[]) => {
+    // Check for duplicates in the new files themselves
+    const seenNames = new Set<string>();
+    const uniqueNewFiles: File[] = [];
+    const duplicateNames: string[] = [];
+    
+    for (const f of newFiles) {
+      if (seenNames.has(f.name)) {
+        duplicateNames.push(f.name);
+      } else {
+        seenNames.add(f.name);
+        uniqueNewFiles.push(f);
+      }
+    }
+    
+    // Show warning for duplicates within the same selection
+    if (duplicateNames.length > 0) {
+      setDuplicateWarning(`${duplicateNames.length} duplicate file(s) in selection: ${duplicateNames.slice(0, 3).join(", ")}${duplicateNames.length > 3 ? "..." : ""}`);
+      setTimeout(() => setDuplicateWarning(null), 5000);
+    }
+    
     // Check if any of the new files are raw files
-    const hasRawFiles = newFiles.some(
+    const hasRawFiles = uniqueNewFiles.some(
       (f) => f.name.endsWith(".dump.pgm") || f.name.endsWith(".tip")
     );
 
@@ -81,16 +101,16 @@ export default function UploadPage() {
       setDuplicateWarning(null);
       setStreamErrors([]);
       // Add files to state so UploadFileQueue renders
-      setFiles((prev) => [...prev, ...newFiles]);
+      setFiles((prev) => [...prev, ...uniqueNewFiles]);
       // Route all files (including co-submitted PNGs) to raw processing pipeline
-      processRawFiles(newFiles);
+      processRawFiles(uniqueNewFiles);
       return;
     }
 
     // Existing PNG flow: unchanged
-    setFiles((prev) => [...prev, ...newFiles]);
+    setFiles((prev) => [...prev, ...uniqueNewFiles]);
     const startIdx = staged.length;
-    const newStaged = newFiles.map((f) => ({
+    const newStaged = uniqueNewFiles.map((f) => ({
       file: f,
       category: "",
       subcategory: "",
@@ -98,7 +118,7 @@ export default function UploadPage() {
     }));
     setStaged((prev) => [...prev, ...newStaged]);
     const newIndices = new Set<number>();
-    for (let i = startIdx; i < startIdx + newFiles.length; i++) {
+    for (let i = startIdx; i < startIdx + newStaged.length; i++) {
       newIndices.add(i);
     }
     setSelectedForMass(newIndices);

@@ -1,9 +1,11 @@
 import React, { useRef, useEffect, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import type { SceneObject } from "../../types/customization";
+import { API_BASE_URL } from "../../config/api";
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
-const IMAGE_BASE_URL = "http://localhost:8080/data/library_images/";
+const IMAGE_BASE_URL = `${API_BASE_URL}/data/library_images/`;
 
 interface SyntheticPreviewProps {
   objects: SceneObject[];
@@ -21,6 +23,7 @@ interface SyntheticPreviewProps {
  */
 export default function SyntheticPreview({ objects, combinationId, bagId, threatId, otherIds }: SyntheticPreviewProps) {
   const [allLoaded, setAllLoaded] = useState(false);
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   const loadedRef = useRef(new Set<string>());
 
   const sorted = [...objects].sort((a, b) => a.layer - b.layer);
@@ -28,6 +31,14 @@ export default function SyntheticPreview({ objects, combinationId, bagId, threat
 
   const handleImageLoad = (url: string) => {
     loadedRef.current.add(url);
+    if (loadedRef.current.size >= totalImages) {
+      setAllLoaded(true);
+    }
+  };
+
+  const handleImageError = (url: string, objName: string) => {
+    loadedRef.current.add(url);
+    setFailedImages(prev => new Set(prev).add(url));
     if (loadedRef.current.size >= totalImages) {
       setAllLoaded(true);
     }
@@ -65,6 +76,8 @@ export default function SyntheticPreview({ objects, combinationId, bagId, threat
               // For non-bag objects, use multiply blend like CanvasArea does
               const isBag = obj.library === "bag";
 
+              const hasError = failedImages.has(url);
+              
               return (
                 <div
                   key={obj.id}
@@ -81,14 +94,20 @@ export default function SyntheticPreview({ objects, combinationId, bagId, threat
                     zIndex: obj.layer,
                   }}
                 >
-                  <img
-                    src={url}
-                    alt={obj.name}
-                    className="w-full h-full object-contain"
-                    draggable={false}
-                    onLoad={() => handleImageLoad(url)}
-                    onError={() => handleImageLoad(url)} // count errors as "loaded" to avoid stuck spinner
-                  />
+                  {hasError ? (
+                    <div className="w-full h-full flex items-center justify-center bg-rose-50 border border-rose-200 rounded" title={`Failed to load: ${obj.name}`}>
+                      <AlertTriangle size={14} className="text-rose-500" />
+                    </div>
+                  ) : (
+                    <img
+                      src={url}
+                      alt={obj.name}
+                      className="w-full h-full object-contain"
+                      draggable={false}
+                      onLoad={() => handleImageLoad(url)}
+                      onError={() => handleImageError(url, obj.name)}
+                    />
+                  )}
                 </div>
               );
             })}
