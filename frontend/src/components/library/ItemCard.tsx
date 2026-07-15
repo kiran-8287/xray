@@ -2,6 +2,7 @@ import React, { memo, useRef, useEffect } from "react";
 import { Check, Edit3, Trash2 } from "lucide-react";
 import type { Item } from "../../types/library";
 import { getCategoryConfig } from "../../config/categories";
+import { API_BASE_URL } from "../../config/api";
 import ImageWithPlaceholder from "../common/ImageWithPlaceholder";
 
 function formatDisplayName(name: string) {
@@ -126,13 +127,13 @@ const ItemCard = memo(function ItemCard({
       <div className="relative aspect-square bg-surface flex items-center justify-center p-4 overflow-hidden">
         {item.category === "bags" && item.valid_region_points && item.valid_region_points.length > 0 ? (
           <ThumbnailWithRegion
-            src={`http://localhost:8080/data/library_images/${item.filepath}`}
+            src={`${API_BASE_URL}/data/library_images/${item.filepath}`}
             validRegionPoints={item.valid_region_points}
             alt={item.filename}
           />
         ) : (
           <ImageWithPlaceholder
-            src={`http://localhost:8080/data/library_images/${item.filepath}`}
+            src={`${API_BASE_URL}/data/library_images/${item.filepath}`}
             alt={item.filename}
             className="max-w-full max-h-full object-contain"
           />

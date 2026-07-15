@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { 
-  ZoomIn, ZoomOut, Maximize2, Sliders, ShieldAlert, ShieldCheck, Loader2
+  ZoomIn, ZoomOut, Maximize2, Sliders, ShieldAlert, ShieldCheck, Loader2, X
 } from "lucide-react";
 import type { SceneObject } from "../types/customization";
 import type { Item } from "../types/library";
@@ -14,6 +14,7 @@ import { getRectCorners } from "../lib/geometry";
 import { loadMultipleImageDimensions } from "../lib/imageSizeLoader";
 import { computeObjectStats, type ObjectPixelStats } from "../lib/xrayRenderer";
 import { API_BASE_URL } from "../config/api";
+import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 import { normalizeCategoryName, getCategoryConfig, normalizeCategorizedItems } from "../config/categories";
 import ScannedBagsSidebar from "../components/customization/ScannedBagsSidebar";
 import WorkspaceToolbar from "../components/customization/WorkspaceToolbar";
@@ -94,18 +95,25 @@ export default function CustomizationPage() {
   const [lastSavedTime, setLastSavedTime] = useState<number>(0);
   const [categorizedList, setCategorizedList] = useState<any>(null);
   const [pixelStats, setPixelStats] = useState<Map<string, ObjectPixelStats>>(new Map());
+  const [loadError, setLoadError] = useState<string | null>(null);
   const hasInitialized = useRef(false);
 
   // Fetch all scanned bags from DB on mount
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/items/categorized`)
+    fetchWithTimeout(`${API_BASE_URL}/api/items/categorized`)
       .then((res) => res.json())
       .then((data) => {
         if (data.ok) {
           setCategorizedList(normalizeCategorizedItems(data.categorized));
+          setLoadError(null);
+        } else {
+          setLoadError(data.error || "Failed to load library items.");
         }
       })
-      .catch((err) => console.error("Error loading scanned bags in workspace:", err));
+      .catch((err) => {
+        console.error("Error loading scanned bags in workspace:", err);
+        setLoadError("Cannot connect to backend. Please verify the server is running.");
+      });
   }, []);
 
   // Initialize objects from URL query params — runs only ONCE after data loads
@@ -879,6 +887,21 @@ export default function CustomizationPage() {
         }`}>
           {saveState.status === "success" ? <ShieldCheck size={16} /> : saveState.status === "error" ? <ShieldAlert size={16} /> : <Loader2 size={16} className="animate-spin" />}
           <span className="font-semibold text-xs">{saveState.message}</span>
+        </div>
+      )}
+
+      {/* Backend load error banner */}
+      {loadError && (
+        <div className="absolute top-28 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-panel border border-rose-200 bg-rose-50 text-rose-800 flex items-center gap-3 animate-slide-up">
+          <ShieldAlert size={18} className="shrink-0" />
+          <span className="font-semibold text-xs">{loadError}</span>
+          <button
+            onClick={() => setLoadError(null)}
+            className="ml-2 text-rose-600 hover:text-rose-800"
+            title="Dismiss"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 

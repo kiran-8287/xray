@@ -3,6 +3,7 @@ import { Activity, ArrowLeft, BookOpen } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import type { Item } from "../../types/library";
 import { normalizeCategoryName, getCategoryConfig } from "../../config/categories";
+import { API_BASE_URL } from "../../config/api";
 
 interface ScannedBagsSidebarProps {
   activeLibrary: string | null;
@@ -130,7 +131,7 @@ export default function ScannedBagsSidebar({
                       className="group h-28 overflow-hidden rounded-2xl border border-border bg-panel p-2.5 text-left transition-all hover:border-rose-400 hover:bg-rose-50 hover:shadow-sm"
                     >
                       <div className="h-14 bg-white rounded-xl overflow-hidden flex items-center justify-center mb-2 border border-border/50 group-hover:border-rose-200">
-                        <img src={`http://localhost:8080/data/library_images/${item.filepath}`} alt={item.name} className="max-h-full max-w-full object-contain" />
+                        <img src={`${API_BASE_URL}/data/library_images/${item.filepath}`} alt={item.name} className="max-h-full max-w-full object-contain" />
                       </div>
                       <p className="text-[11px] font-bold text-ink truncate group-hover:text-rose-700">{item.name}</p>
                     </button>
@@ -162,7 +163,7 @@ export default function ScannedBagsSidebar({
                       className="group h-28 overflow-hidden rounded-2xl border border-border bg-panel p-2.5 text-left transition-all hover:border-accent/40 hover:bg-accent/4 hover:shadow-sm"
                     >
                       <div className="h-14 bg-white rounded-xl overflow-hidden flex items-center justify-center mb-2 border border-border/50 group-hover:border-accent/20">
-                        <img src={`http://localhost:8080/data/library_images/${item.filepath}`} alt={item.name} className="max-h-full max-w-full object-contain" />
+                        <img src={`${API_BASE_URL}/data/library_images/${item.filepath}`} alt={item.name} className="max-h-full max-w-full object-contain" />
                       </div>
                       <p className="text-[11px] font-bold text-ink truncate group-hover:text-accent">{item.name}</p>
                     </button>
@@ -226,7 +227,7 @@ export default function ScannedBagsSidebar({
                 >
                   <div className="w-10 h-10 aspect-square flex items-center justify-center overflow-hidden">
                     <img
-                      src={`http://localhost:8080/data/library_images/${item.filepath}`}
+                      src={`${API_BASE_URL}/data/library_images/${item.filepath}`}
                       alt={item.name}
                       className="max-w-full max-h-full object-contain filter opacity-70 group-hover:opacity-95 transition-opacity"
                     />

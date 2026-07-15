@@ -202,6 +202,34 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
   for (const obj of sorted) {
     if (!obj.id) continue;
     
+    // Guard: skip objects with missing or invalid transform
+    if (!obj.transform || typeof obj.transform !== 'object') {
+      const msg = `Missing transform for object ${obj.name || obj.id}, skipping`;
+      console.warn(`⚠️  ${msg}`);
+      if (Array.isArray(warnings)) {
+        warnings.push(msg);
+      }
+      continue;
+    }
+    
+    // Guard: ensure transform has required numeric properties
+    const tx = obj.transform.x;
+    const ty = obj.transform.y;
+    const objWidth = obj.transform.width;
+    const objHeight = obj.transform.height;
+    const objRotation = obj.transform.rotation;
+    
+    if (!Number.isFinite(tx) || !Number.isFinite(ty) || 
+        !Number.isFinite(objWidth) || !Number.isFinite(objHeight) || 
+        !Number.isFinite(objRotation)) {
+      const msg = `Invalid transform values for ${obj.name || obj.id} (x=${tx}, y=${ty}, w=${objWidth}, h=${objHeight}, r=${objRotation}), skipping`;
+      console.warn(`⚠️  ${msg}`);
+      if (Array.isArray(warnings)) {
+        warnings.push(msg);
+      }
+      continue;
+    }
+    
     let srcArray = null;
     let srcWidth = 0;
     let srcHeight = 0;
@@ -244,11 +272,9 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
     }
     
     // Calculate transformation
-    const scaleX = (obj.transform.width || srcWidth) / srcWidth;
-    const scaleY = (obj.transform.height || srcHeight) / srcHeight;
-    const rotation = (obj.transform.rotation * Math.PI) / 180;
-    const tx = obj.transform.x;
-    const ty = obj.transform.y;
+    const scaleX = objWidth / srcWidth;
+    const scaleY = objHeight / srcHeight;
+    const rotation = (objRotation * Math.PI) / 180;
     
     // Apply transformation to source data
     const transformedData = applyAffineTransform(

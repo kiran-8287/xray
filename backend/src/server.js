@@ -144,10 +144,12 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         let duplicateCount = 0;
 
         const files = req.files || [];
+        const skippedFiles = [];
         for (const file of files) {
             const itemId = deriveItemId(file.originalname);
             const fileType = classifyFileType(file.originalname);
             if (!fileType) {
+                skippedFiles.push({ filename: file.originalname, reason: "Unrecognized file extension (expected .dump.pgm or .tip)" });
                 continue;
             }
 
@@ -156,6 +158,15 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
             } else {
                 nonDuplicates.push({ file, itemId, fileType });
             }
+        }
+
+        // Report skipped files immediately
+        for (const skipped of skippedFiles) {
+            res.write(JSON.stringify({
+                status: "skipped",
+                filename: skipped.filename,
+                reason: skipped.reason,
+            }) + "\n");
         }
 
         // If no non-duplicate files, send complete line immediately
@@ -206,8 +217,10 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
                         failedCount++;
                     }
 
-                    // Clean up temp file asynchronously
-                    fs.unlink(tempPath).catch(() => {});
+                    // Clean up temp file asynchronously — log warning if cleanup fails
+                    fs.unlink(tempPath).catch((cleanupErr) => {
+                        console.warn(`[process-raw-files] Failed to delete temp file ${tempPath}:`, cleanupErr.message);
+                    });
                 }
             );
         }
@@ -281,7 +294,7 @@ app.get("/api/items/categorized", async (req, res) => {
         categorized[normalizedCategory][subcat] = [];
       }
       
-      if (item.category === "bags") {
+      if (normalizedCategory === "bags") {
         const bagData = await getBagByItemId(item.id);
         if (bagData) {
           item.valid_region_points = bagData.valid_region_points?.simplifiedPoints || bagData.valid_region_points?.points || bagData.valid_region_points;
@@ -455,9 +468,18 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
             }
           }
 
-          // Tags filter - OR logic (layout has ANY of the selected tags)
+          // Tags filter - uses the selected filter logic (same as threats)
           const layoutBagTags = bagObjs.length > 0 ? (bagObjs[0].tags || []) : [];
-          const tagMatch = tags.length === 0 || tags.some(tag => layoutBagTags.includes(tag));
+          let tagMatch = true;
+          if (tags.length > 0) {
+            if (filterLogic === 'or') {
+              // OR: Layout has ANY of the selected tags
+              tagMatch = tags.some(tag => layoutBagTags.includes(tag));
+            } else if (filterLogic === 'and') {
+              // AND: Layout has ALL of the selected tags
+              tagMatch = tags.every(tag => layoutBagTags.includes(tag));
+            }
+          }
           
           // Match if bag matches AND threat matches AND tag matches
           return bagMatch && threatMatch && tagMatch;
@@ -491,6 +513,32 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
 app.post('/api/saved-layouts', async (req, res) => {
     const { id, name, filepath, layout_json } = req.body;
     if (!name || !layout_json) return res.status(400).json({ ok: false, error: 'Missing name or layout_json' });
+    
+    // Validate layout_json structure
+    try {
+        if (!layout_json.objects || typeof layout_json.objects !== 'object') {
+            return res.status(400).json({ ok: false, error: 'Invalid layout_json: missing or invalid objects field' });
+        }
+        
+        // Ensure objects has the expected structure
+        const obj = layout_json.objects;
+        if (!obj.bag && !obj.threats && !obj['non-threats']) {
+            return res.status(400).json({ ok: false, error: 'Invalid layout_json: objects must contain at least one of bag, threats, or non-threats' });
+        }
+        
+        // Validate threats is an array if present
+        if (obj.threats && !Array.isArray(obj.threats)) {
+            return res.status(400).json({ ok: false, error: 'Invalid layout_json: threats must be an array' });
+        }
+        
+        // Validate non-threats is an array if present
+        if (obj['non-threats'] && !Array.isArray(obj['non-threats'])) {
+            return res.status(400).json({ ok: false, error: 'Invalid layout_json: non-threats must be an array' });
+        }
+    } catch (err) {
+        return res.status(400).json({ ok: false, error: `Invalid layout_json structure: ${err.message}` });
+    }
+    
     try {
         const layout = await createSavedLayout({ id, name, filepath, layout_json });
         res.json({ ok: true, layout });
@@ -987,7 +1035,8 @@ app.get("/api/items/:id", async (req, res) => {
       return res.status(404).json({ ok: false, error: "Item not found" });
     }
     
-    if (item.category === "bags") {
+    const normalizedCat = normalizeCategory(item.category);
+    if (normalizedCat === "bags") {
       const bagData = await getBagByItemId(item.id);
       if (bagData) {
         item.validRegionPoints = bagData.valid_region_points?.simplifiedPoints || bagData.valid_region_points?.points || bagData.valid_region_points;

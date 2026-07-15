@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Loader2, CheckCircle2, XCircle, Grid3X3, ChevronLeft, ChevronRight, X, FolderOpen, Download, Edit3 } from "lucide-react";
 import { IoMdPhotos } from "react-icons/io";
 import { API_BASE_URL } from "../config/api";
+import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 import type { Item } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import SyntheticPreview from "../components/collage/SyntheticPreview";
@@ -81,7 +82,7 @@ export default function CollagePage() {
         restoredBags.length === 0 && restoredThreats.length === 0 && restoredOthers.length === 0) {
       (async () => {
         try {
-          const res = await fetch(API_BASE_URL + "/api/items/categorized");
+          const res = await fetchWithTimeout(API_BASE_URL + "/api/items/categorized");
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
           const cat = data.categorized || data;
@@ -168,14 +169,18 @@ export default function CollagePage() {
     }
   }, [locationState]);
 
-  // Persist combinations and failures to sessionStorage
+  // Persist combinations and failures to sessionStorage (only non-empty data)
   useEffect(() => {
     try {
       if (combinations.length > 0) {
         sessionStorage.setItem("collageCombinations", JSON.stringify(combinations));
+      } else {
+        sessionStorage.removeItem("collageCombinations");
       }
       if (failures.length > 0) {
         sessionStorage.setItem("collageFailures", JSON.stringify(failures));
+      } else {
+        sessionStorage.removeItem("collageFailures");
       }
     } catch (err) {
       console.error("Error saving to sessionStorage:", err);
@@ -435,7 +440,7 @@ export default function CollagePage() {
           createdAt: new Date().toISOString(),
         };
         
-        const response = await fetch("http://localhost:8080/api/saved-layouts", {
+        const response = await fetch(`${API_BASE_URL}/api/saved-layouts`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -459,35 +464,43 @@ export default function CollagePage() {
         }));
       }
       
-      setBulkSaveState({
-        status: "success",
-        message: `Successfully saved ${savedCount} workspace${savedCount !== 1 ? "s" : ""}!${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
-        savedCount
-      });
-      
-      // Reset collage state after successful bulk save
-      setCombinations([]);
-      setFailures([]);
-      setSelectedBags([]);
-      setSelectedThreats([]);
-      setSelectedOthers([]);
-      setCurrentPage(0);
-      
-      // Clear persisted storage
-      try {
-        sessionStorage.removeItem("collageCombinations");
-        sessionStorage.removeItem("collageFailures");
-        localStorage.removeItem("selectedBags");
-        localStorage.removeItem("selectedThreats");
-        localStorage.removeItem("selectedOthers");
-      } catch (e) {
-        console.error("Error clearing storage after bulk save:", e);
+      if (failedCount === 0) {
+        setBulkSaveState({
+          status: "success",
+          message: `Successfully saved ${savedCount} workspace${savedCount !== 1 ? "s" : ""}!`,
+          savedCount
+        });
+        
+        // Reset collage state only after fully successful bulk save
+        setCombinations([]);
+        setFailures([]);
+        setSelectedBags([]);
+        setSelectedThreats([]);
+        setSelectedOthers([]);
+        setCurrentPage(0);
+        
+        // Clear persisted storage
+        try {
+          sessionStorage.removeItem("collageCombinations");
+          sessionStorage.removeItem("collageFailures");
+          localStorage.removeItem("selectedBags");
+          localStorage.removeItem("selectedThreats");
+          localStorage.removeItem("selectedOthers");
+        } catch (e) {
+          console.error("Error clearing storage after bulk save:", e);
+        }
+      } else {
+        setBulkSaveState({
+          status: "error",
+          message: `Partially saved: ${savedCount} succeeded, ${failedCount} failed. Your combinations are preserved — please retry.`,
+          savedCount
+        });
       }
     } catch (err) {
       console.error(err);
       setBulkSaveState({
         status: "error",
-        message: "Failed to bulk save workspaces. Please verify backend is running.",
+        message: "Failed to bulk save workspaces. Please verify backend is running. Your combinations are preserved.",
         savedCount
       });
     }
@@ -585,7 +598,7 @@ export default function CollagePage() {
           createdAt: new Date().toISOString(),
         };
         
-        const response = await fetch("http://localhost:8080/api/saved-layouts", {
+        const response = await fetch(`${API_BASE_URL}/api/saved-layouts`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

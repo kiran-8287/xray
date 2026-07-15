@@ -2,6 +2,7 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
 import ValidRegionEditor from "./ValidRegionEditor";
 import { Trash2, Edit3, CheckSquare, Sparkles, Loader2, X, Plus } from "lucide-react";
 import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName, clearCustomSubcategoriesCache } from "../../config/categories";
+import { API_BASE_URL } from "../../config/api";
 import AddSubcategoryModal from "../common/AddSubcategoryModal";
 
 interface UploadFileQueueProps {
@@ -366,7 +367,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     
     // If it's a pre-processed item, clean up the generated files
     if (itemToRemove?.preProcessed && itemToRemove?.itemId) {
-      fetch(`http://localhost:8080/api/temp-files/${itemToRemove.itemId}`, {
+      fetch(`${API_BASE_URL}/api/temp-files/${itemToRemove.itemId}`, {
         method: 'DELETE',
       }).catch(err => {
         console.error('Failed to delete temp files:', err);
@@ -432,7 +433,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
       // Use the pixelDataFilename from the staged item (includes highenrgy/ prefix)
       const pixelDataPath = stagedItem.pixelDataFilename || `${stagedItem.itemId}.npz`;
       
-      const res = await fetch(`http://localhost:8080/api/auto-valid-region`, {
+      const res = await fetch(`${API_BASE_URL}/api/auto-valid-region`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -504,7 +505,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         // Use the pixelDataFilename from the staged item (includes highenrgy/ prefix)
         const pixelDataPath = stagedItem.pixelDataFilename || `${stagedItem.itemId}.npz`;
         
-        const res = await fetch(`http://localhost:8080/api/auto-valid-region`, {
+        const res = await fetch(`${API_BASE_URL}/api/auto-valid-region`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -782,7 +783,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             {staged.map((s, idx) => {
               const file = s.file as File;
               const preview = s.preProcessed
-                ? `http://localhost:8080/data/library_images/${s.filepath}`
+                ? `${API_BASE_URL}/data/library_images/${s.filepath}`
                 : URL.createObjectURL(file);
               const isBags = s.category === "bags";
               const inlineSubOptions = getInlineSubcategoryOptions(s.category);
@@ -1009,7 +1010,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             
             // Clean up files and update session storage
             preProcessedIds.forEach(itemId => {
-              fetch(`http://localhost:8080/api/temp-files/${itemId}`, {
+              fetch(`${API_BASE_URL}/api/temp-files/${itemId}`, {
                 method: 'DELETE',
               }).catch(err => console.error('Failed to delete temp files:', err));
             });
@@ -1040,7 +1041,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   <img
                     src={
                       editDraft.preProcessed
-                        ? `http://localhost:8080/data/library_images/${editDraft.preGeneratedFilepath}`
+                        ? `${API_BASE_URL}/data/library_images/${editDraft.preGeneratedFilepath}`
                         : URL.createObjectURL(editDraft.file as File)
                     }
                     alt={(editDraft.file as File).name}
@@ -1112,7 +1113,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         <ValidRegionEditor
           imageSrc={
             editDraft.preProcessed
-              ? `http://localhost:8080/data/library_images/${editDraft.preGeneratedFilepath}`
+              ? `${API_BASE_URL}/data/library_images/${editDraft.preGeneratedFilepath}`
               : URL.createObjectURL(editDraft.file as File)
           }
           initialPoints={
@@ -1176,7 +1177,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   const prevIdx = previewIndex - 1;
                   const prevItem = staged[prevIdx];
                   const prevPreview = prevItem.preProcessed
-                    ? `http://localhost:8080/data/library_images/${prevItem.preGeneratedFilepath}`
+                    ? `${API_BASE_URL}/data/library_images/${prevItem.preGeneratedFilepath}`
                     : URL.createObjectURL(prevItem.file as File);
                   setPreviewImage(prevPreview);
                   setPreviewFileName((prevItem.file as File).name);
@@ -1198,7 +1199,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   const nextIdx = previewIndex + 1;
                   const nextItem = staged[nextIdx];
                   const nextPreview = nextItem.preProcessed
-                    ? `http://localhost:8080/data/library_images/${nextItem.preGeneratedFilepath}`
+                    ? `${API_BASE_URL}/data/library_images/${nextItem.preGeneratedFilepath}`
                     : URL.createObjectURL(nextItem.file as File);
                   setPreviewImage(nextPreview);
                   setPreviewFileName((nextItem.file as File).name);
@@ -1226,7 +1227,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
               const currentIdx = staged.findIndex(s => {
                 const file = s.file as File;
                 const itemPreview = s.preProcessed
-                  ? `http://localhost:8080/data/library_images/${s.preGeneratedFilepath}`
+                  ? `${API_BASE_URL}/data/library_images/${s.preGeneratedFilepath}`
                   : URL.createObjectURL(file);
                 return itemPreview === previewImage;
               });
