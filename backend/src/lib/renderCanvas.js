@@ -187,8 +187,13 @@ function applyAffineTransform(
 /**
  * Async helper that loads raw pixel arrays and performs per‑pixel attenuation calculation.
  * Returns a PNG buffer of the composited scene.
+ * @param {Array} objects - Scene objects to render
+ * @param {number} width - Canvas width
+ * @param {number} height - Canvas height
+ * @param {string} energyType - "highenrgy" or "lowenergy"
+ * @param {string[]} [warnings] - Optional array to collect warning messages
  */
-export async function renderSceneAsync(objects, width = 800, height = 600, energyType = "highenrgy") {
+export async function renderSceneAsync(objects, width = 800, height = 600, energyType = "highenrgy", warnings = null) {
   // Initialize density buffer with 0 (air)
   const densityBuffer = new Float32Array(width * height);
 
@@ -228,9 +233,13 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
       }
     }
     
-    // If still no data, skip this object
+    // If still no data, skip this object and collect warning
     if (!srcArray) {
-      console.warn(`⚠️  No pixel data or image found for ${obj.name || obj.id}, skipping`);
+      const msg = `No pixel data or image found for ${obj.name || obj.id}, skipping`;
+      console.warn(`⚠️  ${msg}`);
+      if (Array.isArray(warnings)) {
+        warnings.push(msg);
+      }
       continue;
     }
     

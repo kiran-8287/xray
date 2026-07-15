@@ -1164,16 +1164,24 @@ app.post('/api/render-preview', async (req, res) => {
         const flatObjects = [];
         let bagWidth = 800;
         let bagHeight = 600;
+        const missingPixelDataObjs = [];
+        const missingImageObjs = [];
 
         if (objects.bag) {
             const b = objects.bag;
             bagWidth = b.size?.width || 800;
             bagHeight = b.size?.height || 600;
             const item = itemMap.get(b.id);
+            const pixelDataPath = item?.pixel_data_path || null;
+            if (!pixelDataPath && !b.filepath) {
+                missingPixelDataObjs.push(b.id || 'unknown bag');
+            } else if (!pixelDataPath) {
+                missingPixelDataObjs.push(`${b.id || 'bag'} (no pixel data, falls back to PNG)`);
+            }
             flatObjects.push({
                 id: b.id,
                 filepath: b.filepath,
-                pixel_data_path: item?.pixel_data_path || null,
+                pixel_data_path: pixelDataPath,
                 originalPixelValue: b.originalPixelValue,
                 transform: {
                     x: b.center?.x || 0,
@@ -1190,10 +1198,16 @@ app.post('/api/render-preview', async (req, res) => {
             if (!Array.isArray(list)) return;
             for (const obj of list) {
                 const item = itemMap.get(obj.id);
+                const pixelDataPath = item?.pixel_data_path || null;
+                if (!pixelDataPath && !obj.filepath) {
+                    missingPixelDataObjs.push(obj.id || 'unknown');
+                } else if (!pixelDataPath) {
+                    missingPixelDataObjs.push(`${obj.id || 'unknown'} (no pixel data, falls back to PNG)`);
+                }
                 flatObjects.push({
                     id: obj.id,
                     filepath: obj.filepath,
-                    pixel_data_path: item?.pixel_data_path || null,
+                    pixel_data_path: pixelDataPath,
                     originalPixelValue: obj.originalPixelValue,
                     transform: {
                         x: obj.center?.x || 0,
@@ -1214,11 +1228,27 @@ app.post('/api/render-preview', async (req, res) => {
             return res.status(400).json({ ok: false, error: 'No objects to render' });
         }
 
-        // Render using the bag's dimensions as canvas size
-        const pngBuffer = await renderSceneAsync(flatObjects, bagWidth, bagHeight);
+        // Collect warnings during rendering
+        const renderWarnings = [];
+        
+        // Check if there are any objects that have pixel_data_path set
+        const objectsWithData = flatObjects.filter(o => o.pixel_data_path);
+        if (objectsWithData.length === 0 && missingPixelDataObjs.length > 0) {
+            renderWarnings.push('No pixel data files (.npz) found for any objects. Preview may not render correctly.');
+        }
 
-        res.set('Content-Type', 'image/png');
-        res.send(pngBuffer);
+        // Render using the bag's dimensions as canvas size
+        const pngBuffer = await renderSceneAsync(flatObjects, bagWidth, bagHeight, undefined, renderWarnings);
+
+        // Check if ALL objects were skipped (density buffer is all zeros)
+        const isBlank = pngBuffer.length < 500; // Very small buffer = likely blank image
+        
+        res.json({
+            ok: true,
+            warnings: renderWarnings,
+            isBlank,
+            image: pngBuffer.toString('base64'),
+        });
     } catch (err) {
         console.error('[render-preview] Error:', err);
         res.status(500).json({ ok: false, error: String(err) });
