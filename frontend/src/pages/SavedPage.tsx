@@ -50,14 +50,24 @@ function SavedLayoutPreview({ layoutJson }: { layoutJson: any }) {
   const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [isBlank, setIsBlank] = useState(false);
 
   // Fetch rendered preview from backend when layoutJson changes
   useEffect(() => {
-    if (!layoutJson?.objects) return;
+    if (!layoutJson?.objects) {
+      setErrorMessage("No layout data available — cannot render preview.");
+      setLoading(false);
+      return;
+    }
 
     let cancelled = false;
     setLoading(true);
     setPreviewUrl(null);
+    setErrorMessage(null);
+    setWarnings([]);
+    setIsBlank(false);
 
     fetch(`${API_BASE}/api/render-preview`, {
       method: 'POST',
@@ -65,17 +75,33 @@ function SavedLayoutPreview({ layoutJson }: { layoutJson: any }) {
       body: JSON.stringify({ objects: layoutJson.objects }),
     })
       .then(async (res) => {
-        if (!res.ok) throw new Error('Render failed');
-        const blob = await res.blob();
+        if (!res.ok) {
+          const errData = await res.json().catch(() => null);
+          throw new Error(errData?.error || `Render failed (HTTP ${res.status})`);
+        }
+        const data = await res.json();
         if (!cancelled) {
-          const url = URL.createObjectURL(blob);
-          setPreviewUrl(url);
+          if (data.warnings && data.warnings.length > 0) {
+            setWarnings(data.warnings);
+          }
+          if (data.isBlank) {
+            setIsBlank(true);
+            setErrorMessage("Preview rendered as blank — pixel data or images are missing for all objects.");
+          } else if (data.image) {
+            const url = `data:image/png;base64,${data.image}`;
+            setPreviewUrl(url);
+          } else {
+            setErrorMessage("Preview returned no image data.");
+          }
           setLoading(false);
         }
       })
       .catch((err) => {
         console.error('Error rendering preview:', err);
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setErrorMessage(err.message || "Failed to render preview.");
+          setLoading(false);
+        }
       });
 
     return () => {
@@ -102,18 +128,42 @@ function SavedLayoutPreview({ layoutJson }: { layoutJson: any }) {
   }, []);
 
   return (
-    <div ref={previewRef} className="relative w-full h-full overflow-hidden bg-white flex items-center justify-center">
+    <div ref={previewRef} className="relative w-full h-full overflow-hidden bg-white flex flex-col items-center justify-center">
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-muted">
           <Loader2 size={16} className="animate-spin" />
           Rendering preview...
         </div>
       ) : previewUrl ? (
-        <img
-          src={previewUrl}
-          alt="Layout preview"
-          className="max-w-full max-h-full object-contain"
-        />
+        <>
+          <img
+            src={previewUrl}
+            alt="Layout preview"
+            className="max-w-full max-h-full object-contain"
+          />
+          {warnings.length > 0 && (
+            <div className="absolute bottom-0 left-0 right-0 bg-amber-50 border-t border-amber-200 px-3 py-2">
+              <p className="text-[10px] text-amber-800 font-medium">⚠️ Preview warnings:</p>
+              {warnings.map((w, i) => (
+                <p key={i} className="text-[9px] text-amber-700">{w}</p>
+              ))}
+            </div>
+          )}
+        </>
+      ) : errorMessage ? (
+        <div className="flex flex-col items-center justify-center p-4 text-center">
+          <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center mb-2">
+            <span className="text-amber-600 text-lg font-bold">!</span>
+          </div>
+          <p className="text-xs text-amber-800 font-medium">{errorMessage}</p>
+          {warnings.length > 0 && (
+            <div className="mt-2 text-[10px] text-amber-600">
+              {warnings.map((w, i) => (
+                <p key={i}>{w}</p>
+              ))}
+            </div>
+          )}
+        </div>
       ) : (
         <div className="flex items-center justify-center text-muted/40">
           <Grid3X3 size={28} />
@@ -712,84 +762,107 @@ export default function SavedPage() {
                    {/* Right: Annotation Details */}
                    <div className="min-h-0 overflow-y-auto p-5">
                      <div className="space-y-4">
-                  {(selectedLayout.layout_json?.objects?.bag || selectedLayout.layout_json?.objects?.threats?.length > 0 || selectedLayout.layout_json?.objects?.["non-threats"]?.length > 0) && (
-                    <div>
-                      <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Objects in Layout</h3>
-                      <div className="space-y-2">
-                        {getObjects(selectedLayout).map((obj: any, idx: number) => {
-                               // Use center (now relative to bag origin) and size
-                               const transform = obj.center && obj.size ? {
-                                 x: obj.center.x,
-                                 y: obj.center.y,
-                                 width: obj.size.width,
-                                 height: obj.size.height,
-                                 rotation: obj.rotation || 0
-                               } : null;
-                               
-                               return (
-                                 <div key={idx} className="rounded-xl border border-border bg-white p-2.5">
-                                   <div className="flex items-center justify-between mb-1.5">
-                                     <span className="text-xs font-semibold text-ink">{obj.id || obj.name}</span>
-                                     <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
-                                       obj.library === "bag" ? "bg-blue-50 text-blue-700 border-blue-200" :
-                                       obj.library === "threat" ? "bg-rose-50 text-rose-700 border-rose-200" :
-                                       "bg-gray-50 text-gray-600 border-gray-200"
-                                     }`}>
-                                       {obj.library}
-                                     </span>
-                                   </div>
-                                   {obj.subcategory && (
-                                     <div className="text-[10px] text-muted mb-2">
-                                       <span className="font-medium">Subcategory:</span> {obj.subcategory}
-                                     </div>
-                                   )}
-                                   {transform && (
-                                     <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono">
-                                       <div className="bg-surface rounded px-1.5 py-1">
-                                         <span className="text-muted">X:</span> <span className="text-ink">{Math.round(transform.x)}</span>
-                                       </div>
-                                       <div className="bg-surface rounded px-1.5 py-1">
-                                         <span className="text-muted">Y:</span> <span className="text-ink">{Math.round(transform.y)}</span>
-                                       </div>
-                                       <div className="bg-surface rounded px-1.5 py-1">
-                                         <span className="text-muted">W:</span> <span className="text-ink">{Math.round(transform.width)}</span>
-                                       </div>
-                                       <div className="bg-surface rounded px-1.5 py-1">
-                                         <span className="text-muted">H:</span> <span className="text-ink">{Math.round(transform.height)}</span>
-                                       </div>
-                                       <div className="bg-surface rounded px-1.5 py-1 col-span-2">
-                                         <span className="text-muted">Rot:</span> <span className="text-ink">{Math.round(transform.rotation)}°</span>
-                                       </div>
-                                     </div>
-                                   )}
-                                    {/* Show tags for bag objects */}
-                                    {(obj.library || "").toLowerCase() === "bag" && obj.tags && obj.tags.length > 0 && (
-                                      <div className="mt-2 pt-2 border-t border-border">
-                                        <div className="text-[10px] text-muted mb-1 font-medium">Tags:</div>
-                                        <div className="flex flex-wrap gap-1">
-                                          {obj.tags.map((tagSlug: string) => {
-                                            const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                                            return (
-                                              <span
-                                                key={tagSlug}
-                                                className="inline-flex items-center px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-medium"
-                                                title={tagName}
-                                              >
-                                                {tagName}
-                                              </span>
-                                            );
-                                          })}
+                     {(() => {
+                       const layoutObjects = selectedLayout.layout_json?.objects;
+                       if (!layoutObjects) {
+                         return (
+                           <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-center">
+                             <p className="text-xs text-amber-800 font-medium">No layout data available.</p>
+                             <p className="text-[10px] text-amber-600 mt-1">This saved layout contains no object data. Preview cannot be rendered.</p>
+                           </div>
+                         );
+                       }
+                       const objs = getObjects(selectedLayout);
+                       if (objs.length === 0) {
+                         return (
+                           <div>
+                             <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Objects in Layout</h3>
+                             <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-center">
+                               <p className="text-xs text-amber-800 font-medium">No object data found in this saved layout.</p>
+                               <p className="text-[10px] text-amber-600 mt-1">The layout may be corrupted or missing object position data. The preview may not render correctly.</p>
+                             </div>
+                           </div>
+                         );
+                       }
+                       return (
+                         <div>
+                           <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Objects in Layout</h3>
+                           <div className="space-y-2">
+                             {objs.map((obj: any, idx: number) => {
+                                // Use center (now relative to bag origin) and size
+                                const transform = obj.center && obj.size ? {
+                                  x: obj.center.x,
+                                  y: obj.center.y,
+                                  width: obj.size.width,
+                                  height: obj.size.height,
+                                  rotation: obj.rotation || 0
+                                } : null;
+                                
+                                return (
+                                  <div key={idx} className="rounded-xl border border-border bg-white p-2.5">
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className="text-xs font-semibold text-ink">{obj.id || obj.name}</span>
+                                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                                        obj.library === "bag" ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                        obj.library === "threat" ? "bg-rose-50 text-rose-700 border-rose-200" :
+                                        "bg-gray-50 text-gray-600 border-gray-200"
+                                      }`}>
+                                        {obj.library}
+                                      </span>
+                                    </div>
+                                    {obj.subcategory && (
+                                      <div className="text-[10px] text-muted mb-2">
+                                        <span className="font-medium">Subcategory:</span> {obj.subcategory}
+                                      </div>
+                                    )}
+                                    {transform && (
+                                      <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono">
+                                        <div className="bg-surface rounded px-1.5 py-1">
+                                          <span className="text-muted">X:</span> <span className="text-ink">{Math.round(transform.x)}</span>
+                                        </div>
+                                        <div className="bg-surface rounded px-1.5 py-1">
+                                          <span className="text-muted">Y:</span> <span className="text-ink">{Math.round(transform.y)}</span>
+                                        </div>
+                                        <div className="bg-surface rounded px-1.5 py-1">
+                                          <span className="text-muted">W:</span> <span className="text-ink">{Math.round(transform.width)}</span>
+                                        </div>
+                                        <div className="bg-surface rounded px-1.5 py-1">
+                                          <span className="text-muted">H:</span> <span className="text-ink">{Math.round(transform.height)}</span>
+                                        </div>
+                                        <div className="bg-surface rounded px-1.5 py-1 col-span-2">
+                                          <span className="text-muted">Rot:</span> <span className="text-ink">{Math.round(transform.rotation)}°</span>
                                         </div>
                                       </div>
                                     )}
-                                 </div>
-                               );
-                             })}
-                           </div>
-                         </div>
-                       )}
-                     </div>
+                                     {/* Show tags for bag objects */}
+                                     {(obj.library || "").toLowerCase() === "bag" && obj.tags && obj.tags.length > 0 && (
+                                       <div className="mt-2 pt-2 border-t border-border">
+                                         <div className="text-[10px] text-muted mb-1 font-medium">Tags:</div>
+                                         <div className="flex flex-wrap gap-1">
+                                           {obj.tags.map((tagSlug: string) => {
+                                             const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                             return (
+                                               <span
+                                                 key={tagSlug}
+                                                 className="inline-flex items-center px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-medium"
+                                                 title={tagName}
+                                               >
+                                                 {tagName}
+                                               </span>
+                                             );
+                                           })}
+                                         </div>
+                                       </div>
+                                     )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
                    </div>
+                 </div>
                 </div>
               </div>
             </div>
