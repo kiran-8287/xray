@@ -4,6 +4,7 @@ import { Loader2, CheckCircle2, XCircle, Grid3X3, ChevronLeft, ChevronRight, X, 
 import { IoMdPhotos } from "react-icons/io";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
+import { GenerationService } from "../lib/generationService";
 import type { Item } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import SyntheticPreview from "../components/collage/SyntheticPreview";
@@ -18,9 +19,69 @@ export default function CollagePage() {
     | { selectedBags?: Item[]; selectedThreats?: Item[]; selectedOthers?: Item[]; densityPreset?: "empty" | "few" | "filled" }
     | undefined;
 
+  // Selections from library
+  const [selectedBags, setSelectedBags] = useState<Item[]>([]);
+  const [selectedThreats, setSelectedThreats] = useState<Item[]>([]);
+  const [selectedOthers, setSelectedOthers] = useState<Item[]>([]);
+
+  const [combinations, setCombinations] = useState<CombinatorialResult[]>([]);
+  const [failures, setFailures] = useState<FailureLog[]>([]);
+
+  // Generation state from service
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<{ generated: number; total: number } | null>(null);
+
+  const [currentPage, setCurrentPage] = useState(0);
+
+  const [bulkSaveState, setBulkSaveState] = useState<{
+    status: "idle" | "saving" | "success" | "error";
+    message: string;
+    savedCount: number;
+  }>({ status: "idle", message: "", savedCount: 0 });
+
+  // Bulk save confirmation modal state
+  const [showBulkSaveModal, setShowBulkSaveModal] = useState(false);
+
+  // Preview modal state
+  const [selectedCombination, setSelectedCombination] = useState<CombinatorialResult | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [saveImageState, setSaveImageState] = useState<{
+    status: "idle" | "saving" | "success" | "error";
+    message: string;
+    imageUrl: string | null;
+  }>({ status: "idle", message: "", imageUrl: null });
+
+  // Save location modal state
+  const [showSaveLocationModal, setShowSaveLocationModal] = useState(false);
+  const [saveLocationOption, setSaveLocationOption] = useState<"default" | "custom">("default");
+  const [customOutputPath, setCustomOutputPath] = useState("");
+  const [selectedDirHandle, setSelectedDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "single" | "bulk"; saveImages?: boolean } | null>(null);
+
+  // Subscribe to GenerationService for incremental updates
+  useEffect(() => {
+    // Restore from sessionStorage if available (e.g. after page refresh)
+    GenerationService.restoreFromStorage();
+    
+    const unsub = GenerationService.subscribe((state) => {
+      setIsGenerating(state.isGenerating);
+      setGenerationProgress(state.progress);
+      if (state.combinations.length > 0) {
+        setCombinations(state.combinations);
+      }
+      if (state.failures.length > 0) {
+        setFailures(state.failures);
+      }
+    });
+    return unsub;
+  }, []);
+
   // shelf-storage: restore previous state from sessionStorage/localStorage
   // when no fresh locationState is present, with backend fallback for stale item refs
   useEffect(() => {
+    // If generation is already running via service, don't restore from storage
+    if (GenerationService.isGenerating()) return;
+
     if (locationState && locationState.selectedBags && locationState.selectedBags.length > 0) {
       return; // fresh navigation from Library — handled by the locationState effect below
     }
@@ -110,41 +171,6 @@ export default function CollagePage() {
     applyRestore(null, null, null);
   }, []);
 
-  // Selections from library
-  const [selectedBags, setSelectedBags] = useState<Item[]>([]);
-  const [selectedThreats, setSelectedThreats] = useState<Item[]>([]);
-  const [selectedOthers, setSelectedOthers] = useState<Item[]>([]);
-
-  const [combinations, setCombinations] = useState<CombinatorialResult[]>([]);
-  const [failures, setFailures] = useState<FailureLog[]>([]);
-
-  const [currentPage, setCurrentPage] = useState(0);
-
-  const [bulkSaveState, setBulkSaveState] = useState<{
-    status: "idle" | "saving" | "success" | "error";
-    message: string;
-    savedCount: number;
-  }>({ status: "idle", message: "", savedCount: 0 });
-
-  // Bulk save confirmation modal state
-  const [showBulkSaveModal, setShowBulkSaveModal] = useState(false);
-
-  // Preview modal state
-  const [selectedCombination, setSelectedCombination] = useState<CombinatorialResult | null>(null);
-  const [showModal, setShowModal] = useState(false);
-  const [saveImageState, setSaveImageState] = useState<{
-    status: "idle" | "saving" | "success" | "error";
-    message: string;
-    imageUrl: string | null;
-  }>({ status: "idle", message: "", imageUrl: null });
-
-  // Save location modal state
-  const [showSaveLocationModal, setShowSaveLocationModal] = useState(false);
-  const [saveLocationOption, setSaveLocationOption] = useState<"default" | "custom">("default");
-  const [customOutputPath, setCustomOutputPath] = useState("");
-  const [selectedDirHandle, setSelectedDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
-  const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "single" | "bulk"; saveImages?: boolean } | null>(null);
-
   // Whenever new data arrives via location state, persist it
   useEffect(() => {
     if (!locationState || !locationState.selectedBags || locationState.selectedBags.length === 0) {
@@ -211,6 +237,7 @@ export default function CollagePage() {
   };
 
   const handleOpenPreviewModal = (comb: CombinatorialResult) => {
+    if (isGenerating) return; // Lock: don't open modal during generation
     setSelectedCombination(comb);
     setShowModal(true);
     setSaveImageState({ status: "idle", message: "", imageUrl: null });
@@ -472,6 +499,7 @@ export default function CollagePage() {
         });
         
         // Reset collage state only after fully successful bulk save
+        GenerationService.clear();
         setCombinations([]);
         setFailures([]);
         setSelectedBags([]);
@@ -663,6 +691,7 @@ export default function CollagePage() {
       });
       
       // Reset collage state after successful bulk save
+      GenerationService.clear();
       setCombinations([]);
       setFailures([]);
       setSelectedBags([]);
@@ -729,7 +758,7 @@ export default function CollagePage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowBulkSaveModal(true)}
-            disabled={bulkSaveState.status === "saving" || combinations.length === 0}
+            disabled={bulkSaveState.status === "saving" || combinations.length === 0 || isGenerating}
             className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-500 shadow-btn flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             title="Bulk Save All Workspaces"
           >
@@ -872,6 +901,26 @@ export default function CollagePage() {
         </div>
       </div>
 
+      {/* Generation Progress Banner */}
+      {isGenerating && generationProgress && (
+        <div className="mb-6 p-4 rounded-xl border bg-blue-50 border-blue-200 text-blue-800 transition-all duration-300">
+          <div className="flex items-center gap-3">
+            <Loader2 className="animate-spin text-blue-600 shrink-0" size={24} />
+            <div className="flex-1">
+              <p className="font-semibold text-sm">
+                Generating combinations... ({generationProgress.generated} / {generationProgress.total})
+              </p>
+              <div className="mt-2 w-full bg-blue-200 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-blue-600 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${Math.min(100, (generationProgress.generated / generationProgress.total) * 100)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bulk Save Status Banner */}
       {bulkSaveState.status !== "idle" && (
         <div className={`mb-6 p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all duration-300 ${
@@ -907,7 +956,7 @@ export default function CollagePage() {
       )}
 
       {/* Grid */}
-      {combinations.length === 0 && failures.length === 0 ? (
+      {combinations.length === 0 && failures.length === 0 && !isGenerating ? (
         <div className="text-center py-32 px-12 bg-panel rounded-2xl border border-border shadow-card">
           <div className="w-20 h-20 bg-surface rounded-full flex items-center justify-center mx-auto mb-5 border-2 border-border">
             <Grid3X3 size={34} className="text-muted/30" />
@@ -937,6 +986,8 @@ export default function CollagePage() {
               <p>
                 {combinations.length > 0
                   ? `Showing ${currentPage * ITEMS_PER_PAGE + 1}–${Math.min((currentPage + 1) * ITEMS_PER_PAGE, combinations.length)} of ${combinations.length} combinations`
+                  : isGenerating
+                  ? `Generating ${generationProgress?.generated || 0} / ${generationProgress?.total || 0} combinations...`
                   : "0 combinations generated"}
               </p>
             </div>
@@ -951,7 +1002,10 @@ export default function CollagePage() {
                   <button
                     key={comb.id}
                     onClick={() => handleOpenPreviewModal(comb)}
-                    className="bg-panel rounded-2xl border border-border p-4 shadow-card cursor-pointer overflow-hidden group text-left w-full"
+                    disabled={isGenerating}
+                    className={`bg-panel rounded-2xl border border-border p-4 shadow-card cursor-pointer overflow-hidden group text-left w-full ${
+                      isGenerating ? "opacity-70 cursor-not-allowed" : ""
+                    }`}
                   >
                     <SyntheticPreview
                       objects={comb.objects}
