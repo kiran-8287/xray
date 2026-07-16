@@ -5,7 +5,6 @@ import CollagePage from "./pages/CollagePage";
 import CustomizationPage from "./pages/CustomizationPage";
 import LibraryPage from "./pages/LibraryPage";
 import SavedPage from "./pages/SavedPage";
-import HelpMenu from "./components/common/HelpMenu";
 import { UploadProvider } from "./context/UploadContext";
 import { loadCustomSubcategories } from "./config/categories";
 import { GenerationService } from "./lib/generationService";
@@ -123,8 +122,7 @@ function AppLayout() {
             Saved
           </NavLink>
         </div>
-        <HelpMenu />
-      </nav>
+        </nav>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col">

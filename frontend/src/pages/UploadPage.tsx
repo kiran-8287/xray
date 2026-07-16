@@ -91,37 +91,38 @@ export default function UploadPage() {
       setTimeout(() => setDuplicateWarning(null), 5000);
     }
     
-    // Check if any of the new files are raw files
-    const hasRawFiles = uniqueNewFiles.some(
-      (f) => f.name.endsWith(".dump.pgm") || f.name.endsWith(".tip")
-    );
-
-    if (hasRawFiles) {
-      // Clear previous errors/warnings
-      setDuplicateWarning(null);
-      setStreamErrors([]);
-      // Add files to state so UploadFileQueue renders
-      setFiles((prev) => [...prev, ...uniqueNewFiles]);
-      // Route all files (including co-submitted PNGs) to raw processing pipeline
-      processRawFiles(uniqueNewFiles);
+    // Filter files to only allow .dump.pgm and .tip files
+    const validFiles: File[] = [];
+    const invalidFiles: string[] = [];
+    
+    for (const f of uniqueNewFiles) {
+      if (f.name.endsWith(".dump.pgm") || f.name.endsWith(".tip")) {
+        validFiles.push(f);
+      } else {
+        invalidFiles.push(f.name);
+      }
+    }
+    
+    // Show error if any invalid files were found
+    if (invalidFiles.length > 0) {
+      const errorMessage = `Invalid file type(s): ${invalidFiles.slice(0, 5).join(", ")}${invalidFiles.length > 5 ? ` and ${invalidFiles.length - 5} more` : ""}. Only .dump.pgm and .tip files are allowed.`;
+      setValidationMessage(errorMessage);
+      setTimeout(() => setValidationMessage(null), 5000);
+    }
+    
+    // If no valid files, don't proceed
+    if (validFiles.length === 0) {
       return;
     }
-
-    // Existing PNG flow: unchanged
-    setFiles((prev) => [...prev, ...uniqueNewFiles]);
-    const startIdx = staged.length;
-    const newStaged = uniqueNewFiles.map((f) => ({
-      file: f,
-      category: "",
-      subcategory: "",
-      valid_region_points: null,
-    }));
-    setStaged((prev) => [...prev, ...newStaged]);
-    const newIndices = new Set<number>();
-    for (let i = startIdx; i < startIdx + newStaged.length; i++) {
-      newIndices.add(i);
-    }
-    setSelectedForMass(newIndices);
+    
+    // Clear previous errors/warnings
+    setDuplicateWarning(null);
+    setStreamErrors([]);
+    
+    // Add valid files to state so UploadFileQueue renders
+    setFiles((prev) => [...prev, ...validFiles]);
+    // Route all valid files to raw processing pipeline
+    processRawFiles(validFiles);
   };
 
   /**
