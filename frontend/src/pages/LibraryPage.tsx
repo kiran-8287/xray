@@ -5,6 +5,7 @@ import type { Item, CategorizedItems } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
+import { GenerationService } from "../lib/generationService";
 import { getCategoryConfig, normalizeCategoryName, normalizeCategorizedItems, LIBRARIES_UI, getLibrarySubcategories, clearCustomSubcategoriesCache } from "../config/categories";
 import AddSubcategoryModal from "../components/common/AddSubcategoryModal";
 import Pagination from "../components/library/Pagination";
@@ -550,7 +551,7 @@ export default function LibraryPage() {
     }
   };
 
-  const handleGenerateCollage = async () => {
+  const handleGenerateCollage = () => {
     const selectedBags: Item[] = [];
     const selectedThreats: Item[] = [];
     const selectedOthers: Item[] = [];
@@ -570,23 +571,45 @@ export default function LibraryPage() {
       }
     });
 
-    let nextCombinations: CombinatorialResult[] = [];
-    let nextFailures: FailureLog[] = [];
+    if (selectedBags.length === 0) return;
 
-    if (selectedBags.length > 0) {
-      const generated = await handleGenerate();
-      if (generated) {
-        nextCombinations = generated.results;
-        nextFailures = generated.failures;
+    // Set generating state in the UI
+    setIsGenerating(true);
+    setGenerationProgress(`Generating ${kValue} combinations...`);
+
+    // Fetch existing IDs for ID sequencing
+    (async () => {
+      let existingIds: string[] = [];
+      try {
+        const savedRes = await fetch(`${API_BASE_URL}/api/saved-layouts/ids`);
+        if (savedRes.ok) {
+          const savedData = await savedRes.json();
+          if (savedData.ok && Array.isArray(savedData.ids)) {
+            existingIds = savedData.ids;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch saved layout IDs:", err);
       }
-    }
 
-    // Clear selections after generating collage
-    setSelectedItems(new Set());
+      // Start generation via the singleton service — it survives navigation
+      GenerationService.startGeneration({
+        selectedBags,
+        selectedThreats,
+        selectedOthers,
+        kValue,
+        maxThreats,
+        threatDistribution,
+        maxNonThreats,
+        nonThreatDistribution,
+        requireAtLeastOneNonThreat,
+        existingIds,
+      });
 
-    navigate("/collage", {
-      state: { selectedBags, selectedThreats, selectedOthers, combinations: nextCombinations, failures: nextFailures },
-    });
+      // Clear selections and navigate immediately — generation continues in background
+      setSelectedItems(new Set());
+      navigate("/collage");
+    })();
   };
 
   // K-combinations generation handler with Web Worker

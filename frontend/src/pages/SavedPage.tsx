@@ -399,6 +399,8 @@ export default function SavedPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedLayout, setSelectedLayout] = useState<SavedLayout | null>(null);
+  const [integrityIssues, setIntegrityIssues] = useState<Map<string, any[]>>(new Map());
+  const [integrityLoading, setIntegrityLoading] = useState(false);
 
   // Advanced filter state
   const [selectedBagSubcategories, setSelectedBagSubcategories] = useState<string[]>([]);
@@ -461,6 +463,34 @@ export default function SavedPage() {
   useEffect(() => {
     loadLayouts(page);
   }, [page]);
+
+  // Check data integrity when layouts change
+  useEffect(() => {
+    if (layouts.length === 0) return;
+    
+    const checkIntegrity = async () => {
+      setIntegrityLoading(true);
+      try {
+        const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/integrity`);
+        const data = await res.json();
+        if (data.ok) {
+          const issuesMap = new Map();
+          for (const result of data.results) {
+            if (result.hasIssues) {
+              issuesMap.set(result.layoutId, result.issues);
+            }
+          }
+          setIntegrityIssues(issuesMap);
+        }
+      } catch (err) {
+        console.error('Failed to check integrity:', err);
+      } finally {
+        setIntegrityLoading(false);
+      }
+    };
+    
+    checkIntegrity();
+  }, [layouts.length]);
 
   const getObjects = (layout: SavedLayout): LayoutObject[] => {
     try {
@@ -697,17 +727,28 @@ export default function SavedPage() {
                       ? bagTags.map((tag: string) => tag.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')).join(", ")
                       : "—";
 
+                    const layoutIssues = integrityIssues.get(layout.id);
+                    
                     return (
                       <tr
                         key={layout.id}
                         onClick={() => setSelectedLayout(layout)}
-                        className="cursor-pointer hover:bg-surface/50 transition-colors even:bg-surface/20"
+                        className={`cursor-pointer hover:bg-surface/50 transition-colors even:bg-surface/20 ${
+                          layoutIssues ? 'bg-amber-50/50' : ''
+                        }`}
                       >
                         <td className="py-3 px-4 text-sm font-mono text-muted whitespace-nowrap">
                           {((pagination?.page || 1) - 1) * pageSize + idx + 1}
                         </td>
                         <td className="py-3 px-4 whitespace-nowrap">
-                          <span className="text-sm font-mono text-accent-sky font-medium">{layout.id}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-mono text-accent-sky font-medium">{layout.id}</span>
+                            {layoutIssues && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200" title={`${layoutIssues.length} issue(s) found`}>
+                                ⚠️ {layoutIssues.length}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-4 whitespace-nowrap">
                           <span className="text-sm text-ink">{bagName}</span>

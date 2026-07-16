@@ -263,7 +263,7 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
     
     // If still no data, skip this object and collect warning
     if (!srcArray) {
-      const msg = `No pixel data or image found for ${obj.name || obj.id}, skipping`;
+      const msg = `No pixel data or image found for ${obj.name || obj.id}`;
       console.warn(`⚠️  ${msg}`);
       if (Array.isArray(warnings)) {
         warnings.push(msg);

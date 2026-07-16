@@ -1184,6 +1184,77 @@ app.post("/api/render-and-save-collage-both", async (req, res) => {
     }
 });
 
+// Check data integrity of saved layouts (which items/pixel data are missing)
+app.get('/api/saved-layouts/integrity', async (_req, res) => {
+  try {
+    const [layouts, items] = await Promise.all([
+      getSavedLayouts(),
+      getItems()
+    ]);
+    
+    const itemMap = new Map(items.map(i => [i.id, i]));
+    const results = [];
+    
+    for (const layout of layouts) {
+      const issues = [];
+      const objects = layout.layout_json?.objects || {};
+      const allObjects = [
+        objects.bag && { ...objects.bag, library: 'bag' },
+        ...(objects.threats || []).map(t => ({ ...t, library: 'threat' })),
+        ...(objects['non-threats'] || []).map(n => ({ ...n, library: 'non-threat' }))
+      ].filter(Boolean);
+      
+      for (const obj of allObjects) {
+        const item = itemMap.get(obj.id);
+        if (!item) {
+          issues.push({
+            objectId: obj.id,
+            objectLibrary: obj.library,
+            issue: 'item_deleted',
+            message: `Item ${obj.id} not found in library`
+          });
+        } else if (!item.pixel_data_path) {
+          issues.push({
+            objectId: obj.id,
+            objectLibrary: obj.library,
+            issue: 'no_pixel_data',
+            message: `Item ${obj.id} has no pixel data`
+          });
+        } else {
+          // Check if pixel data file exists
+          const pixelDataPath = item.pixel_data_path;
+          const highEnergyPath = path.join(pixelDataRoot, pixelDataPath);
+          const lowEnergyPath = path.join(pixelDataRoot, pixelDataPath.replace(/^highenrgy[\\/]/, 'lowenergy/'));
+          
+          try {
+            await fs.access(highEnergyPath);
+          } catch {
+            issues.push({
+              objectId: obj.id,
+              objectLibrary: obj.library,
+              issue: 'pixel_data_missing',
+              message: `Pixel data file not found: ${pixelDataPath}`
+            });
+          }
+        }
+      }
+      
+      results.push({
+        layoutId: layout.id,
+        layoutName: layout.name,
+        hasIssues: issues.length > 0,
+        issues,
+        objectCount: allObjects.length
+      });
+    }
+    
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error('[integrity] Error:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 // Render a preview image from a saved layout using real pixel data (I1*I2/65535)
 app.post('/api/render-preview', async (req, res) => {
     try {

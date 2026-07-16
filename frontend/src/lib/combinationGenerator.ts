@@ -12,6 +12,9 @@ import type { Point } from "../types/geometry";
 const CANVAS_W = 800;
 const CANVAS_H = 600;
 
+// Batch size for incremental generation callbacks
+const INCREMENTAL_BATCH_SIZE = 5;
+
 // Performance optimization: Cache for transformed valid regions
 const validRegionCache = new Map<string, Point[]>();
 const CACHE_MAX_SIZE = 100;
@@ -1424,6 +1427,397 @@ export async function generateCombinations(
     avgTimePerCombo: results.length > 0 ? `${(elapsed / results.length).toFixed(2)}ms` : 'N/A'
   });
   
+  return { results, failures };
+}
+
+/**
+ * Generate K combinations with incremental batch callbacks.
+ * Same as generateCombinations but calls onBatch every INCREMENTAL_BATCH_SIZE combos.
+ * This allows the UI to render combinations progressively as they're generated.
+ */
+export async function generateCombinationsIncremental(
+  bags: Item[],
+  threats: Item[],
+  nonThreats: Item[],
+  k: number,
+  onBatch: (batch: CombinatorialResult[], progress: { generated: number; total: number }) => void,
+  threatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 },
+  nonThreatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 },
+  requireAtLeastOneNonThreat: boolean = false,
+  existingIds: string[] = []
+): Promise<GenerationResult> {
+  const startTime = Date.now();
+  
+  if (bags.length === 0) {
+    console.log(`[CombinationGenerator] No bags provided, exiting early`);
+    return { results: [], failures: [] };
+  }
+  if (k <= 0) {
+    console.log(`[CombinationGenerator] k <= 0, exiting early`);
+    return { results: [], failures: [] };
+  }
+  
+  console.log(`[CombinationGenerator] Starting incremental generation:`, {
+    k,
+    bags: bags.length,
+    threats: threats.length,
+    nonThreats: nonThreats.length,
+    existingIdsCount: existingIds.length
+  });
+
+  // Validate distributions
+  const hasValidThreatDist = Object.values(threatDistribution).some(v => v > 0);
+  const hasValidNonThreatDist = Object.values(nonThreatDistribution).some(v => v > 0);
+  
+  if (!hasValidThreatDist && threats.length > 0) {
+    threatDistribution = { 1: 25, 2: 25, 3: 25, 4: 25 };
+  }
+  if (!hasValidNonThreatDist && nonThreats.length > 0) {
+    nonThreatDistribution = { 1: 25, 2: 25, 3: 25, 4: 25 };
+  }
+
+  const results: CombinatorialResult[] = [];
+  const failures: FailureLog[] = [];
+  const seenFailures = new Set<string>();
+  const usedIds = new Set<string>(existingIds);
+
+  type BagEntry = {
+    bag: Item;
+    hasValidRegion: boolean;
+    usageCount: number;
+    isExhausted: boolean;
+  };
+
+  const bagEntries: BagEntry[] = [];
+  for (const bag of bags) {
+    const hasValidRegion = !!(bag.valid_region_points && (Array.isArray(bag.valid_region_points) ? bag.valid_region_points.length > 0 : true));
+    bagEntries.push({ bag, hasValidRegion, usageCount: 0, isExhausted: false });
+  }
+
+  function selectWeightedBag(): BagEntry | null {
+    const available = bagEntries.filter(p => !p.isExhausted);
+    if (available.length === 0) return null;
+    const maxUsage = Math.max(...available.map(p => p.usageCount), 1);
+    let totalWeight = 0;
+    const weighted = available.map(p => {
+      const weight = maxUsage - p.usageCount + 1;
+      totalWeight += weight;
+      return { entry: p, weight, cumulative: totalWeight };
+    });
+    const random = Math.random() * totalWeight;
+    for (const w of weighted) {
+      if (random <= w.cumulative) return w.entry;
+    }
+    return available[0];
+  }
+
+  /**
+   * Try to generate one combination for a bag entry (for clean combos fallback)
+   */
+  function tryGenerateOne(entry: BagEntry): CombinatorialResult | null {
+    if (!entry.hasValidRegion) {
+      entry.isExhausted = true;
+      const failureKey = `${entry.bag.id}-novalidregion`;
+      if (!seenFailures.has(failureKey)) {
+        seenFailures.add(failureKey);
+        failures.push({
+          bagName: entry.bag.name,
+          bagId: entry.bag.id,
+          threatName: "N/A",
+          threatId: "N/A",
+          reason: `Bag "${entry.bag.name}" has no valid region defined — cannot place any items`,
+          expected: 1,
+          actual: 0,
+        });
+      }
+      return null;
+    }
+
+    if (threats.length > 0) {
+      const targetByCount: Record<number, { min: number; target: number; max: number }> = {};
+      const totalWeight = Object.values(threatDistribution).reduce((sum, w) => sum + w, 0);
+      const tolerance = 0.05;
+      for (const [count, weight] of Object.entries(threatDistribution)) {
+        const countNum = parseInt(count);
+        if (countNum <= threats.length && weight > 0) {
+          const target = Math.round((weight / totalWeight) * 1);
+          targetByCount[countNum] = {
+            min: Math.max(0, Math.floor(target * (1 - tolerance))),
+            target,
+            max: Math.ceil(target * (1 + tolerance))
+          };
+        }
+      }
+      const { results: placements, failure } = generateMultiThreatPlacements(
+        entry.bag, threats, targetByCount, nonThreats, nonThreatDistribution, requireAtLeastOneNonThreat, usedIds
+      );
+      if (placements.length > 0) {
+        entry.usageCount++;
+        return placements[0];
+      } else {
+        entry.isExhausted = true;
+        if (failure) {
+          const failureKey = `${entry.bag.id}-multi-threat`;
+          if (!seenFailures.has(failureKey)) {
+            seenFailures.add(failureKey);
+            failures.push(failure);
+          }
+        }
+        return null;
+      }
+    } else {
+      const placements = generateCleanCombinations(entry.bag, 1, nonThreats, nonThreatDistribution, requireAtLeastOneNonThreat, usedIds);
+      if (placements.length > 0) {
+        entry.usageCount++;
+        return placements[0];
+      } else {
+        entry.isExhausted = true;
+        return null;
+      }
+    }
+  }
+
+  const maxConsecutiveFailures = bagEntries.length * 3;
+
+  // Pre-calculate target distribution
+  const targetByCount: Record<number, { min: number; target: number; max: number }> = {};
+  const distributionWeights: Record<number, number> = {};
+  if (threats.length > 0) {
+    const totalWeight = Object.values(threatDistribution).reduce((sum, w) => sum + w, 0);
+    const tolerance = 0.05;
+    const targets: { count: number; min: number; target: number; max: number; weight: number }[] = [];
+    for (const [count, weight] of Object.entries(threatDistribution)) {
+      const countNum = parseInt(count);
+      if (countNum <= threats.length && weight > 0) {
+        const target = Math.round((weight / totalWeight) * k);
+        targets.push({
+          count: countNum,
+          min: Math.max(0, Math.floor(target * (1 - tolerance))),
+          target,
+          max: Math.ceil(target * (1 + tolerance)),
+          weight
+        });
+      }
+    }
+    for (const t of targets) {
+      if (t.target > 0) {
+        targetByCount[t.count] = { min: t.min, target: t.target, max: t.max };
+        distributionWeights[t.count] = t.weight;
+      }
+    }
+  }
+
+  if (threats.length > 0 && Object.keys(targetByCount).length > 0) {
+    let remainingByCount: Record<number, number> = {};
+    let totalRemaining = 0;
+    let totalMax = 0;
+    for (const bounds of Object.values(targetByCount)) totalMax += bounds.max;
+    const scale = Math.min(1, k / totalMax);
+    for (const [countStr, bounds] of Object.entries(targetByCount)) {
+      const countNum = parseInt(countStr);
+      const capped = Math.min(bounds.max, Math.max(bounds.min || 0, Math.round(bounds.max * scale)));
+      remainingByCount[countNum] = capped;
+      totalRemaining += capped;
+    }
+    if (totalRemaining < k && Object.keys(remainingByCount).length > 0) {
+      const deficit = k - totalRemaining;
+      const totalWeight = Object.values(distributionWeights).reduce((s, w) => s + w, 0);
+      const counts = Object.keys(remainingByCount).map(Number);
+      for (const countNum of counts) {
+        const weight = distributionWeights[countNum] || 0;
+        const extra = Math.round((weight / totalWeight) * deficit);
+        remainingByCount[countNum] += extra;
+        totalRemaining += extra;
+      }
+      if (totalRemaining > k) {
+        const sorted = counts.sort((a, b) => (distributionWeights[b] || 0) - (distributionWeights[a] || 0));
+        for (const countNum of sorted) {
+          const excess = totalRemaining - k;
+          const canRemove = Math.min(excess, remainingByCount[countNum] - (targetByCount[countNum]?.min || 0));
+          if (canRemove > 0) {
+            remainingByCount[countNum] -= canRemove;
+            totalRemaining -= canRemove;
+          }
+          if (totalRemaining <= k) break;
+        }
+      }
+    }
+
+    const consecutiveFailuresByCount: Record<number, number> = {};
+    const exhaustedCount = new Set<number>();
+    const maxConsecutivePerCount = Math.max(10, Math.ceil(k / 10));
+    let attemptsWithoutProgress = 0;
+    const maxAttemptsWithoutProgress = Math.min(5000, Math.max(k * 3, 1000));
+    let lastBatchIndex = 0;
+
+    while (results.length < k && totalRemaining > 0 && attemptsWithoutProgress < maxAttemptsWithoutProgress) {
+      attemptsWithoutProgress++;
+      const entry = selectWeightedBag();
+      if (!entry) break;
+      if (!entry.hasValidRegion) { entry.isExhausted = true; continue; }
+
+      const activeCounts = Object.keys(remainingByCount)
+        .map(Number)
+        .filter(c => !exhaustedCount.has(c) && (remainingByCount[c] || 0) > 0);
+      if (activeCounts.length === 0) break;
+
+      let selectionTotalWeight = 0;
+      const selectionWeights: { count: number; weight: number; cumulative: number }[] = [];
+      for (const countNum of activeCounts) {
+        const remaining = remainingByCount[countNum] || 0;
+        const distWeight = distributionWeights[countNum] || 1;
+        const weight = remaining * distWeight;
+        selectionTotalWeight += weight;
+        selectionWeights.push({ count: countNum, weight, cumulative: selectionTotalWeight });
+      }
+      const selectionRandom = Math.random() * selectionTotalWeight;
+      let selectedCount = activeCounts[0];
+      for (const sw of selectionWeights) {
+        if (selectionRandom <= sw.cumulative) { selectedCount = sw.count; break; }
+      }
+
+      const selectedThreats = shuffleArray(threats).slice(0, selectedCount);
+      const bagObj = createBagSceneObject(entry.bag);
+      const placedThreats: { item: Item; x: number; y: number; rotation: number }[] = [];
+      let placementFailed = false;
+      const bagThreatPositions = new Map<string, Set<string>>();
+      const threatObjs: SceneObject[] = [];
+
+      for (const threat of selectedThreats) {
+        const placement = generateSingleThreatPlacement(entry.bag, threat, bagObj, entry.bag.id, bagThreatPositions, threatObjs);
+        if (!placement) { placementFailed = true; break; }
+        placedThreats.push({ item: threat, ...placement });
+      }
+
+      if (placementFailed) {
+        consecutiveFailuresByCount[selectedCount] = (consecutiveFailuresByCount[selectedCount] || 0) + 1;
+        if (consecutiveFailuresByCount[selectedCount] >= maxConsecutivePerCount && !exhaustedCount.has(selectedCount)) {
+          exhaustedCount.add(selectedCount);
+          const failedRemaining = remainingByCount[selectedCount] || 0;
+          delete remainingByCount[selectedCount];
+          totalRemaining -= failedRemaining;
+          if (failedRemaining > 0 && activeCounts.length > 1) {
+            const otherCounts = activeCounts.filter(c => c !== selectedCount);
+            const otherTotalWeight = otherCounts.reduce((s, c) => s + (distributionWeights[c] || 1), 0);
+            if (otherTotalWeight > 0) {
+              for (const otherCount of otherCounts) {
+                const share = Math.round((failedRemaining * (distributionWeights[otherCount] || 1)) / otherTotalWeight);
+                if (share > 0) { remainingByCount[otherCount] = (remainingByCount[otherCount] || 0) + share; totalRemaining += share; }
+              }
+              if (totalRemaining > k - results.length) {
+                const excess = totalRemaining - (k - results.length);
+                const sortedOthers = [...otherCounts].sort((a, b) => (remainingByCount[b] || 0) - (remainingByCount[a] || 0));
+                let trimmed = 0;
+                for (const c of sortedOthers) {
+                  const canTrim = Math.min(excess - trimmed, remainingByCount[c] || 0);
+                  if (canTrim > 0) { remainingByCount[c] = (remainingByCount[c] || 0) - canTrim; totalRemaining -= canTrim; trimmed += canTrim; }
+                  if (trimmed >= excess) break;
+                }
+              }
+            }
+            const failureKey = `${entry.bag.id}-redistribute-${selectedCount}`;
+            if (!seenFailures.has(failureKey)) {
+              seenFailures.add(failureKey);
+              failures.push({
+                bagName: entry.bag.name, bagId: entry.bag.id,
+                threatName: threats.map(t => t.name).join(", "), threatId: threats.map(t => t.id).join(","),
+                reason: `Redistributed ${failedRemaining} remaining combos from ${selectedCount}-threat count to other counts`,
+                expected: failedRemaining, actual: 0,
+              });
+            }
+          }
+        }
+        continue;
+      }
+
+      for (let i = 0; i < placedThreats.length; i++) {
+        const pt = placedThreats[i];
+        threatObjs.push(createThreatSceneObject(pt.item, pt.x, pt.y, pt.rotation, i + 1));
+      }
+
+      let nonThreatPositions: { x: number; y: number; rotation: number }[] | null = [];
+      let selectedNonThreats: Item[] = [];
+      if (nonThreats.length > 0) {
+        const nonThreatCount = pickNonThreatCountByDistribution(nonThreatDistribution, nonThreats.length, requireAtLeastOneNonThreat);
+        selectedNonThreats = shuffleArray(nonThreats).slice(0, nonThreatCount);
+      }
+      if (selectedNonThreats.length > 0) {
+        nonThreatPositions = tryPlaceNonThreats(selectedNonThreats, bagObj, threatObjs);
+        if (!nonThreatPositions) { consecutiveFailuresByCount[selectedCount] = (consecutiveFailuresByCount[selectedCount] || 0) + 1; continue; }
+      }
+
+      const objects: SceneObject[] = [bagObj];
+      let layer = 1;
+      selectedNonThreats.forEach((item, idx) => {
+        const ntObj = createNonThreatSceneObject(item, nonThreatPositions![idx].x, nonThreatPositions![idx].y, nonThreatPositions![idx].rotation, layer++);
+        objects.push(ntObj);
+      });
+      for (const tObj of threatObjs) objects.push({ ...tObj, layer: layer++ });
+
+      const generatedId = generateSynthesizedId(entry.bag.id, Array.from(usedIds));
+      usedIds.add(generatedId.id);
+      results.push({
+        id: generatedId.id, bag: entry.bag,
+        threats: placedThreats.map(pt => pt.item),
+        others: selectedNonThreats, objects,
+      });
+
+      remainingByCount[selectedCount] = (remainingByCount[selectedCount] || 0) - 1;
+      totalRemaining--;
+      entry.usageCount++;
+      attemptsWithoutProgress = 0;
+      consecutiveFailuresByCount[selectedCount] = 0;
+
+      // Emit batch callback every INCREMENTAL_BATCH_SIZE combos
+      if (results.length - lastBatchIndex >= INCREMENTAL_BATCH_SIZE) {
+        const batch = results.slice(lastBatchIndex);
+        lastBatchIndex = results.length;
+        onBatch(batch, { generated: results.length, total: k });
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+
+    // Emit any remaining results as final batch
+    if (lastBatchIndex < results.length) {
+      const batch = results.slice(lastBatchIndex);
+      onBatch(batch, { generated: results.length, total: k });
+    }
+  } else {
+    let consecutiveFailures = 0;
+    let lastBatchIndex = 0;
+    while (results.length < k && consecutiveFailures < maxConsecutiveFailures) {
+      const entry = selectWeightedBag();
+      if (!entry) break;
+      const combo = tryGenerateOne(entry);
+      if (combo) {
+        results.push(combo);
+        consecutiveFailures = 0;
+
+        // Emit batch callback every INCREMENTAL_BATCH_SIZE combos
+        if (results.length - lastBatchIndex >= INCREMENTAL_BATCH_SIZE) {
+          const batch = results.slice(lastBatchIndex);
+          lastBatchIndex = results.length;
+          onBatch(batch, { generated: results.length, total: k });
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+      } else {
+        consecutiveFailures++;
+      }
+    }
+    // Emit any remaining results as final batch
+    if (lastBatchIndex < results.length) {
+      const batch = results.slice(lastBatchIndex);
+      onBatch(batch, { generated: results.length, total: k });
+    }
+  }
+
+  const endTime = Date.now();
+  const elapsed = endTime - startTime;
+  console.log(`[CombinationGenerator] Incremental completed in ${elapsed}ms`, {
+    requested: k, generated: results.length, failures: failures.length,
+    avgTimePerCombo: results.length > 0 ? `${(elapsed / results.length).toFixed(2)}ms` : 'N/A'
+  });
+
   return { results, failures };
 }
 
