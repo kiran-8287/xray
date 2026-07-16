@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "dev": "node --max-old-space-size=4096 --watch src/server.js",
+    "start": "node --max-old-space-size=4096 src/server.js"
   },
   "dependencies": {
     "jimp": "^0.22.12",
