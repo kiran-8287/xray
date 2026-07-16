@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Image, AlertTriangle, CheckCircle2, X, XCircle, Trash2, Loader2 } from "lucide-react";
 import type { Item, CategorizedItems } from "../types/library";
@@ -7,6 +7,7 @@ import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 import { getCategoryConfig, normalizeCategoryName, normalizeCategorizedItems, LIBRARIES_UI, getLibrarySubcategories, clearCustomSubcategoriesCache } from "../config/categories";
 import AddSubcategoryModal from "../components/common/AddSubcategoryModal";
+import Pagination from "../components/library/Pagination";
 
 // Use centralized library definitions
 const LIBRARIES = LIBRARIES_UI;
@@ -24,6 +25,7 @@ type ConfirmDialog = { message: string; onConfirm: () => void; onCancel: () => v
 export default function LibraryPage() {
   const navigate = useNavigate();
   const [categorizedItems, setCategorizedItems] = useState<CategorizedItems>({});
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem("selectedItemIds");
@@ -35,6 +37,8 @@ export default function LibraryPage() {
   const [activeCategory, setActiveCategory] = useState<string>("bags");
   const [activeSubcategory, setActiveSubcategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const ITEMS_PER_PAGE = 50;
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog>(null);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
@@ -203,49 +207,86 @@ export default function LibraryPage() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("selectedItemIds", JSON.stringify(Array.from(selectedItems)));
+    try {
+      localStorage.setItem("selectedItemIds", JSON.stringify(Array.from(selectedItems)));
+    } catch (e) {
+      // localStorage may be full or unavailable - silently skip
+    }
   }, [selectedItems]);
 
   const fetchCategorizedItems = async () => {
     try {
-      // Check for recently refreshed data from upload
-      const cachedData = sessionStorage.getItem("refreshedCategorizedItems");
-      if (cachedData) {
-        sessionStorage.removeItem("refreshedCategorizedItems");
-        const data = JSON.parse(cachedData);
-        const merged = normalizeCategorizedItems(data.categorized || data);
-        setCategorizedItems(merged);
-        if (!Object.keys(merged).includes(activeCategory)) {
-          setActiveCategory(Object.keys(merged)[0] || "bags");
-          setActiveSubcategory("all");
-        }
-        return;
+      setIsLoading(true);
+      // Clear any stale sessionStorage cache — always do a fresh full paginated fetch
+      sessionStorage.removeItem("refreshedCategorizedItems");
+
+      // First, determine total pages by fetching page 1
+      const BATCH_SIZE = 500;
+      const firstRes = await fetchWithTimeout(
+        `${API_BASE_URL}/api/items/categorized?page=1&limit=${BATCH_SIZE}`
+      );
+      const firstData = await firstRes.json();
+      
+      if (!firstData.ok) {
+        throw new Error(firstData.error || "Failed to fetch items");
       }
 
-      // Request paginated data - 1000 items per page for smooth virtualization
-      const res = await fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?limit=1000`);
-      const data = await res.json();
-      if (data.ok) {
-        const merged = normalizeCategorizedItems(data.categorized);
-        setCategorizedItems(merged);
-        if (!Object.keys(merged).includes(activeCategory)) {
-          setActiveCategory(Object.keys(merged)[0] || "bags");
-          setActiveSubcategory("all");
+      const totalItems = firstData.pagination?.totalItems || 0;
+      const totalPages = firstData.pagination?.totalPages || 1;
+      
+      // Build an array of page numbers to fetch
+      const pageNumbers = [1];
+      for (let i = 2; i <= totalPages; i++) {
+        pageNumbers.push(i);
+      }
+
+      // Fetch all remaining pages in parallel
+      const pageFetches = pageNumbers.slice(1).map(page =>
+        fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?page=${page}&limit=${BATCH_SIZE}`)
+          .then(res => res.json())
+      );
+
+      const allResponses = [firstData, ...(await Promise.all(pageFetches))];
+      
+      // Merge all categorized items
+      const mergedCategorized: CategorizedItems = {};
+      for (const data of allResponses) {
+        if (!data.ok) continue;
+        const batchCategorized = normalizeCategorizedItems(data.categorized) as CategorizedItems;
+        for (const [category, subcats] of Object.entries(batchCategorized)) {
+          if (!mergedCategorized[category]) {
+            mergedCategorized[category] = {};
+          }
+          const subcatsObj = subcats as Record<string, Item[]>;
+          for (const [subcat, items] of Object.entries(subcatsObj)) {
+            if (!mergedCategorized[category][subcat]) {
+              mergedCategorized[category][subcat] = [];
+            }
+            mergedCategorized[category][subcat].push(...items);
+          }
         }
-        
-        // Show notification if library is large
-        const totalItems = data.pagination?.totalItems || 0;
-        if (totalItems > 1000) {
-          showNotification("info", `Library loaded: ${totalItems} items total. Showing first 1000.`, 6000);
-        }
+      }
+
+      setCategorizedItems(mergedCategorized);
+      
+      if (!Object.keys(mergedCategorized).includes(activeCategory)) {
+        setActiveCategory(Object.keys(mergedCategorized)[0] || "bags");
+        setActiveSubcategory("all");
+      }
+      
+      // Show notification if library is large
+      if (totalItems > 500) {
+        showNotification("info", `Library loaded: ${totalItems} items total.`, 5000);
       }
     } catch (err) {
       console.error("Failed to fetch categorized items:", err);
       showNotification("error", "Unable to load library items.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const getDisplayItems = (): Item[] => {
+  const displayedItems = useMemo((): Item[] => {
     const subcats = categorizedItems[activeCategory] || {};
     const baseItems = activeSubcategory === "all" ? Object.values(subcats).flat() : subcats[activeSubcategory] || [];
     const query = searchQuery.trim().toLowerCase();
@@ -255,7 +296,24 @@ export default function LibraryPage() {
         .map((value) => String(value || "").toLowerCase())
         .some((value) => value.includes(query));
     });
+  }, [categorizedItems, activeCategory, activeSubcategory, searchQuery]);
+
+  const totalPages = useMemo(() => Math.ceil(displayedItems.length / ITEMS_PER_PAGE), [displayedItems.length]);
+
+  const paginatedItems = useMemo(() => displayedItems.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  ), [displayedItems, currentPage, ITEMS_PER_PAGE]);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  // Reset page to 1 when category, subcategory, or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeCategory, activeSubcategory, searchQuery]);
 
   const toggleItemSelection = (itemId: string) => {
     setSelectedItems((prevSelected) => {
@@ -702,77 +760,58 @@ export default function LibraryPage() {
         sessionStorage.setItem("collageFailures", JSON.stringify(failures));
       }
     } catch (err) {
-      console.error("Error saving to sessionStorage:", err);
+      // Silently ignore storage quota exceeded - expected with large datasets
+      if (err instanceof DOMException && err.name === "QuotaExceededError") {
+        console.warn("Storage quota exceeded for sessionStorage - this is expected with large datasets");
+      } else {
+        console.error("Error saving to sessionStorage:", err);
+      }
     }
   }, [combinations, failures]);
 
   const subcategoriesData = categorizedItems[activeCategory] || {};
-  const displayedItems = getDisplayItems();
   const activeCategoryConfig = getCategoryConfig(activeCategory);
-  const totalCategoryItemsCount = Object.values(subcategoriesData).flat().length;
+  const totalCategoryItemsCount = useMemo(() => Object.values(subcategoriesData).flat().length, [subcategoriesData]);
 
-  // Calculate selected non-threat count for conditional UI rendering
-  const selectedNonThreatCount = Array.from(selectedItems).filter(itemId => {
-    for (const subcats of Object.values(categorizedItems)) {
-      for (const items of Object.values(subcats as Record<string, Item[]>)) {
-        const match = (items as Item[]).find((item) => item.id === itemId);
-        if (match) {
-          const normalizedCategory = normalizeCategoryName(match.category);
-          if (normalizedCategory !== "bags" && normalizedCategory !== "threats") {
-            return true;
-          }
-          return false;
+  // Build a lookup map for item categories to avoid repeated nested iteration
+  const itemCategoryMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [cat, subcats] of Object.entries(categorizedItems)) {
+      const subcatsObj = subcats as Record<string, Item[]>;
+      for (const items of Object.values(subcatsObj)) {
+        for (const item of items) {
+          map.set(item.id, cat);
         }
       }
     }
-    return false;
-  }).length;
+    return map;
+  }, [categorizedItems]);
 
-  // Calculate selected threat count for validation
-  const selectedThreatCount = Array.from(selectedItems).filter(itemId => {
-    for (const subcats of Object.values(categorizedItems)) {
-      for (const items of Object.values(subcats as Record<string, Item[]>)) {
-        const match = (items as Item[]).find((item) => item.id === itemId);
-        if (match) {
-          const normalizedCategory = normalizeCategoryName(match.category);
-          if (normalizedCategory === "threats") {
-            return true;
-          }
-          return false;
-        }
-      }
+  // Calculate selection counts using the lookup map
+  const { selectedNonThreatCount, selectedThreatCount, selectedBagCount } = useMemo(() => {
+    let nonThreat = 0;
+    let threat = 0;
+    let bag = 0;
+    for (const itemId of selectedItems) {
+      const cat = itemCategoryMap.get(itemId);
+      if (!cat) continue;
+      const normalized = normalizeCategoryName(cat);
+      if (normalized === "bags") bag++;
+      else if (normalized === "threats") threat++;
+      else nonThreat++;
     }
-    return false;
-  }).length;
-
-  // Calculate selected bag count for validation
-  const selectedBagCount = Array.from(selectedItems).filter(itemId => {
-    for (const subcats of Object.values(categorizedItems)) {
-      for (const items of Object.values(subcats as Record<string, Item[]>)) {
-        const match = (items as Item[]).find((item) => item.id === itemId);
-        if (match) {
-          const normalizedCategory = normalizeCategoryName(match.category);
-          if (normalizedCategory === "bags") {
-            return true;
-          }
-          return false;
-        }
-      }
-    }
-    return false;
-  }).length;
+    return { selectedNonThreatCount: nonThreat, selectedThreatCount: threat, selectedBagCount: bag };
+  }, [selectedItems, itemCategoryMap]);
 
   // Check if selection is incomplete (needs bag + at least one threat)
   const hasIncompleteSelection = selectedItems.size > 0 && (selectedBagCount === 0 || selectedThreatCount === 0);
 
-  const getIncompleteSelectionMessage = () => {
+  const incompleteSelectionMessage = useMemo(() => {
     if (selectedItems.size === 0) return "";
     if (selectedBagCount === 0) return "Please select at least one bag item to generate a collage.";
     if (selectedThreatCount === 0) return "Please select at least one threat item to generate a collage.";
     return "";
-  };
-
-  const incompleteSelectionMessage = getIncompleteSelectionMessage();
+  }, [selectedItems.size, selectedBagCount, selectedThreatCount]);
 
   // Show notification when selection is incomplete (only once per transition)
   useEffect(() => {
@@ -826,8 +865,15 @@ export default function LibraryPage() {
             setSearchQuery={setSearchQuery}
           />
 
-          <div className="flex-1 overflow-hidden">
-            {displayedItems.length === 0 ? (
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {isLoading ? (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-3">
+                  <Loader2 size={28} className="animate-spin text-accent" />
+                  <p className="text-sm text-muted">Loading library items...</p>
+                </div>
+              </div>
+            ) : displayedItems.length === 0 ? (
               <div className="h-full overflow-y-auto p-5">
                 <div className="text-center py-24 bg-panel rounded-2xl border border-border shadow-card">
                   <div className="w-16 h-16 bg-surface rounded-full flex items-center justify-center mx-auto mb-4 border border-border">
@@ -840,17 +886,28 @@ export default function LibraryPage() {
                 </div>
               </div>
             ) : (
-              <VirtualizedItemGrid
-                items={displayedItems}
-                selectedItems={selectedItems}
-                onSelect={toggleItemSelection}
-                onOpen={openItemDetail}
-                onEditRegion={(item) => {
-                  setEditingRegionItem(item);
-                  setIsValidRegionEditorOpen(true);
-                }}
-                onDelete={handleDeleteItem}
-              />
+              <>
+                <div className="flex-1 overflow-hidden">
+                  <VirtualizedItemGrid
+                    items={paginatedItems}
+                    selectedItems={selectedItems}
+                    onSelect={toggleItemSelection}
+                    onOpen={openItemDetail}
+                    onEditRegion={(item) => {
+                      setEditingRegionItem(item);
+                      setIsValidRegionEditorOpen(true);
+                    }}
+                    onDelete={handleDeleteItem}
+                  />
+                </div>
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={handlePageChange}
+                  itemsPerPage={ITEMS_PER_PAGE}
+                  totalItems={displayedItems.length}
+                />
+              </>
             )}
           </div>
         </main>

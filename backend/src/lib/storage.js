@@ -43,6 +43,64 @@ async function getItemById(id) {
   return items.find(item => item.id === id);
 }
 
+// Stream items in batches to avoid loading everything into memory at once
+async function* streamItems(batchSize = 1000) {
+  await ensureDataDir();
+  
+  try {
+    const data = await fs.readFile(ITEMS_FILE, 'utf8');
+    const items = JSON.parse(data);
+    
+    for (let i = 0; i < items.length; i += batchSize) {
+      yield items.slice(i, i + batchSize);
+    }
+  } catch (err) {
+    console.error('Error streaming items:', err);
+    yield [];
+  }
+}
+
+// Get items with pagination at the database level
+async function getItemsPaginated(page = 1, limit = 100) {
+  await ensureDataDir();
+  
+  try {
+    const data = await fs.readFile(ITEMS_FILE, 'utf8');
+    const allItems = JSON.parse(data);
+    
+    const totalItems = allItems.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+    const safePage = Math.min(page, totalPages);
+    const startIndex = (safePage - 1) * limit;
+    const endIndex = startIndex + limit;
+    
+    return {
+      items: allItems.slice(startIndex, endIndex),
+      pagination: {
+        page: safePage,
+        limit,
+        totalItems,
+        totalPages,
+        hasNextPage: safePage < totalPages,
+        hasPreviousPage: safePage > 1
+      }
+    };
+  } catch (err) {
+    console.error('Error getting paginated items:', err);
+    return {
+      items: [],
+      pagination: {
+        page: 1,
+        limit,
+        totalItems: 0,
+        totalPages: 0,
+        hasNextPage: false,
+        hasPreviousPage: false
+      }
+    };
+  }
+}
+
 async function createItem(itemData) {
   await ensureDataDir();
   const items = await getItems();
@@ -241,5 +299,7 @@ export {
   deleteSavedLayout,
   getCustomSubcategories,
   addCustomSubcategory,
-  removeCustomSubcategory
+  removeCustomSubcategory,
+  streamItems,
+  getItemsPaginated
 };

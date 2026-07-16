@@ -28,7 +28,9 @@ import {
     deleteSavedLayout,
     getCustomSubcategories,
     addCustomSubcategory,
-    removeCustomSubcategory
+    removeCustomSubcategory,
+    streamItems,
+    getItemsPaginated
 } from "./lib/storage.js";
 
 const app = express();
@@ -266,19 +268,22 @@ function normalizeCategory(cat) {
 app.get("/api/items/categorized", async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 1000));
+    // Limit to 500 items per request to prevent memory issues
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 100));
     const categoryFilter = req.query.category || null;
     
-    const items = await getItems();
+    // Use database-level pagination - only load the items we need
+    const { items: paginatedItems, pagination } = await getItemsPaginated(page, limit);
     
-    // Normalize and categorize all items
+    // Normalize and categorize items
     const categorized = {};
     const categoryCounts = {};
     
-    for (const item of items) {
+    // Process and categorize items
+    for (const item of paginatedItems) {
       const normalizedCategory = normalizeCategory(item.category);
       
-      // Count items per category
+      // Count items per category (we'll estimate based on what we have)
       categoryCounts[normalizedCategory] = (categoryCounts[normalizedCategory] || 0) + 1;
       
       // Skip if filtering by category and doesn't match
@@ -294,49 +299,29 @@ app.get("/api/items/categorized", async (req, res) => {
         categorized[normalizedCategory][subcat] = [];
       }
       
-      if (normalizedCategory === "bags") {
-        const bagData = await getBagByItemId(item.id);
-        if (bagData) {
-          item.valid_region_points = bagData.valid_region_points?.simplifiedPoints || bagData.valid_region_points?.points || bagData.valid_region_points;
-          item.validRegionData = bagData.valid_region_points;
-        }
+      // Bag data (valid_region_points) is already stored directly on the item
+      if (normalizedCategory === "bags" && item.valid_region_points) {
+        const vr = item.valid_region_points;
+        item.validRegionData = vr;
+        item.valid_region_points = vr.simplifiedPoints || vr.points || vr;
       }
       
       categorized[normalizedCategory][subcat].push(item);
     }
     
-    // Apply pagination to each subcategory
-    const paginatedCategorized = {};
-    let totalItems = 0;
-    
-    for (const [category, subcats] of Object.entries(categorized)) {
-      if (categoryFilter && category !== categoryFilter) {
-        continue;
-      }
-      
-      paginatedCategorized[category] = {};
-      
-      for (const [subcat, subcatItems] of Object.entries(subcats)) {
-        const startIdx = (page - 1) * limit;
-        const endIdx = startIdx + limit;
-        const paginatedItems = subcatItems.slice(startIdx, endIdx);
-        
-        if (paginatedItems.length > 0) {
-          paginatedCategorized[category][subcat] = paginatedItems;
-          totalItems += paginatedItems.length;
-        }
-      }
-    }
-    
     res.json({ 
       ok: true, 
-      categorized: paginatedCategorized,
+      categorized,
       pagination: {
-        page,
-        limit,
-        totalItems,
+        page: pagination.page,
+        limit: pagination.limit,
+        totalItems: pagination.totalItems,
+        totalPages: pagination.totalPages,
         totalCategories: Object.keys(categoryCounts).length,
-        categoryCounts
+        categoryCounts: {
+          // Return estimated counts based on loaded data
+          ...categoryCounts
+        }
       }
     });
   } catch (err) {

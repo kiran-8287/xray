@@ -925,8 +925,27 @@ export async function generateCombinations(
   requireAtLeastOneNonThreat: boolean = false,
   existingIds: string[] = []
 ): Promise<GenerationResult> {
-  if (bags.length === 0) return { results: [], failures: [] };
-  if (k <= 0) return { results: [], failures: [] };
+  const startTime = Date.now();
+  
+  if (bags.length === 0) {
+    console.log(`[CombinationGenerator] No bags provided, exiting early`);
+    return { results: [], failures: [] };
+  }
+  if (k <= 0) {
+    console.log(`[CombinationGenerator] k <= 0, exiting early`);
+    return { results: [], failures: [] };
+  }
+  
+  console.log(`[CombinationGenerator] Starting generation:`, {
+    k,
+    bags: bags.length,
+    threats: threats.length,
+    nonThreats: nonThreats.length,
+    threatDistribution,
+    nonThreatDistribution,
+    requireAtLeastOneNonThreat,
+    existingIdsCount: existingIds.length
+  });
 
   // Validate distributions - ensure they have at least one non-zero value
   const hasValidThreatDist = Object.values(threatDistribution).some(v => v > 0);
@@ -1395,6 +1414,16 @@ export async function generateCombinations(
     }
   }
 
+  const endTime = Date.now();
+  const elapsed = endTime - startTime;
+  
+  console.log(`[CombinationGenerator] Completed in ${elapsed}ms`, {
+    requested: k,
+    generated: results.length,
+    failures: failures.length,
+    avgTimePerCombo: results.length > 0 ? `${(elapsed / results.length).toFixed(2)}ms` : 'N/A'
+  });
+  
   return { results, failures };
 }
 
