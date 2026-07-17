@@ -275,10 +275,6 @@ export default function LibraryPage() {
         setActiveSubcategory("all");
       }
       
-      // Show notification if library is large
-      if (totalItems > 500) {
-        showNotification("info", `Library loaded: ${totalItems} items total.`, 5000);
-      }
     } catch (err) {
       console.error("Failed to fetch categorized items:", err);
       showNotification("error", "Unable to load library items.");
@@ -878,6 +874,7 @@ export default function LibraryPage() {
           onSelectAllSubcategory={selectAllSubcategory}
           onDeleteCategory={deleteCategory}
           onDeleteSubcategory={deleteSubcategory}
+          isGenerating={isGenerating}
         />
         <main className="flex-1 flex flex-col overflow-hidden">
           <LibraryToolbar
@@ -921,6 +918,7 @@ export default function LibraryPage() {
                       setIsValidRegionEditorOpen(true);
                     }}
                     onDelete={handleDeleteItem}
+                    isGenerating={isGenerating}
                   />
                 </div>
                 <Pagination

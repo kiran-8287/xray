@@ -136,12 +136,11 @@ export default function WorkspaceToolbar({
       {/* Save Button */}
       <button
         onClick={handleSave}
-        className="ml-auto flex items-center gap-1.5 px-4 py-1.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover transition-all text-xs"
+        className="ml-auto flex items-center gap-1.5 px-4 py-1.5 rounded-xl font-semibold text-white bg-blue-600 text-xs"
         title="Save Workspace"
       >
         <Save size={14} />
         Save
-        {hasUnsavedChanges && <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />}
       </button>
     </div>
   );

@@ -162,7 +162,8 @@ export default function CollagePage() {
           applyRestore(matchedBags, matchedThreats, matchedOthers);
         } catch (e) {
           console.error("[CollagePage] fetch fresh items failed:", e);
-          applyRestore(null, null, null);
+          // Even if fetch fails, preserve the combinations with original item refs
+          applyRestore(restoredBags, restoredThreats, restoredOthers);
         }
       })();
       return;
@@ -237,7 +238,6 @@ export default function CollagePage() {
   };
 
   const handleOpenPreviewModal = (comb: CombinatorialResult) => {
-    if (isGenerating) return; // Lock: don't open modal during generation
     setSelectedCombination(comb);
     setShowModal(true);
     setSaveImageState({ status: "idle", message: "", imageUrl: null });
@@ -1002,10 +1002,7 @@ export default function CollagePage() {
                   <button
                     key={comb.id}
                     onClick={() => handleOpenPreviewModal(comb)}
-                    disabled={isGenerating}
-                    className={`bg-panel rounded-2xl border border-border p-4 shadow-card cursor-pointer overflow-hidden group text-left w-full ${
-                      isGenerating ? "opacity-70 cursor-not-allowed" : ""
-                    }`}
+                    className="bg-panel rounded-2xl border border-border p-4 shadow-card cursor-pointer overflow-hidden group text-left w-full"
                   >
                     <SyntheticPreview
                       objects={comb.objects}

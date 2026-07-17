@@ -10,6 +10,7 @@ interface VirtualizedItemGridProps {
   onOpen: (item: Item) => void;
   onEditRegion: (item: Item) => void;
   onDelete: (itemId: string) => void;
+  isGenerating?: boolean;
 }
 
 export default function VirtualizedItemGrid({
@@ -19,6 +20,7 @@ export default function VirtualizedItemGrid({
   onOpen,
   onEditRegion,
   onDelete,
+  isGenerating = false,
 }: VirtualizedItemGridProps) {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -91,6 +93,7 @@ export default function VirtualizedItemGrid({
                   onOpen={() => onOpen(item)}
                   onEditRegion={() => onEditRegion(item)}
                   onDelete={() => onDelete(item.id)}
+                  isGenerating={isGenerating}
                 />
               ))}
             </div>

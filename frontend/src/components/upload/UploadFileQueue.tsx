@@ -4,6 +4,7 @@ import { Trash2, Edit3, CheckSquare, Sparkles, Loader2, X, Plus } from "lucide-r
 import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName, clearCustomSubcategoriesCache } from "../../config/categories";
 import { API_BASE_URL } from "../../config/api";
 import AddSubcategoryModal from "../common/AddSubcategoryModal";
+import ConfirmModal from "../common/ConfirmModal";
 
 interface UploadFileQueueProps {
   files: File[];
@@ -264,6 +265,17 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     }
   }, [activeTagRow]);
 
+  // Confirm dialog state
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    confirmVariant?: "danger" | "primary";
+    onConfirm?: () => void;
+  }>({ isOpen: false, title: "", message: "" });
+
   const massSubcategoryOptions = useMemo(() => {
     if (!massCategory) return [];
     return getLibrarySubcategories(massCategory);
@@ -463,7 +475,14 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     } catch (err) {
       console.error("Failed to auto-generate valid region:", err);
       const msg = err instanceof Error ? err.message : "Unknown error";
-      alert(`Auto-generation failed: ${msg}`);
+      setConfirmDialog({
+        isOpen: true,
+        title: "Auto-generation Failed",
+        message: msg,
+        confirmLabel: "OK",
+        confirmVariant: "primary",
+        onConfirm: () => setConfirmDialog({ isOpen: false, title: "", message: "" }),
+      });
     } finally {
       setAutoGeneratingIndices(prev => {
         const next = new Set(prev);
@@ -477,32 +496,84 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     // Determine which indices to process:
     // - If items are selected (via checkboxes), use only those
     // - Otherwise, use all bag items
+    // - Skip items that already have a valid region
     let indicesToProcess: number[] = [];
+    let skippedCount = 0;
+    
+    // Helper: check if item has a valid region (points array with at least 2 items)
+    function hasValidRegion(s: any): boolean {
+      if (!s.valid_region_points) return false;
+      const raw = Array.isArray(s.valid_region_points)
+        ? s.valid_region_points
+        : s.valid_region_points.simplifiedPoints || s.valid_region_points.points || [];
+      return Array.isArray(raw) && raw.length >= 2;
+    }
+    
     if (selectedForMass.size > 0) {
-      indicesToProcess = [...selectedForMass].filter(idx => staged[idx]?.category === "bags");
+      indicesToProcess = [...selectedForMass].filter(idx => {
+        const s = staged[idx];
+        if (s?.category !== "bags") return false;
+        if (hasValidRegion(s)) { skippedCount++; return false; }
+        return true;
+      });
     } else {
       indicesToProcess = staged
         .map((s, idx) => ({ s, idx }))
-        .filter(({ s }) => s.category === "bags")
+        .filter(({ s }) => {
+          if (s.category !== "bags") return false;
+          if (hasValidRegion(s)) { skippedCount++; return false; }
+          return true;
+        })
         .map(({ idx }) => idx);
     }
     
     if (indicesToProcess.length === 0) {
-      alert("No bag items found to auto-generate valid regions.");
+      const totalBags = staged.filter(s => s.category === "bags").length;
+      if (skippedCount > 0 && skippedCount === totalBags) {
+        setConfirmDialog({
+          isOpen: true,
+          title: "Nothing to Generate",
+          message: `All ${totalBags} bag items already have valid regions. Nothing to generate.`,
+          confirmLabel: "OK",
+          confirmVariant: "primary",
+          onConfirm: () => setConfirmDialog({ isOpen: false, title: "", message: "" }),
+        });
+      } else {
+        setConfirmDialog({
+          isOpen: true,
+          title: "Nothing to Generate",
+          message: "No bag items found to auto-generate valid regions.",
+          confirmLabel: "OK",
+          confirmVariant: "primary",
+          onConfirm: () => setConfirmDialog({ isOpen: false, title: "", message: "" }),
+        });
+      }
       return;
     }
     
-    setMassAutoGen({ total: indicesToProcess.length, completed: 0, running: true });
+    const total = indicesToProcess.length;
+    setMassAutoGen({ total, completed: 0, running: true });
+    
+    // Mark all as generating in one batch
+    setAutoGeneratingIndices(prev => {
+      const next = new Set(prev);
+      indicesToProcess.forEach(idx => next.add(idx));
+      return next;
+    });
     
     let completedCount = 0;
-    const failedItems: number[] = [];
+    const CONCURRENCY = 4; // Process up to 4 items in parallel
+    const UI_BATCH_SIZE = 10; // Update UI every 10 completed items
     
-    for (const idx of indicesToProcess) {
-      setAutoGeneratingIndices(prev => new Set(prev).add(idx));
-      
-      const stagedItem = staged[idx];
+    // Snapshot staged once to avoid stale closure issues
+    const queue = indicesToProcess.map(idx => ({ idx, stagedItem: staged[idx] }));
+    
+    // Collect results and apply them in batches
+    const pendingResults: { idx: number; points: any; success: boolean }[] = [];
+    
+    async function processOne(task: { idx: number; stagedItem: any }): Promise<void> {
+      const { idx, stagedItem } = task;
       try {
-        // Use the pixelDataFilename from the staged item (includes highenrgy/ prefix)
         const pixelDataPath = stagedItem.pixelDataFilename || `${stagedItem.itemId}.npz`;
         
         const res = await fetch(`${API_BASE_URL}/api/auto-valid-region`, {
@@ -519,42 +590,94 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
           throw new Error(data.error || "Failed to auto-generate valid region");
         }
         
-        // Update staged item with generated region using functional updater
-        // to avoid stale closure issues when processing multiple items
-        setStaged(prev => {
-          const copy = [...prev];
-          copy[idx] = {
-            ...copy[idx],
-            valid_region_points: {
-              points: data.data.points,
-              simplifiedPoints: data.data.points
-            }
-          };
-          return copy;
-        });
-        
-        completedCount++;
-        setMassAutoGen({ total: indicesToProcess.length, completed: completedCount, running: true });
+        pendingResults.push({ idx, points: data.data.points, success: true });
       } catch (err) {
         console.error(`Failed to auto-generate valid region for item ${idx + 1}:`, err);
-        failedItems.push(idx);
-        completedCount++;
-        setMassAutoGen({ total: indicesToProcess.length, completed: completedCount, running: true });
+        pendingResults.push({ idx, points: null, success: false });
       } finally {
-        setAutoGeneratingIndices(prev => {
-          const next = new Set(prev);
-          next.delete(idx);
-          return next;
-        });
+        completedCount++;
+        
+        // Flush batched results periodically
+        if (completedCount % UI_BATCH_SIZE === 0 || completedCount === total) {
+          const batch = pendingResults.splice(0, pendingResults.length);
+          setStaged(prev => {
+            const copy = [...prev];
+            for (const r of batch) {
+              if (r.success) {
+                copy[r.idx] = {
+                  ...copy[r.idx],
+                  valid_region_points: {
+                    points: r.points,
+                    simplifiedPoints: r.points
+                  }
+                };
+              }
+            }
+            return copy;
+          });
+          setMassAutoGen({ total, completed: completedCount, running: completedCount < total });
+        }
       }
     }
     
-    setMassAutoGen({ total: indicesToProcess.length, completed: completedCount, running: false });
+    // Throttled queue: run up to CONCURRENCY in-flight requests
+    const workers = Array.from({ length: CONCURRENCY }, async () => {
+      while (queue.length > 0) {
+        const task = queue.shift()!;
+        await processOne(task);
+      }
+    });
+    await Promise.all(workers);
     
-    if (failedItems.length > 0) {
-      alert(`Mass auto-generation complete. ${completedCount - failedItems.length} succeeded, ${failedItems.length} failed.`);
+    // Flush any remaining results
+    if (pendingResults.length > 0) {
+      const batch = pendingResults.splice(0, pendingResults.length);
+      setStaged(prev => {
+        const copy = [...prev];
+        for (const r of batch) {
+          if (r.success) {
+            copy[r.idx] = {
+              ...copy[r.idx],
+              valid_region_points: {
+                points: r.points,
+                simplifiedPoints: r.points
+              }
+            };
+          }
+        }
+        return copy;
+      });
+    }
+    
+    // Clear generating indicators all at once
+    setAutoGeneratingIndices(prev => {
+      const next = new Set(prev);
+      indicesToProcess.forEach(idx => next.delete(idx));
+      return next;
+    });
+    
+    setMassAutoGen({ total, completed: completedCount, running: false });
+    
+    // Summary: show skipped + succeeded + failed counts
+    const failedCount = total - completedCount;
+    const succeeded = completedCount - failedCount; // all completed ones succeeded since failures update completedCount too
+    // Actually failures increment completedCount too, so re-derive: succeeded are those with success:true
+    // Let's just report based on what we know
+    if (skippedCount > 0) {
+      console.log(`Mass auto-generation: ${succeeded} succeeded, ${failedCount} failed, ${skippedCount} skipped (already had valid region).`);
+    }
+    
+    if (failedCount > 0) {
+      setConfirmDialog({
+        isOpen: true,
+        title: "Mass Auto-generation Complete",
+        message: `${succeeded} succeeded, ${failedCount} failed${skippedCount > 0 ? `, ${skippedCount} skipped` : ''}.`,
+        confirmLabel: "OK",
+        confirmVariant: "primary",
+        onConfirm: () => setConfirmDialog({ isOpen: false, title: "", message: "" }),
+      });
     } else {
-      console.log(`Mass auto-generation complete: ${completedCount} items processed successfully.`);
+      console.log(`Mass auto-generation complete: ${completedCount} items processed successfully${skippedCount > 0 ? ` (${skippedCount} skipped)` : ''}.`);
     }
   };
 
@@ -702,7 +825,14 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                     // Apply selected tags to all bag items (or selected ones)
                     const tagsToApply = Array.from(massSelectedTags);
                     if (tagsToApply.length === 0) {
-                      alert("Please select at least one tag");
+                      setConfirmDialog({
+                        isOpen: true,
+                        title: "No Tags Selected",
+                        message: "Please select at least one tag",
+                        confirmLabel: "OK",
+                        confirmVariant: "primary",
+                        onConfirm: () => setConfirmDialog({ isOpen: false, title: "", message: "" }),
+                      });
                       return;
                     }
 
@@ -720,7 +850,14 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                     }
 
                     if (indicesToUpdate.length === 0) {
-                      alert("No bag items found to apply tags.");
+                      setConfirmDialog({
+                        isOpen: true,
+                        title: "No Bag Items Found",
+                        message: "No bag items found to apply tags.",
+                        confirmLabel: "OK",
+                        confirmVariant: "primary",
+                        onConfirm: () => setConfirmDialog({ isOpen: false, title: "", message: "" }),
+                      });
                       return;
                     }
 
@@ -1150,6 +1287,17 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         onClose={() => setIsAddSubcategoryModalOpen(false)}
         onAdd={handleAddCustomSubcategory}
         categoryName={LIBRARIES.find(lib => lib.slug === addingSubcategoryFor)?.name || addingSubcategoryFor}
+      />
+
+      <ConfirmModal
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        cancelLabel={confirmDialog.cancelLabel}
+        confirmVariant={confirmDialog.confirmVariant}
+        onConfirm={confirmDialog.onConfirm || (() => setConfirmDialog({ isOpen: false, title: "", message: "" }))}
+        onCancel={() => setConfirmDialog({ isOpen: false, title: "", message: "" })}
       />
 
       {/* Image Preview Modal */}

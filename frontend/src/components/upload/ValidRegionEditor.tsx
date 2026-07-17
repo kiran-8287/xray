@@ -18,6 +18,7 @@ import {
   Loader2,
   Eraser
 } from 'lucide-react';
+import ConfirmModal from '../common/ConfirmModal';
 import type { Point } from '../../types/geometry';
 import { isPointInPolygon } from '../../lib/geometry';
 
@@ -79,6 +80,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   const [toasts, setToasts] = useState<{ id: string; type: 'success'|'warning'|'info'; message: string }[]>([]);
   const polygonsBeforeDrag = useRef<Polygon[]>([]);
   const polygonsRef = useRef<Polygon[]>([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
   // Keep ref in sync with state
   useEffect(() => {
@@ -1085,11 +1087,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
         {/* Footer */}
         <div className="px-5 py-3 border-t border-[#DDE4F5] bg-white flex justify-between items-center flex-shrink-0">
           <button 
-            onClick={() => {
-              if (confirm("Are you sure you want to remove the entire valid region?")) {
-                onDelete();
-              }
-            }} 
+            onClick={() => setShowDeleteConfirm(true)} 
             disabled={isDeleteDisabled}
             className="px-4 py-2 border border-[#FCA5A5] text-[#DC2626] hover:bg-[#FEF2F2] rounded-lg text-sm font-semibold transition-all cursor-pointer bg-white disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
           >
@@ -1114,6 +1112,20 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
           </div>
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        title="Delete Region"
+        message="Are you sure you want to remove the entire valid region?"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        confirmVariant="danger"
+        onConfirm={() => {
+          setShowDeleteConfirm(false);
+          onDelete();
+        }}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </div>
   );
 };

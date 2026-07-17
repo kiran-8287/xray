@@ -54,20 +54,20 @@ export default function Pagination({
   };
 
   return (
-    <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-panel">
-      <div className="text-sm text-muted">
+    <div className="flex items-center justify-between px-3 py-2.5 border-t border-border bg-panel">
+      <div className="text-xs text-muted">
         Showing <span className="font-semibold text-ink">{startItem}</span> to{" "}
         <span className="font-semibold text-ink">{endItem}</span> of{" "}
         <span className="font-semibold text-ink">{totalItems}</span> items
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <button
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage === 1}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border bg-surface text-sm font-medium text-ink hover:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+          className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-surface text-xs font-medium text-ink hover:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all"
         >
-          <ChevronLeft size={16} />
+          <ChevronLeft size={14} />
           <span className="hidden sm:inline">Previous</span>
         </button>
 
@@ -77,7 +77,7 @@ export default function Pagination({
               return (
                 <span
                   key={`ellipsis-${index}`}
-                  className="px-3 py-1.5 text-sm text-muted"
+                  className="px-2 py-1 text-xs text-muted"
                 >
                   ...
                 </span>
@@ -89,7 +89,7 @@ export default function Pagination({
               <button
                 key={pageNum}
                 onClick={() => onPageChange(pageNum)}
-                className={`min-w-[36px] px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                className={`min-w-[30px] px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
                   currentPage === pageNum
                     ? "bg-accent text-white shadow-sm"
                     : "border border-border bg-surface text-ink hover:bg-panel"
@@ -104,10 +104,10 @@ export default function Pagination({
         <button
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage === totalPages}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border bg-surface text-sm font-medium text-ink hover:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+          className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-surface text-xs font-medium text-ink hover:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all"
         >
           <span className="hidden sm:inline">Next</span>
-          <ChevronRight size={16} />
+          <ChevronRight size={14} />
         </button>
       </div>
     </div>

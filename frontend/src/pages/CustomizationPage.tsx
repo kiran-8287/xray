@@ -96,24 +96,63 @@ export default function CustomizationPage() {
   const [categorizedList, setCategorizedList] = useState<any>(null);
   const [pixelStats, setPixelStats] = useState<Map<string, ObjectPixelStats>>(new Map());
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [sidebarSearch, setSidebarSearch] = useState("");
   const hasInitialized = useRef(false);
 
-  // Fetch all scanned bags from DB on mount
+  // Fetch all categorized items from DB on mount (no pagination limit)
   useEffect(() => {
-    fetchWithTimeout(`${API_BASE_URL}/api/items/categorized`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.ok) {
-          setCategorizedList(normalizeCategorizedItems(data.categorized));
-          setLoadError(null);
-        } else {
-          setLoadError(data.error || "Failed to load library items.");
+    (async () => {
+      try {
+        const BATCH_SIZE = 500;
+        const firstRes = await fetchWithTimeout(
+          `${API_BASE_URL}/api/items/categorized?page=1&limit=${BATCH_SIZE}`
+        );
+        const firstData = await firstRes.json();
+        if (!firstData.ok) {
+          setLoadError(firstData.error || "Failed to load library items.");
+          return;
         }
-      })
-      .catch((err) => {
+
+        const totalPages = firstData.pagination?.totalPages || 1;
+
+        // Fetch all remaining pages in parallel
+        const pageNumbers = [];
+        for (let i = 2; i <= totalPages; i++) {
+          pageNumbers.push(i);
+        }
+
+        const pageFetches = pageNumbers.map(page =>
+          fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?page=${page}&limit=${BATCH_SIZE}`)
+            .then(res => res.json())
+        );
+
+        const allResponses = [firstData, ...(await Promise.all(pageFetches))];
+
+        // Merge all categorized items
+        const mergedCategorized: any = {};
+        for (const data of allResponses) {
+          if (!data.ok) continue;
+          const batchCategorized = normalizeCategorizedItems(data.categorized);
+          for (const [category, subcats] of Object.entries(batchCategorized)) {
+            if (!mergedCategorized[category]) {
+              mergedCategorized[category] = {};
+            }
+            for (const [subcat, items] of Object.entries(subcats as Record<string, any[]>)) {
+              if (!mergedCategorized[category][subcat]) {
+                mergedCategorized[category][subcat] = [];
+              }
+              mergedCategorized[category][subcat].push(...items);
+            }
+          }
+        }
+
+        setCategorizedList(mergedCategorized);
+        setLoadError(null);
+      } catch (err: any) {
         console.error("Error loading scanned bags in workspace:", err);
         setLoadError("Cannot connect to backend. Please verify the server is running.");
-      });
+      }
+    })();
   }, []);
 
   // Initialize objects from URL query params — runs only ONCE after data loads
@@ -523,15 +562,17 @@ export default function CustomizationPage() {
 
   const handleMouseDown = (e: React.MouseEvent, obj: SceneObject) => {
     e.stopPropagation();
+    // Prevent selecting the bag on canvas
+    if (obj.library === "bag") return;
     setSelectedObjectId(obj.id);
-    if (obj.library !== "bag") {
-      setIsDragging(true);
-      setDragStart({ x: e.clientX - obj.transform.x, y: e.clientY - obj.transform.y });
-    }
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - obj.transform.x, y: e.clientY - obj.transform.y });
   };
 
   const handleRotationMouseDown = (e: React.MouseEvent, obj: SceneObject) => {
     e.stopPropagation();
+    // Prevent selecting/rotating the bag on canvas
+    if (obj.library === "bag") return;
     setSelectedObjectId(obj.id);
     if (!canvasDivRef.current) return;
 
@@ -608,6 +649,14 @@ export default function CustomizationPage() {
 
     if (outOfBoundsNow.length > 0) {
       setSaveState({ status: "error", message: `Cannot save: ${outOfBoundsNow.length} object(s) out of bounds.` });
+      setTimeout(() => setSaveState({ status: "idle", message: "" }), 3000);
+      return;
+    }
+
+    // Check that bag has at least one threat or non-threat
+    const nonBagObjects = objects.filter(o => o.library !== "bag");
+    if (nonBagObjects.length === 0) {
+      setSaveState({ status: "error", message: "Cannot save: bag must contain at least one threat or non-threat." });
       setTimeout(() => setSaveState({ status: "idle", message: "" }), 3000);
       return;
     }
@@ -828,7 +877,7 @@ export default function CustomizationPage() {
 
   const bagObject = objects.find(o => o.library === "bag");
   const outOfBoundsObjects = objects.filter(
-    obj => bagObject && obj.library === "threat" && !isObjectInsideContainer(obj, bagObject)
+    obj => bagObject && obj.library !== "bag" && !isObjectInsideContainer(obj, bagObject)
   );
 
   // Compute stats when selection changes
@@ -946,6 +995,21 @@ export default function CustomizationPage() {
           hasBag={hasBag}
           handleAddObject={handleAddObject}
           categorizedList={categorizedList}
+          sidebarSearch={sidebarSearch}
+          setSidebarSearch={setSidebarSearch}
+          canvasObjects={objects}
+          selectedObjectId={selectedObjectId}
+          onSelectCanvasObject={(id) => {
+            // Prevent selecting the bag
+            if (id && objects.find(o => o.id === id && o.library === "bag")) return;
+            setSelectedObjectId(id);
+          }}
+          onRemoveCanvasObject={(id) => {
+            const newObjects = objects.filter(o => o.id !== id);
+            pushHistory(newObjects);
+            setObjects(newObjects);
+            if (selectedObjectId === id) setSelectedObjectId(null);
+          }}
         />
 
         <CanvasArea
@@ -987,7 +1051,7 @@ export default function CustomizationPage() {
         </div>
 
         {/* Right Sidebar: Properties list */}
-        <aside className="w-56 border-l border-border bg-nav flex flex-col overflow-y-auto flex-shrink-0">
+        <aside className="w-64 border-l border-border bg-nav flex flex-col overflow-y-auto flex-shrink-0">
           <div className="px-4 py-3 border-b border-border bg-panel flex items-center gap-2">
             <Sliders size={14} className="text-accent" />
             <h3 className="font-semibold text-ink text-xs uppercase tracking-wider">
@@ -1000,7 +1064,7 @@ export default function CustomizationPage() {
               const selectedObj = objects.find((o) => o.id === selectedObjectId);
               if (!selectedObj) return null;
               const isValid = bagObject && selectedObj.library !== "bag" 
-                ? (selectedObj.library === "threat" ? isObjectInsideContainer(selectedObj, bagObject) : true) 
+                ? isObjectInsideContainer(selectedObj, bagObject) 
                 : true;
               const config = getCategoryConfig(selectedObj.library);
 
@@ -1129,39 +1193,6 @@ export default function CustomizationPage() {
                     </div>
                   </div>
 
-                  {/* Pixel details */}
-                  <div className="space-y-1.5">
-                    <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Grayscale value</span>
-                    <div className="space-y-1.5">
-                      <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
-                        <span className="text-[11px] text-muted uppercase tracking-wider">Original</span>
-                        <span className="font-mono text-ink text-xs font-semibold">{selectedObj.originalPixelValue}</span>
-                      </div>
-                      {(() => {
-                        const stats = pixelStats.get(selectedObj.id);
-                        if (!stats) {
-                          return (
-                            <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
-                              <span className="text-[11px] text-muted uppercase tracking-wider">Synthesized</span>
-                              <span className="font-mono text-accent-sky text-xs font-semibold">{selectedObj.currentPixelValue}</span>
-                            </div>
-                          );
-                        }
-                        return (
-                          <div className="bg-panel rounded-xl border border-accent/30 px-3 py-2 space-y-1">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] text-muted uppercase tracking-wider">Synthesized</span>
-                              <span className="font-mono text-accent-sky text-xs font-semibold">{stats.synthesizedMean}</span>
-                            </div>
-                            <div className="flex items-center justify-between text-[10px] text-muted">
-                              <span>Range</span>
-                              <span className="font-mono">{stats.min} – {stats.max}</span>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
                 </div>
               );
             })()
@@ -1203,15 +1234,6 @@ export default function CustomizationPage() {
         </aside>
       </div>
 
-      {/* Footer */}
-      <footer className="bg-panel border-t border-border px-5 py-2 flex items-center justify-between flex-shrink-0 h-9 z-10 shadow-[0_-1px_3px_rgba(27,35,51,0.04)]">
-        <div className="text-xs text-muted">
-          {objects.length} object{objects.length !== 1 ? "s" : ""} · {outOfBoundsObjects.length} out-of-bounds · Canvas {CANVAS_W}×{CANVAS_H}
-        </div>
-        <div className="text-xs text-muted">
-          {lastSavedTime > 0 ? `Saved recently (${Math.round((Date.now() - lastSavedTime) / 60000)} min ago)` : "Ready to save"}
-        </div>
-      </footer>
     </div>
   );
 }

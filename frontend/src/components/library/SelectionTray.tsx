@@ -219,15 +219,16 @@ export default function SelectionTray({
       </button>
       <button
         onClick={onGenerateCollage}
-        disabled={selectedCount === 0 || hasIncompleteSelection || !hasValidDistribution}
+        disabled={selectedCount === 0 || hasIncompleteSelection || !hasValidDistribution || isGenerating}
         title={
+          isGenerating ? "Generation in progress..." :
           hasIncompleteSelection ? incompleteSelectionMessage :
           !hasValidDistribution ? "Distribution percentages must total 100%" :
           ""
         }
         className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        Generate Collage
+        {isGenerating ? "Generating..." : "Generate Collage"}
       </button>
     </div>
   );

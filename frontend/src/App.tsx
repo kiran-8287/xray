@@ -5,7 +5,6 @@ import CollagePage from "./pages/CollagePage";
 import CustomizationPage from "./pages/CustomizationPage";
 import LibraryPage from "./pages/LibraryPage";
 import SavedPage from "./pages/SavedPage";
-import HelpMenu from "./components/common/HelpMenu";
 import { UploadProvider } from "./context/UploadContext";
 import { loadCustomSubcategories } from "./config/categories";
 import { GenerationService } from "./lib/generationService";
@@ -36,10 +35,12 @@ function NavigationGuard() {
   const [pendingLocation, setPendingLocation] = useState<string | null>(null);
   
   // Block navigation when there are generated results and user is on collage page
-  const blocker = useBlocker(() => {
+  // Exception: allow navigation to /customize page (part of collage workflow)
+  const blocker = useBlocker(({ nextLocation }) => {
     const hasResults = GenerationService.hasGeneratedResults();
     const isOnCollagePage = window.location.pathname.startsWith("/collage");
-    return hasResults && isOnCollagePage;
+    const isNavigatingToCustomize = nextLocation.pathname.startsWith("/customize");
+    return hasResults && isOnCollagePage && !isNavigatingToCustomize;
   });
 
   useEffect(() => {
@@ -123,8 +124,7 @@ function AppLayout() {
             Saved
           </NavLink>
         </div>
-        <HelpMenu />
-      </nav>
+        </nav>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col">

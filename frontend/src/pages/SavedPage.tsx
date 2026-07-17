@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
-import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check, Loader2 } from "lucide-react";
+import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check, CheckCircle2, Loader2, Trash2 } from "lucide-react";
 import { getLibrarySubcategories } from "../config/categories";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
@@ -401,6 +401,19 @@ export default function SavedPage() {
   const [selectedLayout, setSelectedLayout] = useState<SavedLayout | null>(null);
   const [integrityIssues, setIntegrityIssues] = useState<Map<string, any[]>>(new Map());
   const [integrityLoading, setIntegrityLoading] = useState(false);
+  
+  // Delete confirmation state
+  const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; layout: SavedLayout | null }>({ show: false, layout: null });
+  const [deleting, setDeleting] = useState(false);
+  
+  // Toast notifications
+  const [toasts, setToasts] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
+  
+  const showToast = (type: 'success' | 'error' | 'info', message: string) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setToasts(prev => [...prev, { id, type, message }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+  };
 
   // Advanced filter state
   const [selectedBagSubcategories, setSelectedBagSubcategories] = useState<string[]>([]);
@@ -531,6 +544,53 @@ export default function SavedPage() {
     setPage(1);
   };
 
+  // Delete layout handler
+  const handleDelete = async (layoutId: string) => {
+    if (!deleteConfirm.layout || deleteConfirm.layout.id !== layoutId) return;
+    
+    setDeleting(true);
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/${layoutId}`, {
+        method: 'DELETE',
+      });
+      
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `Failed to delete layout (HTTP ${res.status})`);
+      }
+      
+      // Remove from local state
+      setLayouts(prev => prev.filter(l => l.id !== layoutId));
+      
+      // Close detail modal if this layout was selected
+      if (selectedLayout?.id === layoutId) {
+        setSelectedLayout(null);
+      }
+      
+      // Update pagination total
+      if (pagination) {
+        setPagination({
+          ...pagination,
+          total: pagination.total - 1,
+          totalPages: Math.max(1, Math.ceil((pagination.total - 1) / pagination.limit))
+        });
+      }
+      
+      // Close confirmation dialog
+      setDeleteConfirm({ show: false, layout: null });
+      
+      // Show success message
+      showToast('success', `Layout ${layoutId} deleted successfully`);
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error deleting layout:', error);
+      showToast('error', `Failed to delete layout: ${errorMessage}`);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // Close detail on Escape
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -542,8 +602,42 @@ export default function SavedPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // Toast notification styles
+  const toastStyles = `
+    @keyframes slide-down {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-slide-down { animation: slide-down 0.2s ease-out; }
+  `;
+
   return (
     <div className="p-6">
+      {/* Toast Notifications */}
+      {toasts.length > 0 && (
+        <>
+          <style>{toastStyles}</style>
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 pointer-events-none">
+            {toasts.map(t => (
+              <div
+                key={t.id}
+                className="flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg text-sm font-medium animate-slide-down"
+                style={{
+                  backgroundColor: t.type === 'success' ? '#ECFDF5' : t.type === 'error' ? '#FEF2F2' : '#EFF4FF',
+                  borderColor: t.type === 'success' ? '#6EE7B7' : t.type === 'error' ? '#FCA5A5' : '#BFDBFE',
+                  color: t.type === 'success' ? '#065F46' : t.type === 'error' ? '#991B1B' : '#1E40AF'
+                }}
+              >
+                {t.type === 'success' && <CheckCircle2 size={16} className="text-emerald-600" />}
+                {t.type === 'error' && <Trash2 size={16} className="text-rose-600" />}
+                {t.type === 'info' && <Check size={16} className="text-blue-600" />}
+                {t.message}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       <div className="mb-6 flex items-center justify-between gap-4">
         <div className="border-l-4 border-accent pl-4">
           <h2 className="text-3xl font-bold text-ink tracking-tight">Saved Layouts</h2>
@@ -668,34 +762,6 @@ export default function SavedPage() {
         </div>
       ) : (
         <>
-          {/* Pagination Header */}
-          {pagination && (
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <p className="text-sm text-muted">
-                Showing {((pagination.page - 1) * pagination.limit) + 1}-{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={pagination.page <= 1}
-                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Prev
-                </button>
-                <span className="text-sm text-muted">
-                  Page {pagination.page} / {pagination.totalPages}
-                </span>
-                <button
-                  onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
-                  disabled={pagination.page >= pagination.totalPages}
-                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* List View Table */}
           <div className="rounded-2xl border border-border bg-panel overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
@@ -708,6 +774,7 @@ export default function SavedPage() {
                     <th className="text-left py-3 px-4 w-64">Threats</th>
                     <th className="text-left py-3 px-4 w-56">Non-Threats</th>
                     <th className="text-left py-3 px-4 w-56">Tags</th>
+                    <th className="text-center py-3 px-4 w-20">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -762,6 +829,18 @@ export default function SavedPage() {
                         <td className="py-3 px-4">
                           <span className="text-sm text-emerald-700">{tagsDisplay}</span>
                         </td>
+                        <td className="py-3 px-4 text-center">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirm({ show: true, layout });
+                            }}
+                            className="p-1.5 rounded-md bg-panel border border-border text-muted hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50 transition-colors"
+                            title="Delete layout"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
@@ -769,6 +848,34 @@ export default function SavedPage() {
               </table>
             </div>
           </div>
+
+          {/* Pagination Footer */}
+          {pagination && (
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <p className="text-sm text-muted">
+                Showing {((pagination.page - 1) * pagination.limit) + 1}-{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={pagination.page <= 1}
+                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <span className="text-sm text-muted">
+                  Page {pagination.page} / {pagination.totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                  disabled={pagination.page >= pagination.totalPages}
+                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Detail Panel */}
           {selectedLayout && (
@@ -911,6 +1018,58 @@ export default function SavedPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirm.show && deleteConfirm.layout && (
+        <div className="fixed inset-0 z-[60] bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setDeleteConfirm({ show: false, layout: null })}>
+          <div
+            className="w-full max-w-md bg-panel rounded-2xl border border-border shadow-2xl p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center">
+                <Trash2 size={20} className="text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-ink">Delete Layout</h3>
+                <p className="text-xs text-muted">This action cannot be undone</p>
+              </div>
+            </div>
+            
+            <p className="text-sm text-ink mb-6">
+              Are you sure you want to delete layout <span className="font-mono font-semibold text-accent-sky">{deleteConfirm.layout.id}</span>? 
+              This will permanently remove it from the backend storage.
+            </p>
+            
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setDeleteConfirm({ show: false, layout: null })}
+                disabled={deleting}
+                className="px-4 py-2 rounded-lg border border-border bg-white text-sm text-ink hover:bg-surface transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDelete(deleteConfirm.layout!.id)}
+                disabled={deleting}
+                className="px-4 py-2 rounded-lg bg-rose-600 text-white text-sm font-medium hover:bg-rose-700 transition-colors disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-2"
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    Delete
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
