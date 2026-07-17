@@ -115,6 +115,40 @@ app.get("/", (_req, res) => {
   });
 });
 
+// Clean up temp files older than 1 hour (runs on server startup and can be called periodically)
+async function cleanupOldTempFiles() {
+  const tempDir = path.resolve(__dirname, "../data/temp");
+  try {
+    await fs.mkdir(tempDir, { recursive: true });
+    const files = await fs.readdir(tempDir);
+    const now = Date.now();
+    const maxAge = 60 * 60 * 1000; // 1 hour
+
+    let cleaned = 0;
+    for (const file of files) {
+      if (!file.endsWith(".tmp")) continue;
+      const filePath = path.join(tempDir, file);
+      try {
+        const stats = await fs.stat(filePath);
+        if (now - stats.mtimeMs > maxAge) {
+          await fs.unlink(filePath);
+          cleaned++;
+        }
+      } catch (err) {
+        // Ignore individual file errors
+      }
+    }
+    if (cleaned > 0) {
+      console.log(`[temp-cleanup] Cleaned up ${cleaned} old temp files`);
+    }
+  } catch (err) {
+    console.warn("[temp-cleanup] Failed to clean temp files:", err.message);
+  }
+}
+
+// Run cleanup on startup
+await cleanupOldTempFiles();
+
 // Helper functions for raw file processing
 function deriveItemId(filename) {
     const dotIndex = filename.indexOf(".");
@@ -630,109 +664,120 @@ app.post("/api/upload", upload.array("images"), async (req, res) => {
             // Find metadata for this file
             const fileMeta = metadataArray.find(m => m.originalname === file.originalname) || {};
 
-            // Check if item already exists
-            if (await itemExists(itemId)) {
-                errors.push({ filename: file.originalname, message: `Item ${itemId} already exists in library` });
-                // Clean up the uploaded file since we won't use it
+            try {
+                // Check if item already exists
+                if (await itemExists(itemId)) {
+                    errors.push({ filename: file.originalname, message: `Item ${itemId} already exists in library` });
+                    // Clean up the uploaded file since we won't use it
+                    try {
+                        await fs.unlink(path.join(libraryImagesRoot, file.filename));
+                    } catch (unlinkErr) {
+                        console.warn("Could not delete unused file", unlinkErr);
+                    }
+                    continue;
+                }
+
+                // Classify by filename prefix only
+                const filename = file.originalname.toLowerCase();
+                let category, subcategory;
+
+                if (filename.startsWith("bag")) {
+                    category = "bags";
+                } else if (filename.startsWith("threat")) {
+                    category = "threats";
+                } else {
+                    category = "non-threats";
+                }
+                const parsed = parseFilename(file.originalname);
+                subcategory = parsed.subcategory;
+                const name = path.basename(file.originalname, path.extname(file.originalname));
+
+                if (fileMeta.category) {
+                    category = fileMeta.category;
+                }
+                if (fileMeta.subcategory) subcategory = fileMeta.subcategory;
+                const tags = fileMeta.tags || [];
+                
+                // Detect actual image dimensions from the saved file
+                let width = 512;
+                let height = 512;
+                try {
+                    const savedFilePath = path.join(libraryImagesRoot, file.filename);
+                    const loadedImg = await Jimp.read(savedFilePath);
+                    width = loadedImg.bitmap.width;
+                    height = loadedImg.bitmap.height;
+                } catch (dimErr) {
+                    console.warn("Warning: could not detect image dimensions for", file.filename, dimErr);
+                }
+
+                // Create item with actual filename (no UUID)
+                const item = await createItem({
+                    id: itemId,
+                    filename: file.originalname,
+                    filepath: file.filename, // This is the actual filename, not a UUID
+                    category,
+                    subcategory,
+                    name,
+                    width,
+                    height,
+                    polygon_json: fileMeta.polygon_json || null,
+                    mask_path: fileMeta.mask_path || null,
+                    tags: tags.length > 0 ? tags : null
+                });
+
+                if (category === "bags") {
+                    let vr = null;
+                    if (fileMeta.valid_region_points) {
+                        // Normalize valid region data to only points/simplifiedPoints
+                        const data = fileMeta.valid_region_points;
+                        if (data && typeof data === 'object') {
+                            vr = {
+                                points: data.points || data.simplifiedPoints || [],
+                                simplifiedPoints: data.simplifiedPoints || data.points || []
+                            };
+                        } else if (Array.isArray(data)) {
+                            vr = {
+                                points: data,
+                                simplifiedPoints: data
+                            };
+                        }
+                    }
+                    await createBag({
+                        item_id: item.id,
+                        valid_region_points: vr
+                    });
+                } else if (category === "threats") {
+                    await createThreat({
+                        item_id: item.id,
+                        threat_type: fileMeta.threat_type || null,
+                        severity: fileMeta.severity || null
+                    });
+                    // Also add to threat_items for backward compatibility
+                    await createNonThreatItem({
+                        item_id: item.id,
+                        subcategory_slug: subcategory.toLowerCase().replace(/\s+/g, "-")
+                    });
+                } else {
+                    // All other categories are treated as non-threats
+                    const subSlug = subcategory ? String(subcategory).toLowerCase().replace(/\s+/g, "-") : null;
+                    await createNonThreatItem({
+                        item_id: item.id,
+                        subcategory_slug: subSlug
+                    });
+                }
+
+                processed.push(itemId);
+                processedIds.add(file.originalname);
+            } catch (fileErr) {
+                console.error(`Error processing file ${file.originalname}:`, fileErr);
+                errors.push({ filename: file.originalname, message: String(fileErr) });
+                // Clean up the uploaded file since processing failed
                 try {
                     await fs.unlink(path.join(libraryImagesRoot, file.filename));
                 } catch (unlinkErr) {
-                    console.warn("Could not delete unused file", unlinkErr);
+                    console.warn("Could not delete failed upload file", unlinkErr);
                 }
-                continue;
             }
-
-            // Classify by filename prefix only
-            const filename = file.originalname.toLowerCase();
-            let category, subcategory;
-
-            if (filename.startsWith("bag")) {
-                category = "bags";
-            } else if (filename.startsWith("threat")) {
-                category = "threats";
-            } else {
-                category = "non-threats";
-            }
-            const parsed = parseFilename(file.originalname);
-            subcategory = parsed.subcategory;
-            const name = path.basename(file.originalname, path.extname(file.originalname));
-
-            if (fileMeta.category) {
-                category = fileMeta.category;
-            }
-            if (fileMeta.subcategory) subcategory = fileMeta.subcategory;
-            const tags = fileMeta.tags || [];
-            
-            // Detect actual image dimensions from the saved file
-            let width = 512;
-            let height = 512;
-            try {
-                const savedFilePath = path.join(libraryImagesRoot, file.filename);
-                const loadedImg = await Jimp.read(savedFilePath);
-                width = loadedImg.bitmap.width;
-                height = loadedImg.bitmap.height;
-            } catch (dimErr) {
-                console.warn("Warning: could not detect image dimensions for", file.filename, dimErr);
-            }
-
-            // Create item with actual filename (no UUID)
-            const item = await createItem({
-                id: itemId,
-                filename: file.originalname,
-                filepath: file.filename, // This is the actual filename, not a UUID
-                category,
-                subcategory,
-                name,
-                width,
-                height,
-                polygon_json: fileMeta.polygon_json || null,
-                mask_path: fileMeta.mask_path || null,
-                tags: tags.length > 0 ? tags : null
-            });
-
-            if (category === "bags") {
-                let vr = null;
-                if (fileMeta.valid_region_points) {
-                    // Normalize valid region data to only points/simplifiedPoints
-                    const data = fileMeta.valid_region_points;
-                    if (data && typeof data === 'object') {
-                        vr = {
-                            points: data.points || data.simplifiedPoints || [],
-                            simplifiedPoints: data.simplifiedPoints || data.points || []
-                        };
-                    } else if (Array.isArray(data)) {
-                        vr = {
-                            points: data,
-                            simplifiedPoints: data
-                        };
-                    }
-                }
-                await createBag({
-                    item_id: item.id,
-                    valid_region_points: vr
-                });
-            } else if (category === "threats") {
-                await createThreat({
-                    item_id: item.id,
-                    threat_type: fileMeta.threat_type || null,
-                    severity: fileMeta.severity || null
-                });
-                // Also add to threat_items for backward compatibility
-                await createNonThreatItem({
-                    item_id: item.id,
-                    subcategory_slug: subcategory.toLowerCase().replace(/\s+/g, "-")
-                });
-            } else {
-                // All other categories are treated as non-threats
-                const subSlug = subcategory ? String(subcategory).toLowerCase().replace(/\s+/g, "-") : null;
-                await createNonThreatItem({
-                    item_id: item.id,
-                    subcategory_slug: subSlug
-                });
-            }
-
-            processed.push(itemId);
-            processedIds.add(file.originalname);
         }
 
         // Process pre-processed metadata items that were NOT in req.files

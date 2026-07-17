@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { CheckCircle2, AlertCircle, Upload as UploadIcon, AlertTriangle, Wand2, X } from "lucide-react";
+import { useBlocker } from "react-router-dom";
 import UploadDropZone from "../components/upload/UploadDropZone";
 import UploadFileQueue from "../components/upload/UploadFileQueue";
 import { useUploadContext } from "../context/UploadContext";
 import { API_BASE_URL } from "../config/api";
 import { LIBRARIES_UI, getLibrarySubcategories } from "../config/categories";
+import ConfirmModal from "../components/common/ConfirmModal";
 
 // Use centralized library definitions
 const LIBRARIES = LIBRARIES_UI;
@@ -18,6 +20,16 @@ export default function UploadPage() {
   const [selectedForMass, setSelectedForMass] = useState<Set<number>>(new Set());
   const [confirmUpload, setConfirmUpload] = useState(false);
   const [duplicateFilenames, setDuplicateFilenames] = useState<string[]>([]);
+
+  const hasUnsavedChanges = staged.length > 0 || files.length > 0;
+  const routerBlocker = useBlocker(hasUnsavedChanges);
+
+  // Reset blocker if unsaved changes are resolved while blocked
+  useEffect(() => {
+    if (routerBlocker.state === "blocked" && !hasUnsavedChanges) {
+      routerBlocker.reset?.();
+    }
+  }, [routerBlocker.state, hasUnsavedChanges, routerBlocker]);
 
   // Pipeline-specific state
   const [processing, setProcessing] = useState(false);
@@ -238,15 +250,19 @@ export default function UploadPage() {
       }
     });
 
+    const summarize = (items: string[], label: string, suffix = "items") => {
+      if (items.length === 0) return "";
+      if (items.length <= 5) return `${label} ${items.join(", ")}`;
+      const first = items.slice(0, 5).join(", ");
+      const more = items.length - 5;
+      return `${label} ${first} and ${more} more ${suffix}`;
+    };
+
     if (missingCategory.length > 0 || missingBagsRegion.length > 0) {
       const lines: string[] = [];
-      if (missingCategory.length > 0) {
-        lines.push(`Set category & subcategory for item(s) ${missingCategory.join(", ")}`);
-      }
-      if (missingBagsRegion.length > 0) {
-        lines.push(`Draw valid region for bag item(s) ${missingBagsRegion.join(", ")}`);
-      }
-      setValidationMessage(lines.join(" | "));
+      lines.push(summarize(missingCategory, "Set category & subcategory for item(s)"));
+      lines.push(summarize(missingBagsRegion, "Draw valid region for bag item(s)", "bags"));
+      setValidationMessage(lines.filter(Boolean).join(" | "));
       setTimeout(() => setValidationMessage(null), 5000);
       return;
     }
@@ -295,34 +311,22 @@ export default function UploadPage() {
 
       const data = await res.json();
       if (data.ok) {
-        if (data.duplicates && data.duplicates.length > 0) {
-          setDuplicateFilenames(data.duplicates);
-          setUploadStatus("error");
-        } else if (data.errors && data.errors.length > 0) {
-          setUploadStatus("error");
-        } else {
-          setUploadStatus("success");
-          // Refresh library after successful upload by fetching categorized items
-          try {
-            const libraryRes = await fetch(`${API_BASE_URL}/api/items/categorized`);
-            if (libraryRes.ok) {
-              const libraryData = await libraryRes.json();
-              // Store in session storage so LibraryPage can pick it up
-              sessionStorage.setItem("refreshedCategorizedItems", JSON.stringify(libraryData));
-              // Also trigger a refresh event for any listeners
-              window.dispatchEvent(new CustomEvent("libraryRefresh", { detail: libraryData }));
-            }
-          } catch (refreshErr) {
-            console.warn("Failed to refresh library cache:", refreshErr);
-          }
-          setTimeout(() => {
-            clearAll();
-            // Clear orphaned items tracking on successful upload
-            sessionStorage.removeItem('orphanedPreprocessedItems');
-          }, 1000);
+        if (data.errors && data.errors.length > 0) {
+          setDuplicateFilenames(data.errors.map((e: any) => e.filename || e.message || String(e)));
         }
+        if (data.duplicates && data.duplicates.length > 0) {
+          setDuplicateFilenames(prev => [...prev, ...data.duplicates]);
+        }
+        setUploadStatus("success");
+        setConfirmUpload(false);
+        setValidationMessage(null);
+        setTimeout(() => {
+          clearAll();
+          sessionStorage.removeItem('orphanedPreprocessedItems');
+        }, 1000);
       } else {
         setUploadStatus("error");
+        setValidationMessage(data.error || "Upload failed. Please try again.");
       }
     } catch (err) {
       console.error(err);
@@ -469,6 +473,21 @@ export default function UploadPage() {
             onSelectAll={toggleSelectAll}
           />
         )}
+
+        <ConfirmModal
+          isOpen={routerBlocker.state === "blocked"}
+          title="Unsaved Changes"
+          message="You have staged files that haven't been uploaded. If you leave this page, they will be discarded."
+          confirmLabel="Discard & Leave"
+          cancelLabel="Cancel"
+          confirmVariant="danger"
+          onConfirm={() => {
+            (routerBlocker as any).proceed?.();
+          }}
+          onCancel={() => {
+            (routerBlocker as any).reset?.();
+          }}
+        />
       </div>
 
       {/* Upload confirmation dialog */}

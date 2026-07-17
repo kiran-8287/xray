@@ -35,10 +35,12 @@ function NavigationGuard() {
   const [pendingLocation, setPendingLocation] = useState<string | null>(null);
   
   // Block navigation when there are generated results and user is on collage page
-  const blocker = useBlocker(() => {
+  // Exception: allow navigation to /customize page (part of collage workflow)
+  const blocker = useBlocker(({ nextLocation }) => {
     const hasResults = GenerationService.hasGeneratedResults();
     const isOnCollagePage = window.location.pathname.startsWith("/collage");
-    return hasResults && isOnCollagePage;
+    const isNavigatingToCustomize = nextLocation.pathname.startsWith("/customize");
+    return hasResults && isOnCollagePage && !isNavigatingToCustomize;
   });
 
   useEffect(() => {

@@ -18,6 +18,7 @@ interface Props {
   onSelectAllSubcategory: (category: string, subcategory: string) => void;
   onDeleteCategory: (category: string) => void;
   onDeleteSubcategory: (category: string, subcategory: string) => void;
+  isGenerating?: boolean;
 }
 
 export default function SimpleLibrarySidebar({
@@ -32,6 +33,7 @@ export default function SimpleLibrarySidebar({
   onSelectAllSubcategory,
   onDeleteCategory,
   onDeleteSubcategory,
+  isGenerating = false,
 }: Props) {
   const categories = ['bags', 'threats', 'non-threats'];
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
@@ -112,7 +114,8 @@ export default function SimpleLibrarySidebar({
                 </button>
                 <button
                   onClick={() => onDeleteCategory(catKey)}
-                  className="rounded-lg border border-border bg-surface px-2 py-1.5 text-[9px] font-bold text-muted"
+                  disabled={isGenerating}
+                  className="rounded-lg border border-border bg-surface px-2 py-1.5 text-[9px] font-bold text-muted disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Delete all items in this category"
                 >
                   <Trash2 size={11} />
@@ -171,7 +174,8 @@ export default function SimpleLibrarySidebar({
                         </button>
                         <button
                           onClick={() => onDeleteSubcategory(catKey, subKey)}
-                          className="rounded-lg border border-border bg-surface px-2 py-1.5 text-[9px] font-bold text-muted"
+                          disabled={isGenerating}
+                          className="rounded-lg border border-border bg-surface px-2 py-1.5 text-[9px] font-bold text-muted disabled:opacity-50 disabled:cursor-not-allowed"
                           title={`Delete all items in ${subKey}`}
                         >
                           <Trash2 size={11} />

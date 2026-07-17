@@ -762,34 +762,6 @@ export default function SavedPage() {
         </div>
       ) : (
         <>
-          {/* Pagination Header */}
-          {pagination && (
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <p className="text-sm text-muted">
-                Showing {((pagination.page - 1) * pagination.limit) + 1}-{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={pagination.page <= 1}
-                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Prev
-                </button>
-                <span className="text-sm text-muted">
-                  Page {pagination.page} / {pagination.totalPages}
-                </span>
-                <button
-                  onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
-                  disabled={pagination.page >= pagination.totalPages}
-                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* List View Table */}
           <div className="rounded-2xl border border-border bg-panel overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
@@ -876,6 +848,34 @@ export default function SavedPage() {
               </table>
             </div>
           </div>
+
+          {/* Pagination Footer */}
+          {pagination && (
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <p className="text-sm text-muted">
+                Showing {((pagination.page - 1) * pagination.limit) + 1}-{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={pagination.page <= 1}
+                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <span className="text-sm text-muted">
+                  Page {pagination.page} / {pagination.totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                  disabled={pagination.page >= pagination.totalPages}
+                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Detail Panel */}
           {selectedLayout && (

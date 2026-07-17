@@ -84,6 +84,7 @@ interface ItemCardProps {
   onOpen: () => void;
   onEditRegion: () => void;
   onDelete: () => void;
+  isGenerating?: boolean;
 }
 
 const ItemCard = memo(function ItemCard({
@@ -93,6 +94,7 @@ const ItemCard = memo(function ItemCard({
   onOpen,
   onEditRegion,
   onDelete,
+  isGenerating = false,
 }: ItemCardProps) {
   const config = getCategoryConfig(item.category);
 
@@ -174,7 +176,8 @@ const ItemCard = memo(function ItemCard({
                 e.stopPropagation();
                 onEditRegion();
               }}
-              className="p-1 rounded-md bg-panel border border-border text-muted shadow-card"
+              disabled={isGenerating}
+              className="p-1 rounded-md bg-panel border border-border text-muted shadow-card disabled:opacity-50 disabled:cursor-not-allowed"
               title="Edit valid region"
             >
               <Edit3 size={12} />
@@ -185,7 +188,8 @@ const ItemCard = memo(function ItemCard({
               e.stopPropagation();
               onDelete();
             }}
-            className="p-1 rounded-md bg-panel border border-border text-muted shadow-card"
+            disabled={isGenerating}
+            className="p-1 rounded-md bg-panel border border-border text-muted shadow-card disabled:opacity-50 disabled:cursor-not-allowed"
             title="Delete item"
           >
             <Trash2 size={12} />
