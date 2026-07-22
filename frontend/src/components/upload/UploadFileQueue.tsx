@@ -707,7 +707,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   return (
     <div className="w-full max-w-4xl mx-auto flex flex-col">
       <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-nav flex-shrink-0">
-        <span className="text-sm font-semibold text-ink">Staged Items</span>
+        <span className="text-sm font-semibold text-ink font-heading">Staged Items</span>
         <span className="bg-surface text-muted text-xs font-mono px-2.5 py-0.5 rounded-full border border-border">{staged.length}</span>
       </div>
 
@@ -785,7 +785,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
           
           {showMassTagSelector && (
             <div ref={massTagSelectorRef} className="absolute top-full mt-2 left-0 p-3 border border-border rounded-lg bg-white shadow-xl z-50 w-[400px]">
-              <div className="text-xs font-semibold text-ink mb-2">Assign Tags to Bag Items</div>
+              <div className="text-xs font-semibold text-ink mb-2 font-heading">Assign Tags to Bag Items</div>
               <div className="text-[10px] text-muted mb-2">Select tags to apply to all bag items (or selected items):</div>
               <div className="space-y-1 max-h-64 overflow-y-auto">
                 {LIBRARIES.find(l => l.slug === "non-threats")?.subcategories.map((sub) => {
@@ -1386,7 +1386,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
               
               return (
                 <div className="w-64 bg-white rounded-lg shadow-2xl p-4 max-h-[75vh] overflow-y-auto">
-                  <div className="text-sm font-semibold text-ink mb-1">Tags</div>
+                  <div className="text-sm font-semibold text-ink mb-1 font-heading">Tags</div>
                   <div className="text-xs text-muted mb-3">Select non-threat items:</div>
                   
                   {(() => {

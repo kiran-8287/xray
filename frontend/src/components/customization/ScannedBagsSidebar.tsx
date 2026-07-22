@@ -160,7 +160,7 @@ export default function ScannedBagsSidebar({
   return (
     <aside className="w-80 border-r border-border bg-nav flex flex-col overflow-hidden flex-shrink-0 text-sm shadow-sm">
       <div className="px-5 py-4 border-l-4 border-accent bg-panel">
-        <h3 className="font-bold text-ink flex items-center gap-2 text-xs uppercase tracking-[0.05em]">
+        <h3 className="font-bold text-ink flex items-center gap-2 text-xs uppercase tracking-[0.05em] font-heading">
           <Activity size={14} className="text-accent" />
           Library Items
         </h3>
@@ -392,7 +392,7 @@ export default function ScannedBagsSidebar({
                 <p className="text-xs text-muted mb-4">No additional items available in the library.</p>
                 <button
                   onClick={() => navigate("/library")}
-                  className="px-4 py-2 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn hover:shadow-btn-hover transition-all text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                  className="px-4 py-2 rounded-xl font-semibold text-white bg-blue-600 shadow-btn hover:shadow-btn-hover transition-all text-xs inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <BookOpen size={12} />
                   Go to Library

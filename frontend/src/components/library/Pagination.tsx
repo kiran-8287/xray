@@ -36,14 +36,14 @@ export default function Pagination({
         pages.push("...");
       }
 
-      const start = Math.max(2, currentPage - 1);
-      const end = Math.min(totalPages - 1, currentPage + 1);
+      const start = Math.max(2, currentPage - 2);
+      const end = Math.min(totalPages - 1, currentPage + 2);
 
       for (let i = start; i <= end; i++) {
         pages.push(i);
       }
 
-      if (currentPage < totalPages - 2) {
+      if (currentPage < totalPages - 3) {
         pages.push("...");
       }
 

@@ -640,7 +640,7 @@ export default function SavedPage() {
 
       <div className="mb-6 flex items-center justify-between gap-4">
         <div className="border-l-4 border-accent pl-4">
-          <h2 className="text-3xl font-bold text-ink tracking-tight">Saved Layouts</h2>
+          <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Saved Layouts</h2>
         </div>
         <div className="inline-flex items-center gap-2 rounded-xl border border-border bg-panel px-4 py-3 text-sm text-muted">
           <FolderOpen size={18} />
@@ -654,34 +654,34 @@ export default function SavedPage() {
           {/* Filter 1: Bags and Objects */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <label className="block text-xs font-semibold text-muted uppercase tracking-wider">Filter by Bags & Objects</label>
+              <span className="text-xs font-semibold text-muted uppercase tracking-wider">Filters</span>
               <button
                 onClick={() => setShowTagsFilter(!showTagsFilter)}
-                className="text-xs px-3 py-1.5 rounded-lg border border-border bg-white hover:bg-surface text-ink font-medium flex items-center gap-1.5"
+                className="text-xs px-3 py-1.5 rounded-lg border border-border bg-white hover:bg-surface text-ink font-medium"
               >
-                {showTagsFilter ? 'Hide' : 'Show'} Tags Filter
+                {showTagsFilter ? 'Hide' : 'Show'} Tags
               </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* Bag Subcategory Filter */}
               <div>
-                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter by Bag Subcategory</label>
+                <label className="block text-[10px] font-semibold text-muted uppercase tracking-wider mb-1.5">Bag Type</label>
                 <MultiSelectDropdown
                   selected={selectedBagSubcategories}
                   options={allBagSubcategories.map(s => ({ id: s.slug, name: s.name }))}
                   onChange={setSelectedBagSubcategories}
-                  placeholder="Choose bag subcategories..."
+                  placeholder="Select..."
                 />
               </div>
 
               {/* Threat Subcategory Filter */}
               <div>
-                <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter by Threat Subcategory</label>
+                <label className="block text-[10px] font-semibold text-muted uppercase tracking-wider mb-1.5">Threat Type</label>
                 <MultiSelectDropdown
                   selected={selectedThreatSubcategories}
                   options={allThreatSubcategories.map(s => ({ id: s.slug, name: s.name }))}
                   onChange={setSelectedThreatSubcategories}
-                  placeholder="Choose threat subcategories..."
+                  placeholder="Select..."
                 />
               </div>
             </div>
@@ -690,14 +690,14 @@ export default function SavedPage() {
           {/* Filter 2: Tags (Toggleable) */}
           {showTagsFilter && (
             <div className="pt-3 border-t border-border">
-              <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter by Tags</label>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <label className="block text-[10px] font-semibold text-muted uppercase tracking-wider mb-1.5">Tags</label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
                   <MultiSelectDropdown
                     selected={selectedTags}
                     options={allTags.map(s => ({ id: s.slug, name: s.name }))}
                     onChange={setSelectedTags}
-                    placeholder="Choose tags..."
+                    placeholder="Select..."
                   />
                 </div>
               </div>
@@ -706,7 +706,7 @@ export default function SavedPage() {
 
           {/* Filter Logic Segmented Control (applies to both threats and tags) */}
           <div>
-            <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">Filter Logic (Threats & Tags)</label>
+            <label className="block text-[10px] font-semibold text-muted uppercase tracking-wider mb-1.5">Match Logic</label>
             <div className="inline-flex items-center rounded-lg border border-border bg-white p-1">
               <button
                 onClick={() => setFilterLogic('or')}
@@ -715,7 +715,7 @@ export default function SavedPage() {
                     ? 'bg-accent text-white shadow-sm'
                     : 'text-muted hover:text-ink hover:bg-surface'
                 }`}
-                title="Show layouts with ANY selected threat or tag"
+                title="Match ANY selected item"
               >
                 OR
               </button>
@@ -726,15 +726,11 @@ export default function SavedPage() {
                     ? 'bg-accent text-white shadow-sm'
                     : 'text-muted hover:text-ink hover:bg-surface'
                 }`}
-                title="Show layouts with ALL selected threats and tags together"
+                title="Match ALL selected items"
               >
                 AND
               </button>
             </div>
-            <p className="text-[10px] text-muted mt-1">
-              {filterLogic === 'or' && 'Shows layouts with ANY selected threat or tag (backpack+gun OR backpack+knife)'}
-              {filterLogic === 'and' && 'Shows layouts with ALL selected threats and tags together (backpack+gun+knife)'}
-            </p>
           </div>
 
           {(selectedBagSubcategories.length > 0 || selectedThreatSubcategories.length > 0 || selectedTags.length > 0) && (
@@ -887,7 +883,7 @@ export default function SavedPage() {
                 {/* Header */}
                 <div className="flex items-center justify-between gap-4 border-b border-border bg-nav px-5 py-4">
                   <div className="min-w-0">
-                    <h2 className="truncate text-lg font-semibold text-ink">{selectedLayout.id}</h2>
+                    <h2 className="truncate text-lg font-semibold text-ink font-heading">{selectedLayout.id}</h2>
                     <p className="text-xs text-muted">Saved {new Date(selectedLayout.created_at).toLocaleString()}</p>
                   </div>
                   <button

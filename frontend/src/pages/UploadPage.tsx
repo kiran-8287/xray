@@ -359,7 +359,7 @@ export default function UploadPage() {
   return (
     <div className="w-full py-6 px-6 animate-fade-in">
       <div className="border-l-4 border-accent pl-4 mb-8">
-        <h2 className="text-3xl font-bold text-ink tracking-tight">Upload Images</h2>
+        <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Upload Images</h2>
       </div>
 
       <div className="space-y-6 max-w-5xl mx-auto">
@@ -413,7 +413,7 @@ export default function UploadPage() {
           <button
             onClick={handleUpload}
             disabled={uploading || staged.length === 0}
-            className="w-full flex items-center justify-center gap-3 px-5 py-3.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center gap-3 px-5 py-3.5 rounded-xl font-semibold text-white bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {uploading ? (
               "Uploading..."

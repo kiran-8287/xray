@@ -899,7 +899,7 @@ export default function LibraryPage() {
                   <div className="w-16 h-16 bg-surface rounded-full flex items-center justify-center mx-auto mb-4 border border-border">
                     <Image size={28} className="text-muted/40" />
                   </div>
-                  <h3 className="text-base font-semibold text-ink mb-1">No items found</h3>
+                  <h3 className="text-base font-semibold text-ink mb-1 font-heading">No items found</h3>
                   <p className="text-sm text-muted">
                     {searchQuery ? "Try refining your search keyword." : "Upload scanned items to get started."}
                   </p>
@@ -972,10 +972,10 @@ export default function LibraryPage() {
                 />
               </div>
               <div className="flex-1 space-y-4">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.24em] text-muted mb-1">Selected item</p>
-                  <h2 className="text-xl font-semibold text-ink">{editingItem.filename}</h2>
-                </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.24em] text-muted mb-1">Selected item</p>
+                    <h2 className="text-xl font-semibold text-ink font-heading">{editingItem.filename}</h2>
+                  </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="space-y-2 text-sm">
                     <span className="text-muted text-xs">Category</span>

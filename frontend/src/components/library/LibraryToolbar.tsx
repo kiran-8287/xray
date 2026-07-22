@@ -19,7 +19,7 @@ export default function LibraryToolbar({
   return (
     <div className="px-3 py-1.5 border-b border-border bg-panel flex items-center justify-between flex-shrink-0">
       <div className="flex-shrink-0">
-        <h2 className="text-lg font-bold text-ink tracking-tight">{title}</h2>
+        <h2 className="text-lg font-bold text-ink tracking-tight font-heading">{title}</h2>
         <p className="text-[11px] text-muted mt-0.5 leading-none">
           {itemCount} items · {subcategoryCount} subcategories
         </p>

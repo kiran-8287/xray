@@ -70,7 +70,7 @@ function NavigationGuard() {
     <div className="fixed inset-0 z-[99999] flex items-center justify-center p-6">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div className="relative z-[100000] w-full max-w-md bg-white rounded-2xl shadow-2xl border border-border p-6">
-        <h3 className="text-lg font-bold text-ink mb-2">Unsaved Combinations</h3>
+        <h3 className="text-lg font-bold text-ink mb-2 font-heading">Unsaved Combinations</h3>
         <p className="text-sm text-muted mb-6">
           You have generated combinations that haven't been saved. If you leave this page, they will be discarded.
         </p>
