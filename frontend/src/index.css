@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600;700&family=Poppins:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -11,10 +11,19 @@ body,
 }
 
 body {
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: "Poppins", system-ui, sans-serif;
   background-color: #F0F3F8;
   color: #1B2333;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Typography utility classes */
+.font-heading {
+  font-family: "Josefin Sans", sans-serif;
+}
+
+.font-body {
+  font-family: "Poppins", sans-serif;
 }
 
 @keyframes slide-up {

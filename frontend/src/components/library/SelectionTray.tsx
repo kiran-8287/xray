@@ -92,7 +92,7 @@ export default function SelectionTray({
       <span className="bg-accent text-white text-xs font-bold px-2.5 py-1 rounded-full">
         {selectedCount}
       </span>
-      <span className="text-sm font-semibold text-ink">
+      <span className="text-sm font-semibold text-ink font-heading">
         item{selectedCount !== 1 ? "s" : ""} selected
       </span>
 
@@ -226,7 +226,7 @@ export default function SelectionTray({
           !hasValidDistribution ? "Distribution percentages must total 100%" :
           ""
         }
-        className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        className="px-5 py-2.5 rounded-xl font-semibold text-white bg-blue-600 shadow-btn flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isGenerating ? "Generating..." : "Generate Collage"}
       </button>

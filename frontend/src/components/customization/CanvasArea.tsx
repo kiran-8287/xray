@@ -216,7 +216,7 @@ export default function CanvasArea({
               <div className="w-16 h-16 bg-surface rounded-full flex items-center justify-center mx-auto mb-3 border border-border">
                 <GripVertical size={24} className="text-muted/40" />
               </div>
-              <p className="text-sm font-semibold text-ink mb-1">No bag selected</p>
+              <p className="text-sm font-semibold text-ink mb-1 font-heading">No bag selected</p>
               <p className="text-xs text-muted">Go to collage page to select a bag</p>
             </div>
           </div>

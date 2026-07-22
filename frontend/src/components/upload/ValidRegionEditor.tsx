@@ -1104,7 +1104,7 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
             <button 
               onClick={handleSave} 
               disabled={isSaveDisabled}
-              className="px-5 py-2.5 rounded-lg font-semibold text-white bg-gradient-to-r from-[#2563EB] to-[#1D4ED8] shadow-sm hover:shadow-md hover:opacity-95 transition-all flex items-center gap-1.5 text-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-sm"
+              className="px-5 py-2.5 rounded-lg font-semibold text-white bg-blue-600 shadow-sm hover:shadow-md hover:opacity-95 transition-all flex items-center gap-1.5 text-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-sm"
             >
               <Check size={15} />
               Save Region

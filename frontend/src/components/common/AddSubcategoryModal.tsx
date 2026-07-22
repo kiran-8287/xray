@@ -51,7 +51,7 @@ export default function AddSubcategoryModal({ isOpen, onClose, onAdd, categoryNa
             <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center">
               <Plus size={16} className="text-accent" />
             </div>
-            <h3 className="text-lg font-semibold text-ink">Add New Subcategory</h3>
+            <h3 className="text-lg font-semibold text-ink font-heading">Add New Subcategory</h3>
           </div>
           <button
             onClick={handleClose}

@@ -56,9 +56,9 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       <div className="w-12 h-12 mx-auto mb-4 bg-accent/10 rounded-xl flex items-center justify-center text-accent/70 group-hover:text-accent group-hover:bg-accent/15 transition-colors">
         <UploadIcon className="w-6 h-6" />
       </div>
-      <p className="text-sm font-semibold text-ink mt-2">
-        Drag & drop folder or files here, or click to browse
-      </p>
+        <p className="text-sm font-semibold text-ink mt-2 font-heading">
+          Drag & drop folder or files here, or click to browse
+        </p>
     </div>
   );
 }

@@ -959,14 +959,14 @@ export default function CustomizationPage() {
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
           <div className="relative z-[10000] w-full max-w-md bg-white rounded-2xl shadow-lg border border-border p-6">
-            <h3 className="text-base font-semibold text-ink mb-2">Unsaved Changes</h3>
+            <h3 className="text-base font-semibold text-ink mb-2 font-heading">Unsaved Changes</h3>
             <p className="text-sm text-muted mb-5">
               You have unsaved changes in this workspace. What would you like to do?
             </p>
             <div className="flex flex-col gap-2">
               <button
                 onClick={async () => await handleBackNavigationConfirm("save")}
-                className="w-full px-4 py-2.5 rounded-xl bg-gradient-to-r from-accent to-accent-sky text-white font-semibold text-sm hover:shadow-btn-hover transition-all"
+                className="w-full px-4 py-2.5 rounded-xl bg-blue-600 text-white font-semibold text-sm hover:shadow-btn-hover transition-all"
               >
                 Save & Continue
               </button>

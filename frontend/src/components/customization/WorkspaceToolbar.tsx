@@ -42,7 +42,7 @@ export default function WorkspaceToolbar({
   handleBack,
 }: WorkspaceToolbarProps) {
   return (
-    <div className="bg-panel border-b border-border px-4 py-2 flex items-center gap-1.5 shadow-card relative z-20 h-11 flex-shrink-0 text-sm">
+    <div className="bg-panel border-b border-border px-4 py-2 flex items-center gap-1.5 shadow-card relative z-20 h-11 flex-shrink-0 text-sm font-body">
       {/* Back Button */}
       <button
         onClick={handleBack}

@@ -753,13 +753,13 @@ export default function CollagePage() {
       {/* Header Row */}
       <div className="flex items-end justify-between mb-8 border-l-4 border-accent pl-4">
         <div>
-          <h2 className="text-3xl font-bold text-ink tracking-tight">Collage Images</h2>
+          <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Collage Images</h2>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowBulkSaveModal(true)}
             disabled={bulkSaveState.status === "saving" || combinations.length === 0 || isGenerating}
-            className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-500 shadow-btn flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-5 py-2.5 rounded-xl font-semibold text-white bg-blue-600 shadow-btn flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             title="Bulk Save All Workspaces"
           >
             {bulkSaveState.status === "saving" ? (
@@ -774,14 +774,14 @@ export default function CollagePage() {
             <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
               <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowBulkSaveModal(false)} />
               <div className="relative z-[10000] w-full max-w-md bg-white rounded-2xl shadow-lg border border-border p-6">
-                <h3 className="text-base font-semibold text-ink mb-2">Bulk Save Options</h3>
+          <h3 className="text-base font-semibold text-ink mb-2 font-heading">Bulk Save Options</h3>
                 <p className="text-sm text-muted mb-5">
                   Choose how you want to save {combinations.length} combination{combinations.length !== 1 ? "s" : ""}:
                 </p>
                 <div className="flex flex-col gap-3">
                   <button
                     onClick={() => handleBulkSave(true)}
-                    className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-500 text-white font-semibold text-sm hover:shadow-btn-hover transition-all cursor-pointer text-left"
+                      className="w-full px-4 py-3 rounded-xl bg-blue-600 text-white font-semibold text-sm hover:shadow-btn-hover transition-all cursor-pointer text-left"
                   >
                     <span className="block text-base mb-0.5">Save Annotations + Images</span>
                     <span className="block text-xs opacity-90 font-normal">
@@ -816,7 +816,7 @@ export default function CollagePage() {
                 setPendingSaveAction(null);
               }} />
               <div className="relative z-[10000] w-full max-w-md bg-white rounded-2xl shadow-lg border border-border p-6">
-                <h3 className="text-base font-semibold text-ink mb-2">Choose Save Location</h3>
+                <h3 className="text-base font-semibold text-ink mb-2 font-heading">Choose Save Location</h3>
                 <p className="text-sm text-muted mb-5">
                   Select where you want to save the collage images:
                 </p>
@@ -889,7 +889,7 @@ export default function CollagePage() {
                     <button
                       onClick={handleSaveLocationConfirm}
                       disabled={saveLocationOption === "custom" && !customOutputPath.trim()}
-                      className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-500 text-white font-semibold text-sm hover:shadow-btn-hover transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white font-semibold text-sm hover:shadow-btn-hover transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Continue
                     </button>
@@ -961,13 +961,13 @@ export default function CollagePage() {
           <div className="w-20 h-20 bg-surface rounded-full flex items-center justify-center mx-auto mb-5 border-2 border-border">
             <Grid3X3 size={34} className="text-muted/30" />
           </div>
-          <h3 className="text-xl font-bold text-ink mb-2">No scanned bags selected</h3>
+          <h3 className="text-xl font-bold text-ink mb-2 font-heading">No scanned bags selected</h3>
           <p className="text-base text-muted mb-8 max-w-md mx-auto leading-relaxed">
             Please go to the Library page and select bags and objects to generate combinations.
           </p>
           <button
             onClick={() => navigate("/library")}
-            className="px-6 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-accent to-accent-sky shadow-btn text-base inline-flex items-center gap-2 cursor-pointer"
+            className="px-6 py-3 rounded-xl font-semibold text-white bg-blue-600 shadow-btn text-base inline-flex items-center gap-2 cursor-pointer"
           >
             <IoMdPhotos />
             Go to Library
@@ -1108,7 +1108,7 @@ export default function CollagePage() {
                       ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                       : saveImageState.status === "error"
                       ? "bg-rose-50 text-rose-700 border border-rose-200"
-                      : "bg-gradient-to-r from-blue-600 to-indigo-500 text-white shadow-btn hover:shadow-btn-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                      : "bg-blue-600 text-white shadow-btn hover:shadow-btn-hover disabled:opacity-50 disabled:cursor-not-allowed"
                   }`}
                 >
                   {saveImageState.status === "saving" ? (
@@ -1156,7 +1156,7 @@ export default function CollagePage() {
                     handleCloseModal();
                     handleOpenCombination(selectedCombination);
                   }}
-                  className="w-full px-5 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm bg-gradient-to-r from-accent to-accent-sky text-white shadow-btn hover:shadow-btn-hover transition-all cursor-pointer"
+                  className="w-full px-5 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm bg-blue-600 text-white shadow-btn hover:shadow-btn-hover transition-all cursor-pointer"
                 >
                   <Edit3 size={16} />
                   Customize
