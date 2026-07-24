@@ -85,16 +85,16 @@ def main():
         Image.fromarray(img).save(png_path)
         # --- Write pixel data as .npz (compressed numpy archive) ---
         # Save both high and low energy pixel values to separate folders
-        highenrgy_dir = os.path.join(pixel_data_dir, "highenrgy")
+        highenergy_dir = os.path.join(pixel_data_dir, "highenergy")
         lowenergy_dir = os.path.join(pixel_data_dir, "lowenergy")
-        os.makedirs(highenrgy_dir, exist_ok=True)
+        os.makedirs(highenergy_dir, exist_ok=True)
         os.makedirs(lowenergy_dir, exist_ok=True)
         
         if file_type == "dump":
             # For dump files: high and low are float64 arrays
             # Save high energy
             high_pixel_data = dumpread.to_uint16(high)
-            high_pixel_path = os.path.join(highenrgy_dir, f"{item_id}.npz")
+            high_pixel_path = os.path.join(highenergy_dir, f"{item_id}.npz")
             np.savez_compressed(high_pixel_path, pixel_data=high_pixel_data)
             # Save low energy
             low_pixel_data = dumpread.to_uint16(low)
@@ -105,14 +105,14 @@ def main():
             high_rotated = np.rot90(high_raw, k=3)
             low_rotated = np.rot90(low_raw, k=3)
             # Save high energy
-            high_pixel_path = os.path.join(highenrgy_dir, f"{item_id}.npz")
+            high_pixel_path = os.path.join(highenergy_dir, f"{item_id}.npz")
             np.savez_compressed(high_pixel_path, pixel_data=high_rotated)
             # Save low energy
             low_pixel_path = os.path.join(lowenergy_dir, f"{item_id}.npz")
             np.savez_compressed(low_pixel_path, pixel_data=low_rotated)
         # --- Output success result as JSON to stdout ---
         # Return high energy pixel data filename for backward compatibility
-        pixel_filename = f"highenrgy/{item_id}.npz"
+        pixel_filename = f"highenergy/{item_id}.npz"
         result = {
             "status": "done",
             "id": item_id,

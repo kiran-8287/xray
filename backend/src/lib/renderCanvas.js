@@ -190,10 +190,10 @@ function applyAffineTransform(
  * @param {Array} objects - Scene objects to render
  * @param {number} width - Canvas width
  * @param {number} height - Canvas height
- * @param {string} energyType - "highenrgy" or "lowenergy"
+ * @param {string} energyType - "highenergy" or "lowenergy"
  * @param {string[]} [warnings] - Optional array to collect warning messages
  */
-export async function renderSceneAsync(objects, width = 800, height = 600, energyType = "highenrgy", warnings = null) {
+export async function renderSceneAsync(objects, width = 800, height = 600, energyType = "highenergy", warnings = null) {
   // Initialize density buffer with 0 (air)
   const densityBuffer = new Float32Array(width * height);
 
@@ -237,9 +237,9 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
     // Try pixel data first (from raw .dump.pgm / .tip processing)
     let pixelDataFilename = obj.pixel_data_path || null;
     if (pixelDataFilename) {
-      // If low energy requested, replace the folder prefix from highenrgy to lowenergy
+      // If low energy requested, replace the folder prefix from highenergy to lowenergy
       if (energyType === "lowenergy") {
-        pixelDataFilename = pixelDataFilename.replace(/^highenrgy[\\/]/, "lowenergy/");
+        pixelDataFilename = pixelDataFilename.replace(/^highenergy[\\/]/, "lowenergy/");
       }
       const pixelData = await loadPixelData(pixelDataFilename);
       if (pixelData) {

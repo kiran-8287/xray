@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, Upload as UploadIcon, AlertTriangle, Wand2, X } from "lucide-react";
 import { useBlocker } from "react-router-dom";
 import UploadDropZone from "../components/upload/UploadDropZone";
@@ -36,6 +36,11 @@ export default function UploadPage() {
   const [processingProgress, setProcessingProgress] = useState<{ n: number; total: number } | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [streamErrors, setStreamErrors] = useState<{ id: string; reason: string }[]>([]);
+  const processingTotalRef = useRef(0);
+  const processingCompletedRef = useRef(0);
+  const processingActiveRef = useRef(false);
+  const processingQueueRef = useRef<(() => Promise<void>)[]>([]);
+  const isProcessingRef = useRef(false);
 
   // Clean up orphaned pre-processed files on page load
   useEffect(() => {
@@ -140,99 +145,110 @@ export default function UploadPage() {
   /**
    * Process raw files via NDJSON streaming endpoint
    * Parses the NDJSON stream progressively and appends items to staged panel as they complete.
+   * Accumulates totals across multiple batch uploads so the progress bar shows the correct total.
    */
   async function processRawFiles(files: File[]) {
-    const formData = new FormData();
-    files.forEach((f) => formData.append("rawFiles", f));
-
+    // Update total immediately so the progress bar shows the combined count right away
+    processingTotalRef.current += files.length;
     setProcessing(true);
-    setProcessingProgress({ n: 0, total: files.length });
+    setProcessingProgress({ n: processingCompletedRef.current, total: processingTotalRef.current });
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/process-raw-files`, {
-        method: "POST",
-        body: formData,
-      });
+    // Queue this batch for processing
+    processingQueueRef.current.push(async () => {
+      const formData = new FormData();
+      files.forEach((f) => formData.append("rawFiles", f));
 
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/process-raw-files`, {
+          method: "POST",
+          body: formData,
+        });
 
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let completed = 0;
-      let errors = 0;
+        if (!response.ok) {
+          throw new Error(`Server responded with ${response.status}`);
+        }
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        const reader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let errors = 0;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop()!; // last element may be incomplete
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop()!;
 
-          let msg;
-          try {
-            msg = JSON.parse(line);
-          } catch {
-            continue;
-          }
+          for (const line of lines) {
+            if (!line.trim()) continue;
 
-          if (msg.status === "done") {
-            completed++;
-            setProcessingProgress({ n: completed, total: files.length });
+            let msg;
+            try {
+              msg = JSON.parse(line);
+            } catch {
+              continue;
+            }
 
-            // Append to staged panel immediately
-            setStaged((prev) => {
-              const next = [...prev, {
-                file: new File([], msg.id),
-                category: msg.fileType === "dump" ? "bags" : "non-threats",
-                subcategory: "",
-                valid_region_points: null,
-                preProcessed: true,
-                filepath: msg.filepath,
-                preGeneratedFilepath: msg.filepath,
-                fileType: msg.fileType,
-                itemId: msg.id,
-                pixelDataFilename: msg.pixelDataFilename,
-                width: msg.width,
-                height: msg.height,
-              }];
-              
-              // Track pre-processed item in session storage
-              const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
-              if (!orphanedItems.includes(msg.id)) {
-                orphanedItems.push(msg.id);
-                sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(orphanedItems));
+            if (msg.status === "done") {
+              processingCompletedRef.current++;
+              setProcessingProgress({ n: processingCompletedRef.current, total: processingTotalRef.current });
+
+              // Append to staged panel immediately
+              setStaged((prev) => {
+                const next = [...prev, {
+                  file: new File([], msg.id),
+                  category: msg.fileType === "dump" ? "bags" : "non-threats",
+                  subcategory: "",
+                  valid_region_points: null,
+                  preProcessed: true,
+                  filepath: msg.filepath,
+                  preGeneratedFilepath: msg.filepath,
+                  fileType: msg.fileType,
+                  itemId: msg.id,
+                  pixelDataFilename: msg.pixelDataFilename,
+                  width: msg.width,
+                  height: msg.height,
+                }];
+                
+                const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
+                if (!orphanedItems.includes(msg.id)) {
+                  orphanedItems.push(msg.id);
+                  sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(orphanedItems));
+                }
+                
+                return next;
+              });
+            } else if (msg.status === "error") {
+              errors++;
+              setStreamErrors((prev) => [...prev, { id: msg.id, reason: msg.reason }]);
+            } else if (msg.status === "complete") {
+              if (msg.duplicates > 0) {
+                setDuplicateWarning(`${msg.duplicates} file(s) skipped — already in library`);
               }
-              
-              return next;
-            });
-          } else if (msg.status === "error") {
-            errors++;
-            setStreamErrors((prev) => [...prev, { id: msg.id, reason: msg.reason }]);
-          } else if (msg.status === "complete") {
-            setProcessing(false);
-            setProcessingProgress(null);
-            if (msg.duplicates > 0) {
-              setDuplicateWarning(`${msg.duplicates} file(s) skipped — already in library`);
             }
           }
         }
+      } catch {
+        // On error, don't stop processing - just mark this batch as done
       }
+    });
 
-      // If stream ended without a "complete" line
-      if (processing) {
-        setProcessing(false);
-        setProcessingProgress(null);
+    // Process queue sequentially if not already processing
+    if (!isProcessingRef.current) {
+      isProcessingRef.current = true;
+      while (processingQueueRef.current.length > 0) {
+        const next = processingQueueRef.current.shift();
+        if (next) await next();
       }
-    } catch {
+      isProcessingRef.current = false;
+      
+      // All batches completed - reset state
       setProcessing(false);
       setProcessingProgress(null);
+      processingTotalRef.current = 0;
+      processingCompletedRef.current = 0;
     }
   }
 
@@ -308,6 +324,14 @@ export default function UploadPage() {
         method: "POST",
         body: formData,
       });
+
+      // Check if response is JSON before parsing
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await res.text();
+        console.error("Server returned non-JSON response:", text);
+        throw new Error(`Server error (${res.status}): Expected JSON response but got HTML. Check server logs.`);
+      }
 
       const data = await res.json();
       if (data.ok) {

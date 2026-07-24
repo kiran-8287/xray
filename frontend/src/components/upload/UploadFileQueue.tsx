@@ -571,38 +571,96 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     // Collect results and apply them in batches
     const pendingResults: { idx: number; points: any; success: boolean }[] = [];
     
-    async function processOne(task: { idx: number; stagedItem: any }): Promise<void> {
-      const { idx, stagedItem } = task;
+    // Process items in batches using the new batch endpoint for better parallelization
+    const BATCH_SIZE = 20; // Process 20 items per batch request
+    const batches: { idx: number; stagedItem: any }[][] = [];
+    
+    // Split queue into batches
+    for (let i = 0; i < queue.length; i += BATCH_SIZE) {
+      batches.push(queue.slice(i, i + BATCH_SIZE));
+    }
+    
+    async function processBatch(batch: { idx: number; stagedItem: any }[]): Promise<void> {
       try {
-        const pixelDataPath = stagedItem.pixelDataFilename || `${stagedItem.itemId}.npz`;
+        const items = batch.map(task => ({
+          itemId: task.stagedItem.itemId,
+          pixelDataPath: task.stagedItem.pixelDataFilename || `${task.stagedItem.itemId}.npz`
+        }));
         
-        const res = await fetch(`${API_BASE_URL}/api/auto-valid-region`, {
+        const res = await fetch(`${API_BASE_URL}/api/auto-valid-region-batch`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            itemId: stagedItem.itemId,
-            pixelDataPath: pixelDataPath
-          }),
+          body: JSON.stringify({ items }),
         });
         const data = await res.json();
         
         if (!res.ok || !data.ok) {
-          throw new Error(data.error || "Failed to auto-generate valid region");
+          throw new Error(data.error || "Failed to auto-generate valid regions");
         }
         
-        pendingResults.push({ idx, points: data.data.points, success: true });
+        // Process results
+        if (data.results && Array.isArray(data.results)) {
+          const batchResults: { idx: number; points: any; success: boolean }[] = [];
+          
+          for (let i = 0; i < batch.length; i++) {
+            const task = batch[i];
+            const result = data.results[i];
+            
+            if (result && result.ok && result.data) {
+              batchResults.push({
+                idx: task.idx,
+                points: result.data.points,
+                success: true
+              });
+            } else {
+              batchResults.push({
+                idx: task.idx,
+                points: null,
+                success: false
+              });
+            }
+            completedCount++;
+          }
+          
+          // Add to pending results
+          pendingResults.push(...batchResults);
+          
+          // Flush results periodically
+          if (completedCount % UI_BATCH_SIZE === 0 || completedCount === total) {
+            const resultsToFlush = pendingResults.splice(0, pendingResults.length);
+            setStaged(prev => {
+              const copy = [...prev];
+              for (const r of resultsToFlush) {
+                if (r.success) {
+                  copy[r.idx] = {
+                    ...copy[r.idx],
+                    valid_region_points: {
+                      points: r.points,
+                      simplifiedPoints: r.points
+                    }
+                  };
+                }
+              }
+              return copy;
+            });
+            setMassAutoGen({ total, completed: completedCount, running: completedCount < total });
+          }
+        }
       } catch (err) {
-        console.error(`Failed to auto-generate valid region for item ${idx + 1}:`, err);
-        pendingResults.push({ idx, points: null, success: false });
-      } finally {
-        completedCount++;
+        console.error(`Failed to auto-generate batch:`, err);
         
-        // Flush batched results periodically
+        // Mark all items in batch as failed
+        for (const task of batch) {
+          pendingResults.push({ idx: task.idx, points: null, success: false });
+          completedCount++;
+        }
+        
+        // Flush results
         if (completedCount % UI_BATCH_SIZE === 0 || completedCount === total) {
-          const batch = pendingResults.splice(0, pendingResults.length);
+          const resultsToFlush = pendingResults.splice(0, pendingResults.length);
           setStaged(prev => {
             const copy = [...prev];
-            for (const r of batch) {
+            for (const r of resultsToFlush) {
               if (r.success) {
                 copy[r.idx] = {
                   ...copy[r.idx],
@@ -620,14 +678,18 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
       }
     }
     
-    // Throttled queue: run up to CONCURRENCY in-flight requests
-    const workers = Array.from({ length: CONCURRENCY }, async () => {
-      while (queue.length > 0) {
-        const task = queue.shift()!;
-        await processOne(task);
+    // Process batches in parallel with concurrency limit
+    const batchWorkers = Array.from({ length: CONCURRENCY }, async () => {
+      while (batches.length > 0) {
+        const batch = batches.shift()!;
+        await processBatch(batch);
+        // Yield to event loop after each batch to allow streaming reader to process chunks
+        if (batches.length > 0) {
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
       }
     });
-    await Promise.all(workers);
+    await Promise.all(batchWorkers);
     
     // Flush any remaining results
     if (pendingResults.length > 0) {

@@ -9,7 +9,7 @@ export const pixelDataCache = new Map<string, number[][]>();
  * Fetch full 16-bit pixel data from the server's .npz files.
  * This avoids the 0.2% quantization error from browser canvas 8-bit truncation.
  */
-export async function fetchPixelData(itemId: string, energyType: string = "highenrgy"): Promise<number[][] | null> {
+export async function fetchPixelData(itemId: string, energyType: string = "highenergy"): Promise<number[][] | null> {
   const cacheKey = `${itemId}_${energyType}`;
   if (pixelDataCache.has(cacheKey)) {
     return pixelDataCache.get(cacheKey)!;
@@ -62,7 +62,7 @@ export async function drawXRayComposite(
   objects: SceneObject[],
   onImagesLoaded: () => void
 ) {
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return;
 
   const width = canvas.width;
@@ -190,7 +190,7 @@ export async function drawXRayComposite(
   const layerCanvas = document.createElement("canvas");
   layerCanvas.width = width;
   layerCanvas.height = height;
-  const layerCtx = layerCanvas.getContext("2d");
+  const layerCtx = layerCanvas.getContext("2d", { willReadFrequently: true });
   if (!layerCtx) return;
 
   // Result buffer: 16-bit values (0-65535), initialized to white (transparent)
@@ -290,7 +290,7 @@ export function computeObjectStats(
   const tempCanvas = document.createElement("canvas");
   tempCanvas.width = width;
   tempCanvas.height = height;
-  const tempCtx = tempCanvas.getContext("2d");
+  const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
   if (!tempCtx) return stats;
 
   for (const obj of sorted) {

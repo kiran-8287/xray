@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider, NavLink, useBlocker, Outlet } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, NavLink, useBlocker, Outlet, useLocation } from "react-router-dom";
 import { Grid3X3, Bookmark, Upload, Images } from "lucide-react";
 import UploadPage from "./pages/UploadPage";
 import CollagePage from "./pages/CollagePage";
@@ -8,7 +8,7 @@ import SavedPage from "./pages/SavedPage";
 import { UploadProvider } from "./context/UploadContext";
 import { loadCustomSubcategories } from "./config/categories";
 import { GenerationService } from "./lib/generationService";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // Register Service Worker for offline support and image caching
 export function registerServiceWorker() {
@@ -33,14 +33,20 @@ export function registerServiceWorker() {
 function NavigationGuard() {
   const [showDialog, setShowDialog] = useState(false);
   const [pendingLocation, setPendingLocation] = useState<string | null>(null);
+  const location = useLocation();
   
   // Block navigation when there are generated results and user is on collage page
-  // Exception: allow navigation to /customize page (part of collage workflow)
+  // Exception: allow navigation to/from /customize page (handled by CustomizationPage)
   const blocker = useBlocker(({ nextLocation }) => {
     const hasResults = GenerationService.hasGeneratedResults();
-    const isOnCollagePage = window.location.pathname.startsWith("/collage");
+    const isOnCollagePage = location.pathname.startsWith("/collage");
     const isNavigatingToCustomize = nextLocation.pathname.startsWith("/customize");
-    return hasResults && isOnCollagePage && !isNavigatingToCustomize;
+    
+    // Only block if:
+    // 1. Currently on collage page
+    // 2. Have generated results
+    // 3. NOT navigating to customize page (that's part of the workflow)
+    return isOnCollagePage && hasResults && !isNavigatingToCustomize;
   });
 
   useEffect(() => {

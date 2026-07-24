@@ -53,6 +53,7 @@ export default function ScannedBagsSidebar({
 }: ScannedBagsSidebarProps) {
   const navigate = useNavigate();
   const [collapsedSubcats, setCollapsedSubcats] = useState<Set<string>>(new Set());
+  const [isOnCanvasCollapsed, setIsOnCanvasCollapsed] = useState(false);
 
   const toggleSubcategory = (subKey: string) => {
     setCollapsedSubcats((prev) => {
@@ -64,6 +65,10 @@ export default function ScannedBagsSidebar({
       }
       return next;
     });
+  };
+
+  const toggleOnCanvas = () => {
+    setIsOnCanvasCollapsed((prev) => !prev);
   };
 
   if (!categorizedList) {
@@ -91,6 +96,12 @@ export default function ScannedBagsSidebar({
     const normalized = normalizeCategoryName(catKey);
     const displayName = CATEGORY_LABELS[catKey] || catKey;
     const config = getCategoryConfig(catKey);
+    
+    // Defensive check: ensure config has required properties
+    if (!config || !config.bg || !config.text) {
+      console.warn(`[ScannedBagsSidebar] Invalid config for category: ${catKey}`);
+      continue;
+    }
 
     // Skip bags category entirely if there's already a bag on the canvas
     if (hasBag && (normalized === "bags" || catKey === "bag")) continue;
@@ -233,45 +244,51 @@ export default function ScannedBagsSidebar({
       {/* On-canvas items section */}
       {!activeLibrary && canvasObjects.length > 0 && (
         <div className="px-3 py-2 border-b border-border/60 bg-panel/30">
-          <div className="flex items-center justify-between mb-1.5">
+          <button
+            onClick={toggleOnCanvas}
+            className="flex items-center justify-between w-full cursor-pointer hover:opacity-80"
+          >
             <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">On Canvas ({canvasObjects.length})</span>
-          </div>
-          <div className="space-y-1 max-h-40 overflow-y-auto">
-            {canvasObjects.map((obj) => {
-              const isSelected = selectedObjectId === obj.id;
-              const config = getCategoryConfig(obj.library);
-              return (
-                <div
-                  key={obj.id}
-                  onClick={() => onSelectCanvasObject(isSelected ? null : obj.id)}
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border cursor-pointer transition-all ${
-                    isSelected
-                      ? "bg-accent/10 border-accent/40 shadow-sm"
-                      : "bg-surface border-border/60 hover:border-accent/30 hover:bg-panel"
-                  }`}
-                >
-                  <div className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold ${config.bg} ${config.text}`}>
-                    {obj.library === "bag" ? "B" : obj.library === "threat" ? "T" : "N"}
+            <span className={`text-[10px] transition-transform ${isOnCanvasCollapsed ? 'rotate-0' : 'rotate-90'}`}>▶</span>
+          </button>
+          {!isOnCanvasCollapsed && (
+            <div className="space-y-1 max-h-40 overflow-y-auto mt-1.5">
+              {canvasObjects.map((obj) => {
+                const isSelected = selectedObjectId === obj.id;
+                const config = getCategoryConfig(obj.library);
+                return (
+                  <div
+                    key={obj.id}
+                    onClick={() => onSelectCanvasObject(isSelected ? null : obj.id)}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border cursor-pointer transition-all ${
+                      isSelected
+                        ? "bg-accent/10 border-accent/40 shadow-sm"
+                        : "bg-surface border-border/60 hover:border-accent/30 hover:bg-panel"
+                    }`}
+                  >
+                  <div className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold ${config?.bg || 'bg-gray-100'} ${config?.text || 'text-gray-700'}`}>
+                      {obj.library === "bag" ? "B" : obj.library === "threat" ? "T" : "N"}
+                    </div>
+                    <span className={`text-[11px] font-medium truncate flex-1 ${isSelected ? "text-accent" : "text-ink"}`}>
+                      {obj.name}
+                    </span>
+                    {obj.library !== "bag" && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemoveCanvasObject(obj.id);
+                        }}
+                        className="text-muted hover:text-rose-600 transition-colors"
+                        title="Remove from canvas"
+                      >
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                      </button>
+                    )}
                   </div>
-                  <span className={`text-[11px] font-medium truncate flex-1 ${isSelected ? "text-accent" : "text-ink"}`}>
-                    {obj.name}
-                  </span>
-                  {obj.library !== "bag" && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveCanvasObject(obj.id);
-                      }}
-                      className="text-muted hover:text-rose-600 transition-colors"
-                      title="Remove from canvas"
-                    >
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
