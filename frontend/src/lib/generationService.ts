@@ -37,8 +37,15 @@ function notifySubscribers() {
 
 function persistToStorage() {
   try {
+    // Store only essential data (IDs and minimal info) to avoid quota limits
     if (state.combinations.length > 0) {
-      sessionStorage.setItem("collageCombinations", JSON.stringify(state.combinations));
+      const lightweightCombos = state.combinations.map(combo => ({
+        id: combo.id,
+        bag: combo.bag ? { id: combo.bag.id } : null,
+        threats: combo.threats?.map(t => ({ id: t.id })) || [],
+        others: combo.others?.map(o => ({ id: o.id })) || [],
+      }));
+      sessionStorage.setItem("collageCombinations", JSON.stringify(lightweightCombos));
     }
     if (state.failures.length > 0) {
       sessionStorage.setItem("collageFailures", JSON.stringify(state.failures));
@@ -50,6 +57,15 @@ function persistToStorage() {
     }
   } catch (err) {
     console.warn("[GenerationService] storage persist failed:", err);
+    // Clear storage if quota exceeded to prevent repeated errors
+    if (err instanceof Error && err.name === 'QuotaExceededError') {
+      try {
+        sessionStorage.removeItem("collageCombinations");
+        sessionStorage.removeItem("collageFailures");
+      } catch (clearErr) {
+        // Ignore cleanup errors
+      }
+    }
   }
 }
 
@@ -249,14 +265,46 @@ export const GenerationService = {
   },
 
   /**
+   * Update a specific combination (e.g. after customization save)
+   */
+  updateCombination(combinationId: string, updatedObjects: any[]) {
+    if (state.isGenerating) return;
+    
+    const comboIndex = state.combinations.findIndex(c => c.id === combinationId);
+    if (comboIndex === -1) return;
+    
+    // Update the combination with new objects while maintaining the structure
+    const existingCombo = state.combinations[comboIndex];
+    state.combinations[comboIndex] = {
+      ...existingCombo,
+      objects: updatedObjects,
+    };
+    
+    notifySubscribers();
+    
+    // Don't call persistToStorage() here - it would overwrite sessionStorage
+    // with lightweight data, losing the full objects. The sessionStorage
+    // is only for page refresh recovery, not for preserving edits.
+  },
+
+  /**
    * Restore state from sessionStorage (e.g. after page refresh)
+   * Note: Only restores lightweight data (IDs). Full objects must be re-fetched.
+   * Will NOT overwrite in-memory state that already has objects (e.g. after customization save).
    */
   restoreFromStorage() {
     if (state.isGenerating) return;
+    
+    // Check if in-memory state already has combinations with objects
+    // If so, don't overwrite with lightweight storage data
+    const hasFullObjects = state.combinations.some(c => c.objects && c.objects.length > 0);
+    if (hasFullObjects) return;
+    
     try {
       const combos = sessionStorage.getItem("collageCombinations");
       const failures = sessionStorage.getItem("collageFailures");
       if (combos) {
+        // Restore as lightweight combos - full data needs to be re-fetched from backend
         state.combinations = JSON.parse(combos);
         state.hasGeneratedResults = true;
       }

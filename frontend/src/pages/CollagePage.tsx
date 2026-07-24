@@ -42,6 +42,10 @@ export default function CollagePage() {
   // Bulk save confirmation modal state
   const [showBulkSaveModal, setShowBulkSaveModal] = useState(false);
 
+  // Unsaved combinations navigation warning modal state
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
+
   // Preview modal state
   const [selectedCombination, setSelectedCombination] = useState<CombinatorialResult | null>(null);
   const [showModal, setShowModal] = useState(false);
@@ -84,6 +88,16 @@ export default function CollagePage() {
 
     if (locationState && locationState.selectedBags && locationState.selectedBags.length > 0) {
       return; // fresh navigation from Library — handled by the locationState effect below
+    }
+
+    // Check if GenerationService already has data (e.g. from customization save)
+    const serviceState = GenerationService.getState();
+    if (serviceState.combinations.length > 0) {
+      // Use the service state instead of restoring from storage
+      // This preserves any updates made in customization page
+      setCombinations(serviceState.combinations);
+      setFailures(serviceState.failures);
+      return;
     }
 
     const restoredCombos: any[] = [];
@@ -178,6 +192,14 @@ export default function CollagePage() {
       return;
     }
 
+    // Check if GenerationService has data (e.g. after returning from customization)
+    // If so, don't override with stale locationState data
+    const serviceState = GenerationService.getState();
+    if (serviceState.combinations.length > 0) {
+      // Service has data - don't overwrite with stale location state
+      return;
+    }
+
     const { selectedBags: bags, selectedThreats: threats, selectedOthers: others, combinations: preCombinations, failures: preFailures } = locationState as any;
 
     setSelectedBags(bags);
@@ -200,7 +222,14 @@ export default function CollagePage() {
   useEffect(() => {
     try {
       if (combinations.length > 0) {
-        sessionStorage.setItem("collageCombinations", JSON.stringify(combinations));
+        // Store lightweight version to avoid quota issues
+        const lightweightCombos = combinations.map(combo => ({
+          id: combo.id,
+          bag: combo.bag ? { id: combo.bag.id } : null,
+          threats: combo.threats?.map(t => ({ id: t.id })) || [],
+          others: combo.others?.map(o => ({ id: o.id })) || [],
+        }));
+        sessionStorage.setItem("collageCombinations", JSON.stringify(lightweightCombos));
       } else {
         sessionStorage.removeItem("collageCombinations");
       }
@@ -210,7 +239,10 @@ export default function CollagePage() {
         sessionStorage.removeItem("collageFailures");
       }
     } catch (err) {
-      console.error("Error saving to sessionStorage:", err);
+      // Silently handle quota errors - data is still available in memory
+      if (err instanceof Error && err.name !== 'QuotaExceededError') {
+        console.error("Error saving to sessionStorage:", err);
+      }
     }
   }, [combinations, failures]);
 
@@ -741,6 +773,29 @@ export default function CollagePage() {
     }
   };
 
+  // Handle navigation with unsaved combinations warning
+  const handleNavigateToLibrary = () => {
+    if (combinations.length > 0 && !isGenerating && bulkSaveState.status !== "success") {
+      setShowUnsavedModal(true);
+      setPendingNavigation(() => () => navigate("/library"));
+    } else {
+      navigate("/library");
+    }
+  };
+
+  const handleUnsavedModalAction = (action: "discard" | "cancel") => {
+    if (action === "discard") {
+      setShowUnsavedModal(false);
+      if (pendingNavigation) {
+        pendingNavigation();
+        setPendingNavigation(null);
+      }
+    } else {
+      setShowUnsavedModal(false);
+      setPendingNavigation(null);
+    }
+  };
+
   // Pagination
   const totalPages = Math.max(1, Math.ceil(combinations.length / ITEMS_PER_PAGE));
   const paginatedCombinations = combinations.slice(
@@ -955,6 +1010,33 @@ export default function CollagePage() {
         </div>
       )}
 
+      {/* Unsaved Combinations Navigation Warning Modal */}
+      {showUnsavedModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => handleUnsavedModalAction("cancel")} />
+          <div className="relative z-[10000] w-full max-w-md bg-white rounded-2xl shadow-lg border border-border p-6">
+            <h3 className="text-base font-semibold text-ink mb-2 font-heading">Unsaved Combinations</h3>
+            <p className="text-sm text-muted mb-5">
+              You have generated combinations that haven't been saved. If you leave this page, they will be discarded.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => handleUnsavedModalAction("discard")}
+                className="w-full px-4 py-2.5 rounded-xl bg-rose-600 text-white font-semibold text-sm hover:shadow-btn-hover transition-all"
+              >
+                Discard & Leave
+              </button>
+              <button
+                onClick={() => handleUnsavedModalAction("cancel")}
+                className="w-full px-4 py-2.5 rounded-xl bg-panel border border-border text-ink font-semibold text-sm hover:bg-surface transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Grid */}
       {combinations.length === 0 && failures.length === 0 && !isGenerating ? (
         <div className="text-center py-32 px-12 bg-panel rounded-2xl border border-border shadow-card">
@@ -966,7 +1048,7 @@ export default function CollagePage() {
             Please go to the Library page and select bags and objects to generate combinations.
           </p>
           <button
-            onClick={() => navigate("/library")}
+            onClick={handleNavigateToLibrary}
             className="px-6 py-3 rounded-xl font-semibold text-white bg-blue-600 shadow-btn text-base inline-flex items-center gap-2 cursor-pointer"
           >
             <IoMdPhotos />

@@ -26,8 +26,10 @@ export default function SyntheticPreview({ objects, combinationId, bagId, threat
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   const loadedRef = useRef(new Set<string>());
 
-  const sorted = [...objects].sort((a, b) => a.layer - b.layer);
-  const totalImages = objects.filter(o => o.filepath).length;
+  // Guard against undefined or non-array objects
+  const objectsArray = Array.isArray(objects) ? objects : [];
+  const sorted = [...objectsArray].sort((a, b) => a.layer - b.layer);
+  const totalImages = objectsArray.filter(o => o.filepath).length;
 
   const handleImageLoad = (url: string) => {
     loadedRef.current.add(url);
@@ -60,7 +62,7 @@ export default function SyntheticPreview({ objects, combinationId, bagId, threat
             }}
           >
             {/* Render all objects layer by layer using DOM positioning */}
-            {sorted.map(obj => {
+            {sorted.length > 0 ? sorted.map(obj => {
               if (!obj.filepath) return null;
               const url = `${IMAGE_BASE_URL}${obj.filepath}`;
               const tx = obj.transform;
@@ -110,10 +112,14 @@ export default function SyntheticPreview({ objects, combinationId, bagId, threat
                   )}
                 </div>
               );
-            })}
+            }) : (
+              <div className="absolute inset-0 flex items-center justify-center text-muted text-xs">
+                No objects
+              </div>
+            )}
 
             {/* Loading overlay */}
-            {!allLoaded && (
+            {!allLoaded && sorted.length > 0 && (
               <div className="absolute inset-0 flex items-center justify-center bg-white z-50">
                 <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
               </div>

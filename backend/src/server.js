@@ -35,7 +35,7 @@ import {
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "12mb" }));
+app.use(express.json({ limit: "100mb" })); // Increased for large batch uploads with metadata
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -630,7 +630,19 @@ app.delete('/api/custom-subcategories/:category/:slug', async (req, res) => {
 });
 
 // Upload endpoint - supports large batches (2k-5k files)
-app.post("/api/upload", upload.array("images"), async (req, res) => {
+// Create a separate multer instance with increased limits for large uploads
+const uploadWithLimits = multer({
+  storage: storage,
+  limits: {
+    fieldNameSize: 10000000,  // 10MB for field names (generous)
+    fieldSize: 100000000,     // 100MB for individual fields (metadata can be large)
+    fields: 10000,            // Max number of fields
+    fileSize: 100000000,      // 100MB per file
+    files: 5000               // Max files
+  }
+});
+
+app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res) => {
   // Increase timeout for large uploads (30 minutes)
   req.setTimeout(1800000, () => {
     if (!res.headersSent) {
@@ -902,7 +914,7 @@ app.delete("/api/temp-files/:itemId", async (req, res) => {
         }
         
         // Delete pixel data files (both high and low energy)
-        const highEnergyPath = path.join(pixelDataRoot, "highenrgy", `${itemId}.npz`);
+        const highEnergyPath = path.join(pixelDataRoot, "highenergy", `${itemId}.npz`);
         const lowEnergyPath = path.join(pixelDataRoot, "lowenergy", `${itemId}.npz`);
         
         try {
@@ -969,6 +981,99 @@ app.post("/api/auto-valid-region", async (req, res) => {
     }
 });
 
+// Batch auto-generate valid regions for multiple items in parallel
+app.post("/api/auto-valid-region-batch", async (req, res) => {
+    try {
+        const { items } = req.body;
+        
+        if (!Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ ok: false, error: "Missing or empty items array" });
+        }
+
+        if (items.length > 50) {
+            return res.status(400).json({ ok: false, error: "Maximum 50 items per batch request" });
+        }
+
+        // Process all items in parallel using Promise.all
+        const results = await Promise.allSettled(
+            items.map(async (item) => {
+                const { itemId, pixelDataPath } = item;
+                
+                if (!itemId || !pixelDataPath) {
+                    return {
+                        itemId,
+                        ok: false,
+                        error: "Missing itemId or pixelDataPath"
+                    };
+                }
+
+                const fullPath = path.join(pixelDataRoot, pixelDataPath);
+                
+                // Check if pixel data file exists
+                try {
+                    await fs.access(fullPath);
+                } catch {
+                    return {
+                        itemId,
+                        ok: false,
+                        error: `Pixel data file not found: ${pixelDataPath}`
+                    };
+                }
+
+                try {
+                    const result = await generateValidRegion(fullPath);
+                    return {
+                        itemId,
+                        ok: true,
+                        data: {
+                            points: result.points,
+                            width: result.width,
+                            height: result.height,
+                            pixelCount: result.pixelCount
+                        }
+                    };
+                } catch (error) {
+                    return {
+                        itemId,
+                        ok: false,
+                        error: error.message || "Failed to generate valid region"
+                    };
+                }
+            })
+        );
+
+        // Format results
+        const processedResults = results.map((result, index) => {
+            if (result.status === 'fulfilled') {
+                return result.value;
+            } else {
+                return {
+                    itemId: items[index].itemId,
+                    ok: false,
+                    error: result.reason?.message || "Processing failed"
+                };
+            }
+        });
+
+        const succeeded = processedResults.filter(r => r.ok).length;
+        const failed = processedResults.filter(r => !r.ok).length;
+
+        res.json({
+            ok: true,
+            message: `Batch processing complete: ${succeeded} succeeded, ${failed} failed`,
+            results: processedResults,
+            summary: {
+                total: items.length,
+                succeeded,
+                failed
+            }
+        });
+    } catch (error) {
+        console.error(`[auto-valid-region-batch] Error:`, error);
+        res.status(500).json({ ok: false, error: String(error) });
+    }
+});
+
 // Update bag valid region (only supports points and simplifiedPoints)
 app.put("/api/items/:id/valid-region", async (req, res) => {
     try {
@@ -1005,7 +1110,7 @@ app.get("/api/items/:id/pixel-data", async (req, res) => {
             return res.status(404).json({ ok: false, error: "Item not found" });
         }
 
-        const energyType = req.query.energy || "highenrgy";
+        const energyType = req.query.energy || "highenergy";
         let pixelDataFilename = item.pixel_data_path;
 
         if (!pixelDataFilename) {
@@ -1014,7 +1119,7 @@ app.get("/api/items/:id/pixel-data", async (req, res) => {
 
         // If low energy requested, replace the folder prefix
         if (energyType === "lowenergy") {
-            pixelDataFilename = pixelDataFilename.replace(/^highenrgy[\\/]/, "lowenergy/");
+            pixelDataFilename = pixelDataFilename.replace(/^highenergy[\\/]/, "lowenergy/");
         }
 
         const fullPath = path.join(pixelDataRoot, pixelDataFilename);
@@ -1097,7 +1202,7 @@ async function enrichObjectsWithPixelData(objects) {
 // Render and save a collage combination as a PNG image
 app.post("/api/render-and-save-collage", async (req, res) => {
     try {
-        const { objects, name, energyType = "highenrgy" } = req.body;
+        const { objects, name, energyType = "highenergy" } = req.body;
         if (!objects || !Array.isArray(objects) || objects.length === 0) {
             return res.status(400).json({ ok: false, error: "Missing or invalid objects array" });
         }
@@ -1193,7 +1298,7 @@ app.post("/api/render-and-save-collage-both", async (req, res) => {
         const enrichedObjects = await enrichObjectsWithPixelData(objects);
 
         // Render high energy
-        const highPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "highenrgy");
+        const highPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "highenergy");
         await fs.writeFile(path.join(highEnergyDir, filename), highPngBuffer);
 
         // Render low energy
@@ -1269,7 +1374,7 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
           // Check if pixel data file exists
           const pixelDataPath = item.pixel_data_path;
           const highEnergyPath = path.join(pixelDataRoot, pixelDataPath);
-          const lowEnergyPath = path.join(pixelDataRoot, pixelDataPath.replace(/^highenrgy[\\/]/, 'lowenergy/'));
+          const lowEnergyPath = path.join(pixelDataRoot, pixelDataPath.replace(/^highenergy[\\/]/, 'lowenergy/'));
           
           try {
             await fs.access(highEnergyPath);
@@ -1403,6 +1508,29 @@ app.post('/api/render-preview', async (req, res) => {
         console.error('[render-preview] Error:', err);
         res.status(500).json({ ok: false, error: String(err) });
     }
+});
+
+// Error handling middleware - ensure all errors return JSON
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  console.error('Error stack:', err.stack);
+  
+  // If headers already sent, delegate to Express default handler
+  if (res.headersSent) {
+    return next(err);
+  }
+  
+  // Always return JSON
+  res.status(500).json({ 
+    ok: false, 
+    error: err.message || String(err),
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  });
+});
+
+// 404 handler - also return JSON
+app.use((req, res) => {
+  res.status(404).json({ ok: false, error: 'Not found' });
 });
 
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;
