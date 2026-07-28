@@ -8,6 +8,7 @@ import SavedPage from "./pages/SavedPage";
 import { UploadProvider } from "./context/UploadContext";
 import { loadCustomSubcategories } from "./config/categories";
 import { GenerationService } from "./lib/generationService";
+import { initializeCacheManager } from "./lib/cacheManager";
 import { useEffect, useRef, useState } from "react";
 
 // Register Service Worker for offline support and image caching
@@ -157,6 +158,8 @@ export default function App() {
   useEffect(() => {
     loadCustomSubcategories();
     registerServiceWorker();
+    // Clear stale browser cache data on first startup
+    initializeCacheManager();
   }, []);
 
   return (
