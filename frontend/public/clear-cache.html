@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clear X-Ray App Cache</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin-bottom: 25px;
+            border-radius: 4px;
+        }
+        
+        .warning strong {
+            color: #856404;
+        }
+        
+        .warning p {
+            color: #856404;
+            margin-top: 5px;
+            font-size: 14px;
+        }
+        
+        .section {
+            margin-bottom: 25px;
+        }
+        
+        .section h2 {
+            color: #444;
+            font-size: 18px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .section h2::before {
+            content: '';
+            width: 4px;
+            height: 20px;
+            background: #667eea;
+            border-radius: 2px;
+        }
+        
+        .storage-list {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #555;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .storage-item {
+            padding: 4px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .storage-item:last-child {
+            border-bottom: none;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            flex: 1;
+            min-width: 150px;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(108, 117, 125, 0.4);
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            display: none;
+        }
+        
+        .result.success {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            color: #155724;
+        }
+        
+        .result.error {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+            color: #721c24;
+        }
+        
+        .result.info {
+            background: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            color: #0c5460;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .stat-box {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+        }
+        
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧹 Clear X-Ray App Cache</h1>
+        <p class="subtitle">Remove all stored data from your browser to start fresh</p>
+        
+        <div class="warning">
+            <strong>⚠️ Warning:</strong>
+            <p>This will permanently delete all your saved selections, library preferences, and cached data. You'll need to reconfigure your settings after clearing.</p>
+        </div>
+        
+        <div class="section">
+            <h2>Current Storage Status</h2>
+            <div class="storage-list" id="storageList">
+                <div class="storage-item">Loading...</div>
+            </div>
+            <div class="stats" id="stats" style="display: none;">
+                <div class="stat-box">
+                    <div class="stat-number" id="localStorageCount">0</div>
+                    <div class="stat-label">localStorage Keys</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="sessionStorageCount">0</div>
+                    <div class="stat-label">sessionStorage Keys</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Actions</h2>
+            <div class="button-group">
+                <button class="btn-primary" onclick="clearAllStorage()">
+                    🗑️ Clear All Storage
+                </button>
+                <button class="btn-secondary" onclick="clearLocalStorage()">
+                    📋 Clear localStorage Only
+                </button>
+                <button class="btn-secondary" onclick="clearSessionStorage()">
+                    🔄 Clear sessionStorage Only
+                </button>
+            </div>
+            <div class="button-group" style="margin-top: 10px;">
+                <button class="btn-danger" onclick="clearAllCache()">
+                    🧹 Clear All Browser Cache
+                </button>
+            </div>
+        </div>
+        
+        <div class="result" id="result"></div>
+        
+        <div class="footer">
+            <p>This tool only affects data stored by the X-Ray app in your browser.</p>
+            <p>It does not delete any files from the server or your computer.</p>
+        </div>
+    </div>
+    
+    <script>
+        // X-Ray app storage keys
+        const XRAY_LOCAL_STORAGE_KEYS = [
+            'selectedItemIds',
+            'libraryKValue',
+            'libraryMaxThreats',
+            'libraryThreatDistribution',
+            'libraryMaxNonThreats',
+            'libraryNonThreatDistribution',
+            'libraryRequireAtLeastOneNonThreat',
+            'selectedBags',
+            'selectedThreats',
+            'selectedOthers'
+        ];
+        
+        const XRAY_SESSION_STORAGE_KEYS = [
+            'collageCombinations',
+            'collageFailures',
+            'orphanedPreprocessedItems',
+            'refreshedCategorizedItems'
+        ];
+        
+        // Scan for all X-Ray related storage
+        function scanStorage() {
+            const storageList = document.getElementById('storageList');
+            const stats = document.getElementById('stats');
+            
+            let localStorageItems = [];
+            let sessionStorageItems = [];
+            
+            // Check localStorage
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && (XRAY_LOCAL_STORAGE_KEYS.some(k => key.startsWith(k)) || key.startsWith('xray_workspace_'))) {
+                    const value = localStorage.getItem(key);
+                    const preview = value.length > 50 ? value.substring(0, 50) + '...' : value;
+                    localStorageItems.push({ key, preview });
+                }
+            }
+            
+            // Check sessionStorage
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                if (key && (XRAY_SESSION_STORAGE_KEYS.some(k => key.startsWith(k)) || key.startsWith('xray_workspace_'))) {
+                    const value = sessionStorage.getItem(key);
+                    const preview = value.length > 50 ? value.substring(0, 50) + '...' : value;
+                    sessionStorageItems.push({ key, preview });
+                }
+            }
+            
+            // Update UI
+            if (localStorageItems.length === 0 && sessionStorageItems.length === 0) {
+                storageList.innerHTML = '<div class="storage-item">✅ No X-Ray data found in storage</div>';
+                stats.style.display = 'none';
+            } else {
+                let html = '';
+                
+                if (localStorageItems.length > 0) {
+                    html += '<div style="color: #667eea; font-weight: bold; margin-bottom: 10px;">localStorage:</div>';
+                    localStorageItems.forEach(item => {
+                        html += `<div class="storage-item"><strong>${item.key}</strong><br><small>${item.preview}</small></div>`;
+                    });
+                }
+                
+                if (sessionStorageItems.length > 0) {
+                    html += '<div style="color: #764ba2; font-weight: bold; margin: 10px 0;">sessionStorage:</div>';
+                    sessionStorageItems.forEach(item => {
+                        html += `<div class="storage-item"><strong>${item.key}</strong><br><small>${item.preview}</small></div>`;
+                    });
+                }
+                
+                storageList.innerHTML = html;
+                stats.style.display = 'grid';
+                document.getElementById('localStorageCount').textContent = localStorageItems.length;
+                document.getElementById('sessionStorageCount').textContent = sessionStorageItems.length;
+            }
+        }
+        
+        // Clear all X-Ray storage
+        function clearAllStorage() {
+            const result = document.getElementById('result');
+            result.className = 'result';
+            result.style.display = 'none';
+            
+            let cleared = 0;
+            
+            // Clear localStorage
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && (XRAY_LOCAL_STORAGE_KEYS.some(k => key.startsWith(k)) || key.startsWith('xray_workspace_'))) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(key => {
+                localStorage.removeItem(key);
+                cleared++;
+            });
+            
+            // Clear sessionStorage
+            const sessionKeysToRemove = [];
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                if (key && (XRAY_SESSION_STORAGE_KEYS.some(k => key.startsWith(k)) || key.startsWith('xray_workspace_'))) {
+                    sessionKeysToRemove.push(key);
+                }
+            }
+            sessionKeysToRemove.forEach(key => {
+                sessionStorage.removeItem(key);
+                cleared++;
+            });
+            
+            result.className = 'result success';
+            result.innerHTML = `<strong>✅ Success!</strong> Cleared ${cleared} storage items (${keysToRemove.length} localStorage, ${sessionKeysToRemove.length} sessionStorage)`;
+            result.style.display = 'block';
+            
+            scanStorage();
+        }
+        
+        // Clear only localStorage
+        function clearLocalStorage() {
+            const result = document.getElementById('result');
+            result.className = 'result';
+            result.style.display = 'none';
+            
+            let cleared = 0;
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && (XRAY_LOCAL_STORAGE_KEYS.some(k => key.startsWith(k)) || key.startsWith('xray_workspace_'))) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(key => {
+                localStorage.removeItem(key);
+                cleared++;
+            });
+            
+            result.className = 'result success';
+            result.innerHTML = `<strong>✅ Success!</strong> Cleared ${cleared} localStorage items`;
+            result.style.display = 'block';
+            
+            scanStorage();
+        }
+        
+        // Clear only sessionStorage
+        function clearSessionStorage() {
+            const result = document.getElementById('result');
+            result.className = 'result';
+            result.style.display = 'none';
+            
+            let cleared = 0;
+            const keysToRemove = [];
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                if (key && (XRAY_SESSION_STORAGE_KEYS.some(k => key.startsWith(k)) || key.startsWith('xray_workspace_'))) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(key => {
+                sessionStorage.removeItem(key);
+                cleared++;
+            });
+            
+            result.className = 'result success';
+            result.innerHTML = `<strong>✅ Success!</strong> Cleared ${cleared} sessionStorage items`;
+            result.style.display = 'block';
+            
+            scanStorage();
+        }
+        
+        // Clear all browser cache (more aggressive)
+        function clearAllCache() {
+            const result = document.getElementById('result');
+            result.className = 'result info';
+            result.innerHTML = '<strong>ℹ️ Info:</strong> To clear all browser cache, please use your browser\'s developer tools:<br><br>' +
+                '<strong>Chrome/Edge:</strong> Press F12 → Application tab → Clear site data<br>' +
+                '<strong>Firefox:</strong> Press F12 → Storage tab → Clear site data<br>' +
+                '<strong>Safari:</strong> Develop → Empty Caches';
+            result.style.display = 'block';
+        }
+        
+        // Scan on load
+        window.addEventListener('load', scanStorage);
+    </script>
+</body>
+</html>
