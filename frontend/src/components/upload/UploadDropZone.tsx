@@ -14,9 +14,69 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
     }
   };
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+  const readEntries = (reader: any): Promise<any[]> =>
+    new Promise((resolve, reject) => {
+      const entries: any[] = [];
+      const readBatch = () => {
+        reader.readEntries(
+          (results: any[]) => {
+            if (!results.length) {
+              resolve(entries);
+            } else {
+              entries.push(...results);
+              readBatch();
+            }
+          },
+          reject
+        );
+      };
+      readBatch();
+    });
+
+  const traverseEntry = async (entry: any): Promise<File[]> => {
+    if (!entry) {
+      return [];
+    }
+
+    if (entry.isFile) {
+      return new Promise((resolve, reject) => {
+        entry.file((file: File) => resolve([file]), reject);
+      });
+    }
+
+    if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const nestedEntries = await readEntries(reader);
+      const nestedFiles = await Promise.all(nestedEntries.map(traverseEntry));
+      return nestedFiles.flat();
+    }
+
+    return [];
+  };
+
+  const collectFilesFromDataTransfer = async (items: DataTransferItemList): Promise<File[]> => {
+    const entries = Array.from(items)
+      .map((item) => (item as any).webkitGetAsEntry?.())
+      .filter(Boolean);
+
+    if (entries.length === 0) {
+      return [];
+    }
+
+    const files = await Promise.all(entries.map(traverseEntry));
+    return files.flat();
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragOver(false);
+
+    const filesFromItems = await collectFilesFromDataTransfer(e.dataTransfer.items);
+    if (filesFromItems.length > 0) {
+      onFilesSelected(filesFromItems);
+      return;
+    }
+
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       onFilesSelected(Array.from(e.dataTransfer.files));
     }
@@ -36,8 +96,7 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
-      onClick={() => document.getElementById("fileInput")?.click()}
-      className={`max-w-5xl mx-auto bg-panel border-2 border-dashed rounded-2xl p-14 text-center cursor-pointer shadow-card transition-all duration-200 group ${
+      className={`max-w-5xl mx-auto bg-panel border-2 border-dashed rounded-2xl p-14 text-center shadow-card transition-all duration-200 group ${
         isDragOver
           ? "border-accent-sky bg-accent-sky/5 scale-[1.01]"
           : "border-border hover:border-accent hover:bg-accent/4 hover:shadow-card-hover"
@@ -48,17 +107,45 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
         type="file"
         accept=".dump.pgm,.tip"
         multiple
+        className="hidden"
+        onChange={handleFileChange}
+      />
+      <input
+        id="folderInput"
+        type="file"
+        accept=".dump.pgm,.tip"
+        multiple
         // @ts-ignore webkitdirectory
         webkitdirectory=""
+        // @ts-ignore directory
+        directory=""
+        // @ts-ignore mozdirectory
+        mozdirectory=""
         className="hidden"
         onChange={handleFileChange}
       />
       <div className="w-12 h-12 mx-auto mb-4 bg-accent/10 rounded-xl flex items-center justify-center text-accent/70 group-hover:text-accent group-hover:bg-accent/15 transition-colors">
         <UploadIcon className="w-6 h-6" />
       </div>
-        <p className="text-sm font-semibold text-ink mt-2 font-heading">
-          Drag & drop folder or files here, or click to browse
-        </p>
+      <p className="text-sm font-semibold text-ink mt-2 font-heading">
+        Drag & drop folders or files here, or use the buttons below
+      </p>
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+        <button
+          type="button"
+          onClick={() => document.getElementById("fileInput")?.click()}
+          className="inline-flex items-center justify-center rounded-full border border-border px-5 py-3 text-sm font-semibold text-ink bg-white/90 hover:bg-accent/5 transition"
+        >
+          Upload files
+        </button>
+        <button
+          type="button"
+          onClick={() => document.getElementById("folderInput")?.click()}
+          className="inline-flex items-center justify-center rounded-full border border-border px-5 py-3 text-sm font-semibold text-ink bg-white/90 hover:bg-accent/5 transition"
+        >
+          Upload folder
+        </button>
+      </div>
     </div>
   );
 }

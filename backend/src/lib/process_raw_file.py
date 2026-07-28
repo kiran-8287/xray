@@ -1,19 +1,22 @@
 """process_raw_file.py — Process .dump.pgm and .tip files via Python readers.
-CLI usage:
-    python process_raw_file.py \\
-        --file-path /path/to/file.dump.pgm \\
-        --file-type dump \\
-        --item-id P01X010-2024101200923 \\
-        --library-images-dir /path/to/library_images \\
+
+Single-file mode (CLI):
+    python process_raw_file.py \
+        --file-path /path/to/file.dump.pgm \
+        --file-type dump \
+        --item-id P01X010-2024101200923 \
+        --library-images-dir /path/to/library_images \
         --pixel-data-dir /path/to/pixel_data
-Outputs a single JSON line to stdout:
-    Success: {"status":"done","id":"...","filepath":"...","pixelDataFilename":"...","width":...,"height":...,"fileType":"..."}
-    Error:   {"status":"error","id":"...","reason":"..."}
+
+Batch mode (stdin JSON):
+    echo '[{"filePath":"...","fileType":"dump","itemId":"...","libraryImagesDir":"...","pixelDataDir":"..."},...]' \
+        | python process_raw_file.py --batch
+
+Outputs a JSON result line per file to stdout (NDJSON format).
 """
 import sys
 import json
 import os
-import uuid
 import argparse
 from pathlib import Path
 import numpy as np
@@ -30,108 +33,140 @@ def import_from_path(module_name, file_path):
     return mod
 
 def resolve_scripts_dir():
-    """Resolve the backend/scripts/ directory relative to this script's location.
-    
-    Script is at: backend/src/lib/process_raw_file.py
-    scripts is at: backend/scripts/
-    So we go up 2 levels to reach backend/, then into scripts.
-    """
-    script_dir = Path(__file__).resolve().parent  # backend/src/lib/
-    scripts_dir = script_dir.parent.parent / "scripts"  # backend/scripts/
+    """Resolve the backend/scripts/ directory relative to this script's location."""
+    script_dir = Path(__file__).resolve().parent
+    scripts_dir = script_dir.parent.parent / "scripts"
     return scripts_dir
+
+def process_single_file(file_path, file_type, item_id, library_images_dir, pixel_data_dir):
+    """Process a single raw file and return result dict."""
+    scripts_dir = resolve_scripts_dir()
+    
+    if file_type == "dump":
+        dumpread_path = scripts_dir / "dumpread.py"
+        if not dumpread_path.exists():
+            raise FileNotFoundError(f"dumpread.py not found at {dumpread_path}")
+        dumpread = import_from_path("dumpread", str(dumpread_path))
+        high, low, R = dumpread.ReadDump(file_path, raw=False)
+        pixel_array = high  # 2D float64, shape (rows, cols)
+        img = dumpread.to_uint16(pixel_array)
+        rows, cols = pixel_array.shape
+    else:  # file_type == "tip"
+        tipread_path = scripts_dir / "tipread.py"
+        if not tipread_path.exists():
+            raise FileNotFoundError(f"tipread.py not found at {tipread_path}")
+        tipread = import_from_path("tipread", str(tipread_path))
+        low_raw, high_raw = tipread.read_tip(file_path)
+        img = np.rot90(high_raw, k=3)
+        rows, cols = img.shape
+
+    # Write 16-bit grayscale PNG
+    os.makedirs(library_images_dir, exist_ok=True)
+    png_path = os.path.join(library_images_dir, f"{item_id}.png")
+    Image.fromarray(img).save(png_path)
+
+    # Write pixel data as .npz
+    highenergy_dir = os.path.join(pixel_data_dir, "highenergy")
+    lowenergy_dir = os.path.join(pixel_data_dir, "lowenergy")
+    os.makedirs(highenergy_dir, exist_ok=True)
+    os.makedirs(lowenergy_dir, exist_ok=True)
+
+    if file_type == "dump":
+        high_pixel_data = dumpread.to_uint16(high)
+        high_pixel_path = os.path.join(highenergy_dir, f"{item_id}.npz")
+        np.savez_compressed(high_pixel_path, pixel_data=high_pixel_data)
+        
+        low_pixel_data = dumpread.to_uint16(low)
+        low_pixel_path = os.path.join(lowenergy_dir, f"{item_id}.npz")
+        np.savez_compressed(low_pixel_path, pixel_data=low_pixel_data)
+    else:
+        high_rotated = np.rot90(high_raw, k=3)
+        low_rotated = np.rot90(low_raw, k=3)
+        
+        high_pixel_path = os.path.join(highenergy_dir, f"{item_id}.npz")
+        np.savez_compressed(high_pixel_path, pixel_data=high_rotated)
+        
+        low_pixel_path = os.path.join(lowenergy_dir, f"{item_id}.npz")
+        np.savez_compressed(low_pixel_path, pixel_data=low_rotated)
+
+    pixel_filename = f"highenergy/{item_id}.npz"
+    return {
+        "status": "done",
+        "id": item_id,
+        "filepath": f"{item_id}.png",
+        "pixelDataFilename": pixel_filename,
+        "width": cols,
+        "height": rows,
+        "fileType": file_type,
+    }
 
 def main():
     parser = argparse.ArgumentParser(description="Process raw .dump.pgm and .tip files")
-    parser.add_argument("--file-path", required=True, help="Absolute path to the uploaded temp raw file")
-    parser.add_argument("--file-type", required=True, choices=["dump", "tip"], help="Type of the raw file")
-    parser.add_argument("--item-id", required=True, help="Derived item ID (filename stripped from first dot)")
-    parser.add_argument("--library-images-dir", required=True, help="Output directory for the generated PNG")
-    parser.add_argument("--pixel-data-dir", required=True, help="Output directory for pixel data JSON")
+    parser.add_argument("--batch", action="store_true", help="Read batch JSON from stdin")
+    parser.add_argument("--file-path", help="Absolute path to the uploaded temp raw file")
+    parser.add_argument("--file-type", choices=["dump", "tip"], help="Type of the raw file")
+    parser.add_argument("--item-id", help="Derived item ID")
+    parser.add_argument("--library-images-dir", help="Output directory for generated PNG")
+    parser.add_argument("--pixel-data-dir", help="Output directory for pixel data")
     args = parser.parse_args()
-    file_path = args.file_path
-    file_type = args.file_type
-    item_id = args.item_id
-    library_images_dir = args.library_images_dir
-    pixel_data_dir = args.pixel_data_dir
-    try:
-        # Resolve the scripts directory and dynamically import the reader
-        scripts_dir = resolve_scripts_dir()
-        if file_type == "dump":
-            dumpread_path = scripts_dir / "dumpread.py"
-            if not dumpread_path.exists():
-                raise FileNotFoundError(f"dumpread.py not found at {dumpread_path}")
-            dumpread = import_from_path("dumpread", str(dumpread_path))
-            # ReadDump returns (high, low, R) as numpy 2D float64 arrays (when raw=False)
-            high, low, R = dumpread.ReadDump(file_path, raw=False)
-            pixel_array = high  # 2D float64, shape (rows, cols)
-            # Convert to uint16 using the existing helper in dumpread.py
-            img = dumpread.to_uint16(pixel_array)  # np.uint16 array
-            # Dimensions from the high array shape
-            rows, cols = pixel_array.shape
-        else:  # file_type == "tip"
-            tipread_path = scripts_dir / "tipread.py"
-            if not tipread_path.exists():
-                raise FileNotFoundError(f"tipread.py not found at {tipread_path}")
-            tipread = import_from_path("tipread", str(tipread_path))
-            # read_tip returns (low_raw, high_raw) as numpy 2D uint16 arrays
-            low_raw, high_raw = tipread.read_tip(file_path)
-            # Apply 270° rotation (k=3), matching tipread.py's convert_tip_to_png behavior
-            img = np.rot90(high_raw, k=3)  # uint16 array
-            # Dimensions after rotation
-            rows, cols = img.shape
-        # --- Write 16-bit grayscale PNG ---
-        os.makedirs(library_images_dir, exist_ok=True)
-        png_path = os.path.join(library_images_dir, f"{item_id}.png")
-        Image.fromarray(img).save(png_path)
-        # --- Write pixel data as .npz (compressed numpy archive) ---
-        # Save both high and low energy pixel values to separate folders
-        highenergy_dir = os.path.join(pixel_data_dir, "highenergy")
-        lowenergy_dir = os.path.join(pixel_data_dir, "lowenergy")
-        os.makedirs(highenergy_dir, exist_ok=True)
-        os.makedirs(lowenergy_dir, exist_ok=True)
+
+    if args.batch:
+        # Batch mode: read JSON array from stdin
+        try:
+            raw_input = sys.stdin.read()
+            tasks = json.loads(raw_input)
+        except Exception as e:
+            error_result = {"status": "error", "id": "batch", "reason": f"Failed to parse batch input: {str(e)}"}
+            print(json.dumps(error_result))
+            sys.exit(1)
+
+        if not isinstance(tasks, list):
+            error_result = {"status": "error", "id": "batch", "reason": "Batch input must be a JSON array"}
+            print(json.dumps(error_result))
+            sys.exit(1)
+
+        for task in tasks:
+            file_path = task.get("filePath", "")
+            file_type = task.get("fileType", "")
+            item_id = task.get("itemId", "unknown")
+            library_images_dir = task.get("libraryImagesDir", "")
+            pixel_data_dir = task.get("pixelDataDir", "")
+            
+            try:
+                result = process_single_file(file_path, file_type, item_id, library_images_dir, pixel_data_dir)
+                print(json.dumps(result), flush=True)
+            except Exception as e:
+                error_result = {
+                    "status": "error",
+                    "id": item_id,
+                    "reason": str(e),
+                }
+                print(json.dumps(error_result), flush=True)
         
-        if file_type == "dump":
-            # For dump files: high and low are float64 arrays
-            # Save high energy
-            high_pixel_data = dumpread.to_uint16(high)
-            high_pixel_path = os.path.join(highenergy_dir, f"{item_id}.npz")
-            np.savez_compressed(high_pixel_path, pixel_data=high_pixel_data)
-            # Save low energy
-            low_pixel_data = dumpread.to_uint16(low)
-            low_pixel_path = os.path.join(lowenergy_dir, f"{item_id}.npz")
-            np.savez_compressed(low_pixel_path, pixel_data=low_pixel_data)
-        else:  # file_type == "tip"
-            # For tip files: high_raw and low_raw are uint16 arrays, apply rotation to both
-            high_rotated = np.rot90(high_raw, k=3)
-            low_rotated = np.rot90(low_raw, k=3)
-            # Save high energy
-            high_pixel_path = os.path.join(highenergy_dir, f"{item_id}.npz")
-            np.savez_compressed(high_pixel_path, pixel_data=high_rotated)
-            # Save low energy
-            low_pixel_path = os.path.join(lowenergy_dir, f"{item_id}.npz")
-            np.savez_compressed(low_pixel_path, pixel_data=low_rotated)
-        # --- Output success result as JSON to stdout ---
-        # Return high energy pixel data filename for backward compatibility
-        pixel_filename = f"highenergy/{item_id}.npz"
-        result = {
-            "status": "done",
-            "id": item_id,
-            "filepath": f"{item_id}.png",
-            "pixelDataFilename": pixel_filename,
-            "width": cols,
-            "height": rows,
-            "fileType": file_type,
-        }
-        print(json.dumps(result))
-    except Exception as e:
-        # Output error result as JSON to stdout
-        error_result = {
-            "status": "error",
-            "id": item_id,
-            "reason": str(e),
-        }
-        print(json.dumps(error_result))
-        sys.exit(1)
+        sys.exit(0)
+    else:
+        # Single-file mode (legacy CLI)
+        file_path = args.file_path
+        file_type = args.file_type
+        item_id = args.item_id
+        library_images_dir = args.library_images_dir
+        pixel_data_dir = args.pixel_data_dir
+
+        if not all([file_path, file_type, item_id, library_images_dir, pixel_data_dir]):
+            print(json.dumps({"status": "error", "id": "cli", "reason": "Missing required arguments"}))
+            sys.exit(1)
+
+        try:
+            result = process_single_file(file_path, file_type, item_id, library_images_dir, pixel_data_dir)
+            print(json.dumps(result))
+        except Exception as e:
+            error_result = {
+                "status": "error",
+                "id": item_id,
+                "reason": str(e),
+            }
+            print(json.dumps(error_result))
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()

@@ -7,6 +7,7 @@ import { useUploadContext } from "../context/UploadContext";
 import { API_BASE_URL } from "../config/api";
 import { LIBRARIES_UI, getLibrarySubcategories } from "../config/categories";
 import ConfirmModal from "../components/common/ConfirmModal";
+import { concurrencyController, initializeConcurrencyPools, adjustConcurrencyForLoad } from "../lib/concurrencyController";
 
 // Use centralized library definitions
 const LIBRARIES = LIBRARIES_UI;
@@ -41,6 +42,11 @@ export default function UploadPage() {
   const processingActiveRef = useRef(false);
   const processingQueueRef = useRef<(() => Promise<void>)[]>([]);
   const isProcessingRef = useRef(false);
+
+  // Initialize concurrency pools on mount
+  useEffect(() => {
+    initializeConcurrencyPools();
+  }, []);
 
   // Clean up orphaned pre-processed files on page load
   useEffect(() => {
@@ -153,6 +159,9 @@ export default function UploadPage() {
     setProcessing(true);
     setProcessingProgress({ n: processingCompletedRef.current, total: processingTotalRef.current });
 
+    // Adjust concurrency for upload processing
+    adjustConcurrencyForLoad(true);
+
     // Queue this batch for processing
     processingQueueRef.current.push(async () => {
       const formData = new FormData();
@@ -173,31 +182,42 @@ export default function UploadPage() {
         let buffer = "";
         let errors = 0;
 
+        let linesReceived = 0;
+        let doneMessages = 0;
+        let errorMessages = 0;
+        let completeMessages = 0;
+        
+        console.log(`[UploadPage] Starting NDJSON stream reader for ${files.length} files`);
+        
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop()!;
+          if (value) {
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop()!;
 
-          for (const line of lines) {
-            if (!line.trim()) continue;
+            for (const line of lines) {
+              if (!line.trim()) continue;
 
-            let msg;
-            try {
-              msg = JSON.parse(line);
-            } catch {
-              continue;
-            }
+              linesReceived++;
+              let msg;
+              try {
+                msg = JSON.parse(line);
+              } catch {
+                console.warn(`[UploadPage] Failed to parse line ${linesReceived}: ${line.substring(0, 100)}`);
+                continue;
+              }
 
-            if (msg.status === "done") {
-              processingCompletedRef.current++;
-              setProcessingProgress({ n: processingCompletedRef.current, total: processingTotalRef.current });
-
-              // Append to staged panel immediately
-              setStaged((prev) => {
-                const next = [...prev, {
+              if (msg.status === "done") {
+                doneMessages++;
+                processingCompletedRef.current++;
+                
+                // Update progress
+                setProcessingProgress({ n: processingCompletedRef.current, total: processingTotalRef.current });
+                
+                // Create item object
+                const newItem = {
                   file: new File([], msg.id),
                   category: msg.fileType === "dump" ? "bags" : "non-threats",
                   subcategory: "",
@@ -210,38 +230,133 @@ export default function UploadPage() {
                   pixelDataFilename: msg.pixelDataFilename,
                   width: msg.width,
                   height: msg.height,
-                }];
+                };
                 
+                // Update session storage
                 const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
                 if (!orphanedItems.includes(msg.id)) {
                   orphanedItems.push(msg.id);
                   sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(orphanedItems));
                 }
                 
+                // DIRECTLY add to staged array - no buffer, no timer
+                setStaged((prev) => {
+                  const next = [...prev, newItem];
+                  console.log(`[UploadPage] Added item ${doneMessages}/${processingTotalRef.current}: ${msg.id} (total: ${next.length})`);
+                  return next;
+                });
+              } else if (msg.status === "error") {
+                errorMessages++;
+                console.error(`[UploadPage] Error from backend: ${msg.id}: ${msg.reason}`);
+                setStreamErrors((prev) => [...prev, { id: msg.id, reason: msg.reason }]);
+              } else if (msg.status === "complete") {
+                completeMessages++;
+                console.log(`[UploadPage] Backend complete message:`, msg);
+                if (msg.duplicates > 0) {
+                  setDuplicateWarning(`${msg.duplicates} file(s) skipped — already in library`);
+                }
+              }
+            }
+          }
+          
+          // Yield to event loop after processing each chunk to allow auto-generate to run
+          await new Promise(resolve => setTimeout(resolve, 0));
+          
+          if (done) break;
+        }
+        
+        // Process any remaining data in the buffer after stream ends
+        if (buffer.trim()) {
+          console.log(`[UploadPage] Processing final buffer: "${buffer.substring(0, 100)}"`);
+          const finalLines = buffer.split("\n").filter((line: string) => line.trim());
+          for (const line of finalLines) {
+            linesReceived++;
+            let msg;
+            try {
+              msg = JSON.parse(line);
+            } catch {
+              console.warn(`[UploadPage] Failed to parse final line ${linesReceived}: ${line.substring(0, 100)}`);
+              continue;
+            }
+
+            if (msg.status === "done") {
+              doneMessages++;
+              processingCompletedRef.current++;
+              setProcessingProgress({ n: processingCompletedRef.current, total: processingTotalRef.current });
+
+              const newItem = {
+                file: new File([], msg.id),
+                category: msg.fileType === "dump" ? "bags" : "non-threats",
+                subcategory: "",
+                valid_region_points: null,
+                preProcessed: true,
+                filepath: msg.filepath,
+                preGeneratedFilepath: msg.filepath,
+                fileType: msg.fileType,
+                itemId: msg.id,
+                pixelDataFilename: msg.pixelDataFilename,
+                width: msg.width,
+                height: msg.height,
+              };
+              
+              const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
+              if (!orphanedItems.includes(msg.id)) {
+                orphanedItems.push(msg.id);
+                sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(orphanedItems));
+              }
+              
+              setStaged((prev) => {
+                const next = [...prev, newItem];
+                console.log(`[UploadPage] Added final item: ${msg.id} (total: ${next.length})`);
                 return next;
               });
             } else if (msg.status === "error") {
-              errors++;
+              errorMessages++;
+              console.error(`[UploadPage] Error from backend: ${msg.id}: ${msg.reason}`);
               setStreamErrors((prev) => [...prev, { id: msg.id, reason: msg.reason }]);
             } else if (msg.status === "complete") {
+              completeMessages++;
               if (msg.duplicates > 0) {
                 setDuplicateWarning(`${msg.duplicates} file(s) skipped — already in library`);
               }
             }
           }
         }
+        
+        console.log(`[UploadPage] Stream ended. Lines: ${linesReceived}, Done: ${doneMessages}, Errors: ${errorMessages}, Complete: ${completeMessages}`);
       } catch {
         // On error, don't stop processing - just mark this batch as done
       }
     });
 
-    // Process queue sequentially if not already processing
+    // Process queue items through the concurrency controller
+    // This ensures both upload and auto-generate get fair event loop time
     if (!isProcessingRef.current) {
       isProcessingRef.current = true;
-      while (processingQueueRef.current.length > 0) {
-        const next = processingQueueRef.current.shift();
-        if (next) await next();
-      }
+      
+      // Use concurrency controller to run each batch in parallel with limits
+      // This prevents upload from blocking auto-generate (and vice versa)
+      const processAllBatches = async () => {
+        const uploadPromises: Promise<void>[] = [];
+        
+        while (processingQueueRef.current.length > 0) {
+          const next = processingQueueRef.current.shift();
+          if (next) {
+            // Execute each batch through concurrency controller
+            // This properly yields to event loop between batches
+            uploadPromises.push(
+              concurrencyController.execute('upload', async () => {
+                await next();
+              })
+            );
+          }
+        }
+        
+        // Wait for all upload batches to complete
+        await Promise.all(uploadPromises);
+      };
+      
+      await processAllBatches();
       isProcessingRef.current = false;
       
       // All batches completed - reset state
@@ -249,6 +364,9 @@ export default function UploadPage() {
       setProcessingProgress(null);
       processingTotalRef.current = 0;
       processingCompletedRef.current = 0;
+      
+      // Adjust concurrency back to normal (idle state)
+      adjustConcurrencyForLoad(false);
     }
   }
 
@@ -491,6 +609,7 @@ export default function UploadPage() {
             setStaged={setStaged}
             setFiles={setFiles}
             uploading={uploading}
+            processing={processing}
             handleUpload={handleUpload}
             selectedForMass={selectedForMass}
             onToggleSelect={toggleSelect}

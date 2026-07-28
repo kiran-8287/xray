@@ -40,11 +40,11 @@ app.use(express.json({ limit: "100mb" })); // Increased for large batch uploads 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const exportsRoot = path.resolve(__dirname, "../data/exports");
-const libraryImagesRoot = path.resolve(__dirname, "../data/library_images");
-const collageImagesRoot = path.resolve(__dirname, "../data/collage_images");
-const collageHighRoot = path.resolve(collageImagesRoot, "high");
-const collageLowRoot = path.resolve(collageImagesRoot, "low");
-const pixelDataRoot = path.resolve(__dirname, "../data/pixel_data");
+const libraryImagesRoot = "B:\\library_images";
+const collageImagesRoot = "B:\\collage_images";
+const collageHighRoot = "B:\\collage_images\\high";
+const collageLowRoot = "B:\\collage_images\\low";
+const pixelDataRoot = "B:\\pixel_data";
 
 // Ensure directories exist
 await fs.mkdir(exportsRoot, { recursive: true });
@@ -54,7 +54,17 @@ await fs.mkdir(collageHighRoot, { recursive: true });
 await fs.mkdir(collageLowRoot, { recursive: true });
 await fs.mkdir(pixelDataRoot, { recursive: true });
 
-// Serve static files from data directory
+// Serve static files — map frontend URL paths to actual disk locations
+// IMPORTANT: B: drive routes MUST come BEFORE the generic /data route,
+// because Express matches in order and /data would catch everything.
+
+// B: drive for large data — map /data/library_images, /data/collage_images, /data/pixel_data
+// so frontend URLs like /data/library_images/... continue to work
+app.use('/data/library_images', express.static(libraryImagesRoot));
+app.use('/data/collage_images', express.static(collageImagesRoot));
+app.use('/data/pixel_data', express.static(pixelDataRoot));
+
+// C: drive project data (exports, DB, etc.)
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
 
 // Note: Thumbnails are no longer generated separately. 
@@ -74,7 +84,12 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // Multer setup for raw file uploads (memory storage for streaming)
-const rawUpload = multer({ storage: multer.memoryStorage() });
+const rawUpload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 5000, // Support large batch raw uploads (up to 5000 files)
+  }
+});
 
 function safeNowStamp() {
     return new Date().toISOString().replace(/[:.]/g, "-");
@@ -180,21 +195,25 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         let duplicateCount = 0;
 
         const files = req.files || [];
+        console.log(`[process-raw-files] Received ${files.length} files from multer`);
         const skippedFiles = [];
         for (const file of files) {
             const itemId = deriveItemId(file.originalname);
             const fileType = classifyFileType(file.originalname);
             if (!fileType) {
+                console.log(`[process-raw-files] Skipped ${file.originalname}: unrecognized extension`);
                 skippedFiles.push({ filename: file.originalname, reason: "Unrecognized file extension (expected .dump.pgm or .tip)" });
                 continue;
             }
 
             if (existingIds.has(itemId)) {
+                console.log(`[process-raw-files] Duplicate: ${itemId}`);
                 duplicateCount++;
             } else {
                 nonDuplicates.push({ file, itemId, fileType });
             }
         }
+        console.log(`[process-raw-files] Non-duplicates: ${nonDuplicates.length}, Duplicates: ${duplicateCount}, Skipped: ${skippedFiles.length}`);
 
         // Report skipped files immediately
         for (const skipped of skippedFiles) {
@@ -219,8 +238,9 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         }
 
         // 3. Save file buffers to temp files and dispatch to worker pool
-        // Use larger worker pool for large batches (4-8 workers based on file count)
-        const workerCount = Math.min(8, Math.max(4, Math.ceil(nonDuplicates.length / 100)));
+        // Use 10 workers — maximum parallelism with batch size 1 (10 files × 4MB = 40MB peak)
+        // Safe because only 10 files process simultaneously, fast because fully parallel
+        const workerCount = 10;
         const pool = new WorkerPool(workerCount);
         let processedCount = 0;
         let failedCount = 0;
@@ -253,9 +273,9 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
                         failedCount++;
                     }
 
-                    // Clean up temp file asynchronously — log warning if cleanup fails
-                    fs.unlink(tempPath).catch((cleanupErr) => {
-                        console.warn(`[process-raw-files] Failed to delete temp file ${tempPath}:`, cleanupErr.message);
+                    // Clean up temp file asynchronously — silently ignore if already deleted
+                    fs.unlink(tempPath).catch(() => {
+                        // ENOENT is harmless — file was already cleaned up by another path
                     });
                 }
             );

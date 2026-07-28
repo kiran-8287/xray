@@ -7,8 +7,6 @@ const __dirname = path.dirname(__filename);
 
 const DATA_DIR = path.resolve(__dirname, '../data');
 const ITEMS_FILE = path.join(DATA_DIR, 'items.json');
-const LIBRARY_IMAGES_DIR = path.join(DATA_DIR, 'library_images');
-const PIXEL_DATA_DIR = path.join(DATA_DIR, 'pixel_data/highenrgy');
 
 // Configuration
 const COUNTS = [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000];
@@ -24,7 +22,7 @@ const CATEGORY_DISTRIBUTION = {
 const SUBCATEGORIES = {
   bags: ['Backpack', 'Briefcase', 'Cabin Bag', 'Messenger Bag', 'Duffel Bag', 'Tote Bag', 'Laptop Bag', 'Gym Bag'],
   threats: ['Air Gun', 'Liquid', 'Powder', 'Electronics', 'Knife', 'Sharp Object', 'Flammable'],
-  nonThreats: ['Beverage Can', 'Food', 'Clothing', 'Electronics Accessories', 'Tools', 'Medical', 'Miscellaneous']
+  nonThreats: ['Accessories', 'Food', 'Clothing', 'Electronics Accessories', 'Tools', 'Medical', 'Miscellaneous']
 };
 
 // Tags for bags
@@ -44,26 +42,6 @@ async function getExistingItems() {
     const data = await fs.readFile(ITEMS_FILE, 'utf8');
     return JSON.parse(data);
   } catch {
-    return [];
-  }
-}
-
-async function getExistingImages() {
-  try {
-    const files = await fs.readdir(LIBRARY_IMAGES_DIR);
-    return files.filter(f => f.endsWith('.png'));
-  } catch {
-    console.error('Error reading library_images directory');
-    return [];
-  }
-}
-
-async function getExistingPixelData() {
-  try {
-    const files = await fs.readdir(PIXEL_DATA_DIR);
-    return files.filter(f => f.endsWith('.npz'));
-  } catch {
-    console.error('Error reading pixel_data directory');
     return [];
   }
 }
@@ -203,9 +181,9 @@ async function main() {
   const threatItems = existingItems.filter(item => item.category === 'threats');
   const nonThreatItems = existingItems.filter(item => item.category === 'non-threats');
   
-  console.log(`  - Bags: ${bagItems.length} items`);
-  console.log(`  - Threats: ${threatItems.length} items`);
-  console.log(`  - Non-threats: ${nonThreatItems.length} items\n`);
+  console.log(`  - Bags: ${bagItems.length} items (subcategories: ${[...new Set(bagItems.map(i => i.subcategory))].join(', ')})`);
+  console.log(`  - Threats: ${threatItems.length} items (subcategories: ${[...new Set(threatItems.map(i => i.subcategory))].join(', ')})`);
+  console.log(`  - Non-threats: ${nonThreatItems.length} items (subcategories: ${[...new Set(nonThreatItems.map(i => i.subcategory))].join(', ')})\n`);
   
   if (bagItems.length === 0 || threatItems.length === 0 || nonThreatItems.length === 0) {
     console.error('Error: Need at least one item in each category!');

@@ -5,6 +5,7 @@ import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName, clearCustomS
 import { API_BASE_URL } from "../../config/api";
 import AddSubcategoryModal from "../common/AddSubcategoryModal";
 import ConfirmModal from "../common/ConfirmModal";
+import { concurrencyController } from "../../lib/concurrencyController";
 
 interface UploadFileQueueProps {
   files: File[];
@@ -12,6 +13,7 @@ interface UploadFileQueueProps {
   setStaged: React.Dispatch<React.SetStateAction<any[]>>;
   setFiles: (files: File[]) => void;
   uploading: boolean;
+  processing?: boolean;
   handleUpload: () => void;
   selectedForMass: Set<number>;
   onToggleSelect: (idx: number) => void;
@@ -183,12 +185,126 @@ function ScrollableSelect({ value, options, onChange, disabled, placeholder, onA
   );
 }
 
-export default function UploadFileQueue({ files, staged, setStaged, setFiles, uploading, handleUpload, selectedForMass, onToggleSelect, onSelectAll }: UploadFileQueueProps) {
+export default function UploadFileQueue({ files, staged, setStaged, setFiles, uploading, processing = false, handleUpload, selectedForMass, onToggleSelect, onSelectAll }: UploadFileQueueProps) {
   console.log(`[UploadFileQueue] render called. files=${files.length}, staged=${staged.length}`);
   if (files.length === 0) {
     console.log(`[UploadFileQueue] returning null because files.length === 0`);
     return null;
   }
+
+  // Pagination state — show 50 items per page to prevent UI lag with 1000+ items
+  const [page, setPage] = useState(0);
+  const PER_PAGE = 50;
+  const totalPages = Math.max(1, Math.ceil(staged.length / PER_PAGE));
+  const safePage = Math.min(page, totalPages - 1);
+  const startIdx = safePage * PER_PAGE;
+  const endIdx = Math.min(startIdx + PER_PAGE, staged.length);
+  const currentStaged = staged.slice(startIdx, endIdx);
+  
+  console.log(`[UploadFileQueue] Pagination: page ${safePage + 1}/${totalPages}, showing ${currentStaged.length} items (${startIdx + 1}-${endIdx} of ${staged.length})`);
+  
+  // Map a page-local index to the global staged index
+  const globalIdx = (pageIdx: number) => startIdx + pageIdx;
+  
+  // Page-local toggle select
+  const handleToggleSelect = (pageIdx: number) => onToggleSelect(globalIdx(pageIdx));
+  
+  // Page-local select all
+  const handleSelectAllPage = () => {
+    const allGlobalOnPage = currentStaged.map((_, i) => globalIdx(i));
+    const allSelectedOnPage = allGlobalOnPage.every(i => selectedForMass.has(i));
+    if (allSelectedOnPage) {
+      // Deselect all on this page
+      allGlobalOnPage.forEach(i => {
+        if (selectedForMass.has(i)) onToggleSelect(i);
+      });
+    } else {
+      // Select all on this page
+      allGlobalOnPage.forEach(i => {
+        if (!selectedForMass.has(i)) onToggleSelect(i);
+      });
+    }
+  };
+  
+  // Pagination controls
+  const goToPage = (p: number) => {
+    setPage(Math.max(0, Math.min(p, totalPages - 1)));
+  };
+  
+  // Reset to page 0 when staged changes significantly (e.g., after upload)
+  useEffect(() => {
+    if (page >= totalPages) {
+      setPage(Math.max(0, totalPages - 1));
+    }
+  }, [staged.length]);
+  
+  // Override the child's table rendering to use paginated data
+  const renderStaged = currentStaged;
+  
+  // Helper to compute page-local selected set
+  const pageLocalSelected = new Set<number>();
+  for (let i = 0; i < currentStaged.length; i++) {
+    if (selectedForMass.has(globalIdx(i))) pageLocalSelected.add(i);
+  }
+  
+  // Override handleMassAutoGenerateRegion to work with global indices
+  // (the function already uses the full staged array)
+  
+  // Override handleAutoGenerateRegion to work with global indices
+  // (the function already uses staged[idx] directly)
+  
+  // Paginated removeIndex - called by JSX with page-local indices
+  const removeIndex = (pageIdx: number) => {
+    const copy = [...staged];
+    copy.splice(globalIdx(pageIdx), 1);
+    setStaged(copy);
+    const filesCopy = [...files];
+    filesCopy.splice(globalIdx(pageIdx), 1);
+    setFiles(filesCopy);
+  };
+  
+  // Override handleInlineValidRegion to work with global indices
+  const handleInlineValidRegion = (pageIdx: number) => {
+    const idx = globalIdx(pageIdx);
+    setEditingIndex(idx);
+    setEditDraft({ ...staged[idx] });
+    setIsValidRegionEditorOpen(true);
+  };
+  
+  // Override handleInlineCategoryChange to work with global indices
+  const handleInlineCategoryChange = (pageIdx: number, categoryValue: string) => {
+    const idx = globalIdx(pageIdx);
+    const copy = [...staged];
+    if (!categoryValue) {
+      copy[idx] = { ...copy[idx], category: "", subcategory: "" };
+    } else {
+      const subcategories = getLibrarySubcategories(categoryValue);
+      copy[idx] = {
+        ...copy[idx],
+        category: categoryValue,
+        subcategory: subcategories[0]?.name || "General",
+      };
+    }
+    setStaged(copy);
+  };
+  
+  // Override handleInlineSubcategoryChange to work with global indices
+  const handleInlineSubcategoryChange = (pageIdx: number, subcategoryValue: string) => {
+    const idx = globalIdx(pageIdx);
+    const copy = [...staged];
+    copy[idx] = { ...copy[idx], subcategory: subcategoryValue };
+    setStaged(copy);
+  };
+  
+  // Override handleAutoGenerateRegion to work with global indices
+  const handleAutoGenerateRegionPage = (pageIdx: number) => {
+    handleAutoGenerateRegion(globalIdx(pageIdx));
+  };
+  
+  // Override removeIndex (old one below will be replaced)
+  // Note: The original removeIndex, handleInlineValidRegion, handleInlineCategoryChange,
+  // and handleInlineSubcategoryChange functions below are replaced by the paginated versions above.
+  // We keep the old names to avoid changing all the JSX references, but they now use page-local logic.
 
   // Modal/editing state
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -374,64 +490,11 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     setIsValidRegionEditorOpen(false);
   };
 
-  function removeIndex(idx: number) {
-    const itemToRemove = staged[idx];
-    
-    // If it's a pre-processed item, clean up the generated files
-    if (itemToRemove?.preProcessed && itemToRemove?.itemId) {
-      fetch(`${API_BASE_URL}/api/temp-files/${itemToRemove.itemId}`, {
-        method: 'DELETE',
-      }).catch(err => {
-        console.error('Failed to delete temp files:', err);
-      });
-      
-      // Remove from session storage tracking
-      const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
-      const filtered = orphanedItems.filter((id: string) => id !== itemToRemove.itemId);
-      sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(filtered));
-    }
-    
-    const copy = [...staged];
-    copy.splice(idx, 1);
-    setStaged(copy);
-    // Also remove file from files list
-    const filesCopy = [...files];
-    filesCopy.splice(idx, 1);
-    setFiles(filesCopy);
-  }
-
-  // Handle inline category dropdown change (for the row display)
-  function handleInlineCategoryChange(idx: number, categoryValue: string) {
-    const copy = [...staged];
-    if (!categoryValue) {
-      copy[idx] = { ...copy[idx], category: "", subcategory: "" };
-    } else {
-      const subcategories = getLibrarySubcategories(categoryValue);
-      copy[idx] = {
-        ...copy[idx],
-        category: categoryValue,
-        subcategory: subcategories[0]?.name || "General",
-      };
-    }
-    setStaged(copy);
-  }
-
-  function handleInlineSubcategoryChange(idx: number, subcategoryValue: string) {
-    const copy = [...staged];
-    copy[idx] = { ...copy[idx], subcategory: subcategoryValue };
-    setStaged(copy);
-  }
-
+  // getInlineSubcategoryOptions - uses staged directly (no page/local concept needed)
   function getInlineSubcategoryOptions(categorySlug: string) {
     if (!categorySlug) return [];
     return getLibrarySubcategories(categorySlug);
   }
-
-  const handleInlineValidRegion = (idx: number) => {
-    setEditingIndex(idx);
-    setEditDraft({ ...staged[idx] });
-    setIsValidRegionEditorOpen(true);
-  };
 
   const handleAutoGenerateRegion = async (idx: number) => {
     if (autoGeneratingIndices.has(idx)) return;
@@ -562,7 +625,6 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     });
     
     let completedCount = 0;
-    const CONCURRENCY = 4; // Process up to 4 items in parallel
     const UI_BATCH_SIZE = 10; // Update UI every 10 completed items
     
     // Snapshot staged once to avoid stale closure issues
@@ -571,8 +633,9 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     // Collect results and apply them in batches
     const pendingResults: { idx: number; points: any; success: boolean }[] = [];
     
-    // Process items in batches using the new batch endpoint for better parallelization
-    const BATCH_SIZE = 20; // Process 20 items per batch request
+    // Process items in smaller batches to prevent overwhelming Python subprocesses
+    // Each batch item spawns a separate Python process, so smaller batches = less memory contention
+    const BATCH_SIZE = 5; // Process 5 items per batch request - reduced from 20
     const batches: { idx: number; stagedItem: any }[][] = [];
     
     // Split queue into batches
@@ -581,51 +644,83 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     }
     
     async function processBatch(batch: { idx: number; stagedItem: any }[]): Promise<void> {
-      try {
-        const items = batch.map(task => ({
-          itemId: task.stagedItem.itemId,
-          pixelDataPath: task.stagedItem.pixelDataFilename || `${task.stagedItem.itemId}.npz`
-        }));
-        
-        const res = await fetch(`${API_BASE_URL}/api/auto-valid-region-batch`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ items }),
-        });
-        const data = await res.json();
-        
-        if (!res.ok || !data.ok) {
-          throw new Error(data.error || "Failed to auto-generate valid regions");
-        }
-        
-        // Process results
-        if (data.results && Array.isArray(data.results)) {
-          const batchResults: { idx: number; points: any; success: boolean }[] = [];
+      // Execute through concurrency controller to limit parallel requests
+      return await concurrencyController.execute('auto-generate', async () => {
+        try {
+          const items = batch.map(task => ({
+            itemId: task.stagedItem.itemId,
+            pixelDataPath: task.stagedItem.pixelDataFilename || `${task.stagedItem.itemId}.npz`
+          }));
           
-          for (let i = 0; i < batch.length; i++) {
-            const task = batch[i];
-            const result = data.results[i];
+          const res = await fetch(`${API_BASE_URL}/api/auto-valid-region-batch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ items }),
+          });
+          const data = await res.json();
+          
+          if (!res.ok || !data.ok) {
+            throw new Error(data.error || "Failed to auto-generate valid regions");
+          }
+          
+          // Process results
+          if (data.results && Array.isArray(data.results)) {
+            const batchResults: { idx: number; points: any; success: boolean }[] = [];
             
-            if (result && result.ok && result.data) {
-              batchResults.push({
-                idx: task.idx,
-                points: result.data.points,
-                success: true
-              });
-            } else {
-              batchResults.push({
-                idx: task.idx,
-                points: null,
-                success: false
-              });
+            for (let i = 0; i < batch.length; i++) {
+              const task = batch[i];
+              const result = data.results[i];
+              
+              if (result && result.ok && result.data) {
+                batchResults.push({
+                  idx: task.idx,
+                  points: result.data.points,
+                  success: true
+                });
+              } else {
+                batchResults.push({
+                  idx: task.idx,
+                  points: null,
+                  success: false
+                });
+              }
+              completedCount++;
             }
+            
+            // Add to pending results
+            pendingResults.push(...batchResults);
+            
+            // Flush results periodically
+            if (completedCount % UI_BATCH_SIZE === 0 || completedCount === total) {
+              const resultsToFlush = pendingResults.splice(0, pendingResults.length);
+              setStaged(prev => {
+                const copy = [...prev];
+                for (const r of resultsToFlush) {
+                  if (r.success) {
+                    copy[r.idx] = {
+                      ...copy[r.idx],
+                      valid_region_points: {
+                        points: r.points,
+                        simplifiedPoints: r.points
+                      }
+                    };
+                  }
+                }
+                return copy;
+              });
+              setMassAutoGen({ total, completed: completedCount, running: completedCount < total });
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to auto-generate batch:`, err);
+          
+          // Mark all items in batch as failed
+          for (const task of batch) {
+            pendingResults.push({ idx: task.idx, points: null, success: false });
             completedCount++;
           }
           
-          // Add to pending results
-          pendingResults.push(...batchResults);
-          
-          // Flush results periodically
+          // Flush results
           if (completedCount % UI_BATCH_SIZE === 0 || completedCount === total) {
             const resultsToFlush = pendingResults.splice(0, pendingResults.length);
             setStaged(prev => {
@@ -646,50 +741,14 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             setMassAutoGen({ total, completed: completedCount, running: completedCount < total });
           }
         }
-      } catch (err) {
-        console.error(`Failed to auto-generate batch:`, err);
-        
-        // Mark all items in batch as failed
-        for (const task of batch) {
-          pendingResults.push({ idx: task.idx, points: null, success: false });
-          completedCount++;
-        }
-        
-        // Flush results
-        if (completedCount % UI_BATCH_SIZE === 0 || completedCount === total) {
-          const resultsToFlush = pendingResults.splice(0, pendingResults.length);
-          setStaged(prev => {
-            const copy = [...prev];
-            for (const r of resultsToFlush) {
-              if (r.success) {
-                copy[r.idx] = {
-                  ...copy[r.idx],
-                  valid_region_points: {
-                    points: r.points,
-                    simplifiedPoints: r.points
-                  }
-                };
-              }
-            }
-            return copy;
-          });
-          setMassAutoGen({ total, completed: completedCount, running: completedCount < total });
-        }
-      }
+      });
     }
     
-    // Process batches in parallel with concurrency limit
-    const batchWorkers = Array.from({ length: CONCURRENCY }, async () => {
-      while (batches.length > 0) {
-        const batch = batches.shift()!;
-        await processBatch(batch);
-        // Yield to event loop after each batch to allow streaming reader to process chunks
-        if (batches.length > 0) {
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
-      }
-    });
-    await Promise.all(batchWorkers);
+    // Process batches sequentially through the concurrency controller
+    // The controller will limit parallelism to x/4 (1 when processing, 2 when idle)
+    for (const batch of batches) {
+      await processBatch(batch);
+    }
     
     // Flush any remaining results
     if (pendingResults.length > 0) {
@@ -722,9 +781,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     
     // Summary: show skipped + succeeded + failed counts
     const failedCount = total - completedCount;
-    const succeeded = completedCount - failedCount; // all completed ones succeeded since failures update completedCount too
-    // Actually failures increment completedCount too, so re-derive: succeeded are those with success:true
-    // Let's just report based on what we know
+    const succeeded = completedCount - failedCount;
     if (skippedCount > 0) {
       console.log(`Mass auto-generation: ${succeeded} succeeded, ${failedCount} failed, ${skippedCount} skipped (already had valid region).`);
     }
@@ -775,7 +832,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
       {/* Mass Assign Row - Category/Subcategory apply to all */}
       <div className="px-5 py-3 border-b border-border bg-surface/30 flex items-center gap-4 overflow-visible">
-        <span className="text-xs font-medium text-muted whitespace-nowrap">Mass Assign :</span>
+        <span className="text-xs medium text-muted whitespace-nowrap">Mass Assign :</span>
         <select
           className="w-36 p-1.5 border border-border rounded-lg text-xs bg-white"
           value={massCategory}
@@ -816,7 +873,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
           onClick={handleMassAutoGenerateRegion}
           disabled={massAutoGen?.running ?? false}
           className="px-4 py-1.5 rounded-xl bg-amber-50 text-amber-700 text-xs font-semibold border border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-          title="Auto-generate valid regions for all bag items (or selected ones)"
+          title={processing ? "Auto-generating will run with reduced speed during upload" : "Auto-generate valid regions for all bag items (or selected ones)"}
         >
           {massAutoGen?.running ? (
             <Loader2 size={14} className="animate-spin" />
@@ -979,7 +1036,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {staged.map((s, idx) => {
+            {currentStaged.map((s, pageLocalIdx) => {
+              const actualGlobalIdx = globalIdx(pageLocalIdx);
               const file = s.file as File;
               const preview = s.preProcessed
                 ? `${API_BASE_URL}/data/library_images/${s.filepath}`
@@ -988,24 +1046,24 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
               const inlineSubOptions = getInlineSubcategoryOptions(s.category);
 
               return (
-                <tr key={idx} className="even:bg-surface/20">
+                <tr key={actualGlobalIdx} className="even:bg-surface/20">
                   <td className="py-3 px-3 align-top">
                     <input
                       type="checkbox"
-                      checked={selectedForMass.has(idx)}
-                      onChange={() => onToggleSelect(idx)}
+                      checked={selectedForMass.has(actualGlobalIdx)}
+                      onChange={() => handleToggleSelect(pageLocalIdx)}
                       className="rounded border-gray-300"
                     />
                   </td>
                   <td className="py-3 px-3 align-top text-sm font-mono text-muted text-center">
-                    {idx + 1}
+                    {actualGlobalIdx + 1}
                   </td>
                   <td className="py-3 px-3 align-top">
                     <button
                       onClick={() => {
                         setPreviewImage(preview);
                         setPreviewFileName(file.name);
-                        setPreviewIndex(idx);
+                        setPreviewIndex(actualGlobalIdx);
                       }}
                       className="cursor-pointer hover:opacity-80 transition-opacity"
                       title="Click to enlarge"
@@ -1022,7 +1080,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       <select
                         className="w-32 p-1.5 border border-border rounded-lg text-xs bg-white"
                         value={s.category || ""}
-                        onChange={(e) => handleInlineCategoryChange(idx, e.target.value)}
+                        onChange={(e) => handleInlineCategoryChange(pageLocalIdx, e.target.value)}
                         disabled={uploading}
                       >
                         <option value="">NONE</option>
@@ -1037,7 +1095,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                           <button
                             type="button"
                             onClick={() => {
-                              setActiveTagRow(activeTagRow === idx ? null : idx);
+                              setActiveTagRow(activeTagRow === actualGlobalIdx ? null : actualGlobalIdx);
                             }}
                             className="text-[11px] px-2 py-1 rounded border border-border bg-surface hover:bg-emerald-50 hover:border-emerald-300 flex items-center gap-1"
                           >
@@ -1053,7 +1111,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                             )}
                           </button>
                           
-                          {activeTagRow === idx && (
+                          {activeTagRow === actualGlobalIdx && (
                             <div ref={tagSelectorRef} className="mt-1 p-2 border border-border rounded-lg bg-white shadow-lg z-20 relative" style={{ maxHeight: "220px", overflowY: "auto" }}>
                               <div className="text-[10px] text-muted mb-1.5 font-medium sticky top-0 bg-white pb-1 z-10">Select non-threat items:</div>
                               <div className="space-y-0.5">
@@ -1073,11 +1131,11 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                                         checked={isSelected}
                                         onChange={(e) => {
                                           const copy = [...staged];
-                                          const currentTags = copy[idx].tags || [];
+                                          const currentTags = copy[actualGlobalIdx].tags || [];
                                           const newTags = e.target.checked
                                             ? [...currentTags, sub.slug]
                                             : currentTags.filter((t: string) => t !== sub.slug);
-                                          copy[idx] = { ...copy[idx], tags: newTags };
+                                          copy[actualGlobalIdx] = { ...copy[actualGlobalIdx], tags: newTags };
                                           setStaged(copy);
                                         }}
                                         className="rounded border-gray-300"
@@ -1113,8 +1171,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         const copy = [...staged];
-                                        const newTags = copy[idx].tags?.filter((t: string) => t !== tagSlug) || [];
-                                        copy[idx] = { ...copy[idx], tags: newTags };
+                                        const newTags = copy[actualGlobalIdx].tags?.filter((t: string) => t !== tagSlug) || [];
+                                        copy[actualGlobalIdx] = { ...copy[actualGlobalIdx], tags: newTags };
                                         setStaged(copy);
                                       }}
                                       className="hover:text-rose-600 transition-colors"
@@ -1137,7 +1195,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                     <ScrollableSelect
                       value={s.subcategory || ""}
                       options={inlineSubOptions}
-                      onChange={(val) => handleInlineSubcategoryChange(idx, val)}
+                      onChange={(val) => handleInlineSubcategoryChange(pageLocalIdx, val)}
                       disabled={uploading || !s.category}
                       placeholder="NONE"
                       onAddNew={s.category ? () => openAddSubcategoryModal(s.category) : undefined}
@@ -1149,12 +1207,12 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => handleAutoGenerateRegion(idx)}
-                          disabled={autoGeneratingIndices.has(idx)}
+                          onClick={() => handleAutoGenerateRegion(actualGlobalIdx)}
+                          disabled={autoGeneratingIndices.has(actualGlobalIdx)}
                           className="text-xs px-3 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                           title="Auto-generate valid region from pixel data"
                         >
-                          {autoGeneratingIndices.has(idx) ? (
+                          {autoGeneratingIndices.has(actualGlobalIdx) ? (
                             <Loader2 size={12} className="animate-spin" />
                           ) : (
                             <Sparkles size={12} />
@@ -1163,7 +1221,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleInlineValidRegion(idx)}
+                          onClick={() => handleInlineValidRegion(pageLocalIdx)}
                           className="text-xs px-3 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1.5"
                         >
                           <Edit3 size={12} />
@@ -1176,7 +1234,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   </td>
                   <td className="py-3 px-3 align-top">
                     <button
-                      onClick={() => removeIndex(idx)}
+                      onClick={() => removeIndex(pageLocalIdx)}
                       className="p-1.5 rounded-lg text-rose-500"
                       title="Remove"
                       disabled={uploading}
@@ -1189,6 +1247,47 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             })}
           </tbody>
         </table>
+        
+        {/* Pagination Controls - Only show when more than 1 page */}
+        {totalPages > 1 && (
+          <div className="px-5 py-2 bg-surface/30 border-t border-border flex items-center justify-center gap-2">
+            <button
+              onClick={() => goToPage(0)}
+              disabled={safePage === 0}
+              className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-30 disabled:cursor-not-allowed"
+              title="First page"
+            >
+              ⟪
+            </button>
+            <button
+              onClick={() => goToPage(safePage - 1)}
+              disabled={safePage === 0}
+              className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Previous page"
+            >
+              ⟨
+            </button>
+            <span className="text-xs text-muted px-3">
+              Page {safePage + 1} of {totalPages} ({staged.length} items)
+            </span>
+            <button
+              onClick={() => goToPage(safePage + 1)}
+              disabled={safePage === totalPages - 1}
+              className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Next page"
+            >
+              ⟩
+            </button>
+            <button
+              onClick={() => goToPage(totalPages - 1)}
+              disabled={safePage === totalPages - 1}
+              className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Last page"
+            >
+              ⟫
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="px-5 py-3 bg-nav border-t border-border flex-shrink-0 flex justify-between items-center">

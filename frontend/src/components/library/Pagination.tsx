@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface PaginationProps {
@@ -17,6 +17,12 @@ export default function Pagination({
   totalItems,
 }: PaginationProps) {
   if (totalPages <= 1) return null;
+
+  const [pageInput, setPageInput] = useState(String(currentPage));
+
+  useEffect(() => {
+    setPageInput(String(currentPage));
+  }, [currentPage]);
 
   const startItem = (currentPage - 1) * itemsPerPage + 1;
   const endItem = Math.min(currentPage * itemsPerPage, totalItems);
@@ -51,6 +57,30 @@ export default function Pagination({
     }
 
     return pages;
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPageInput(e.target.value);
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      const parsed = parseInt(pageInput, 10);
+      if (!isNaN(parsed) && parsed >= 1 && parsed <= totalPages) {
+        onPageChange(parsed);
+      } else {
+        setPageInput(String(currentPage));
+      }
+    }
+  };
+
+  const handleInputBlur = () => {
+    const parsed = parseInt(pageInput, 10);
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= totalPages) {
+      onPageChange(parsed);
+    } else {
+      setPageInput(String(currentPage));
+    }
   };
 
   return (
@@ -109,6 +139,18 @@ export default function Pagination({
           <span className="hidden sm:inline">Next</span>
           <ChevronRight size={14} />
         </button>
+
+        <input
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={pageInput}
+          onChange={handleInputChange}
+          onKeyDown={handleInputKeyDown}
+          onBlur={handleInputBlur}
+          className="w-16 rounded-md border border-border bg-surface px-2 py-1 text-center text-xs font-medium text-ink focus:outline-none focus:ring-2 focus:ring-accent/50"
+          placeholder={`/${totalPages}`}
+        />
       </div>
     </div>
   );
