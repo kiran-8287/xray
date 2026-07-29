@@ -6,6 +6,9 @@
 import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import pino from 'pino';
+import client from 'prom-client';
+import { PIPELINE_STAGES } from './instrumentation.js';
 
 // Derive __dirname equivalent in ESM
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,6 +32,18 @@ class WorkerPool {
    * @param {number} size - Number of workers to create (default: 4)
    */
   constructor(size = 4) {
+    this.logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+
+    // Metrics
+    try {
+      this.batchDuration = new client.Histogram({
+        name: 'worker_batch_duration_seconds',
+        help: 'Time to process a worker batch',
+        buckets: [0.01, 0.05, 0.1, 0.3, 0.5, 1, 2, 5]
+      });
+    } catch (e) {
+      // metrics lib may be initialized elsewhere; ignore if fails
+    }
     this.size = size;
     this.idle = new Set();
     this.queue = [];           // Array of { tasks, onResult } batches waiting
@@ -101,8 +116,8 @@ class WorkerPool {
       const worker = this.idle.values().next().value;
       this.idle.delete(worker);
       this._pendingBatches++;
-      
-      console.log(`[WorkerPool] Sending batch of ${batchEntries.length} tasks to worker. Total pending: ${this._pendingBatches}`);
+      this.logger.info({ batchSize: batchEntries.length, pending: this._pendingBatches, stage: PIPELINE_STAGES.WORKER_DISPATCH }, 'workerpool_send_batch');
+      const batchStart = process.hrtime.bigint();
       
       // Send the tasks array to the worker (worker expects an array)
       worker.postMessage({ tasks: batchEntries.map(e => e.item) });
@@ -133,8 +148,15 @@ class WorkerPool {
           this._pendingBatches--;
           worker.removeListener("message", messageHandler);
           this.idle.add(worker);
-          
-          console.log(`[WorkerPool] Batch complete. Results: ${resultsReceived}/${totalExpected}. Pending: ${this._pendingBatches}`);
+          const batchDurationSec = Number(process.hrtime.bigint() - batchStart) / 1e9;
+          try { this.batchDuration && this.batchDuration.observe(batchDurationSec); } catch (e) {}
+          this.logger.info({ 
+            resultsReceived, 
+            totalExpected, 
+            pending: this._pendingBatches, 
+            duration_s: batchDurationSec,
+            stage: PIPELINE_STAGES.WORKER_DISPATCH 
+          }, 'workerpool_batch_complete');
           
           // Process next queued batch if any
           if (this.queue.length > 0) {
@@ -176,7 +198,7 @@ class WorkerPool {
     } else {
       // No idle workers, queue entire batch
       this.queue.push(batchEntries);
-      console.log(`[WorkerPool] No idle workers, queued batch of ${batchEntries.length}. Queue length: ${this.queue.length}`);
+      this.logger.info({ queuedSize: batchEntries.length, queueLength: this.queue.length }, 'workerpool_queued_batch');
     }
   }
 

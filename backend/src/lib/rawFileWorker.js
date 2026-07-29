@@ -7,9 +7,20 @@ import { parentPort } from "node:worker_threads";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import pino from 'pino';
+import client from 'prom-client';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PYTHON_SCRIPT = path.join(__dirname, "process_raw_file.py");
+const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+let pythonBatchDuration;
+try {
+  pythonBatchDuration = new client.Histogram({
+    name: 'python_batch_duration_seconds',
+    help: 'Duration of the Python subprocess batch processing',
+    buckets: [0.01, 0.05, 0.1, 0.3, 0.5, 1, 2, 5]
+  });
+} catch (e) {}
 
 /**
  * Spawn ONE Python process and feed it a batch of files via stdin.
@@ -20,6 +31,7 @@ const PYTHON_SCRIPT = path.join(__dirname, "process_raw_file.py");
  */
 function runPythonBatch(tasks) {
   return new Promise((resolve) => {
+    const batchStart = process.hrtime.bigint();
     // Build the batch input for Python stdin
     const batchInput = tasks.map(t => ({
       filePath: t.filePath,
@@ -48,6 +60,9 @@ function runPythonBatch(tasks) {
     });
 
     proc.on("close", (code) => {
+      const batchDuration = Number(process.hrtime.bigint() - batchStart) / 1e9;
+      try { pythonBatchDuration && pythonBatchDuration.observe(batchDuration); } catch (e) {}
+      logger.info({ batchSize: tasks.length, duration_s: batchDuration, exitCode: code }, 'python_batch_complete');
       const lines = stdout.trim().split("\n").filter(Boolean);
       const results = lines.map(line => {
         try {
@@ -61,6 +76,7 @@ function runPythonBatch(tasks) {
     });
 
     proc.on("error", (err) => {
+      logger.error({ err: err.message }, 'python_process_error');
       // Return error for ALL tasks in the batch
       const errorResults = tasks.map(t => ({
         status: "error",
