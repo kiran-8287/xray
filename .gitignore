@@ -6,14 +6,20 @@ node_modules/
 frontend/dist/
 
 # Generated data
-backend/data/item.json
-backend/data/items.json
-backend/data/savedLayouts.json
-backend/data/saved_layouts.json
+backend/data/*.json
 backend/data/library_images/
 backend/data/exports/
 backend/data/collage_images/
 backend/data/pixel_data/
+backend/data/temp/
+backend/data/*.tmp
+
+# Exported/batch data files
+backend/data/items_*.json
+backend/data/items_backup.json
+
+# User-specific data (should not be shared)
+backend/data/customSubcategories.json
 
 # IDE
 .vscode/

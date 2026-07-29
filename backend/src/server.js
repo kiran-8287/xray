@@ -9,6 +9,8 @@ import { generateValidRegion } from "./lib/autoValidRegion.js";
 import { renderSceneAsync } from "./lib/renderCanvas.js";
 import Jimp from "jimp";
 import WorkerPool from "./lib/workerPool.js";
+import pino from 'pino';
+import client from 'prom-client';
 import {
     getItems,
     getItemById,
@@ -32,19 +34,57 @@ import {
     streamItems,
     getItemsPaginated
 } from "./lib/storage.js";
+import { PipelineTimer, PIPELINE_STAGES, generateOperationId, getMemoryUsageMB, queueWaitTracker } from "./lib/instrumentation.js";
+import { initializeSystemConfig, getWorkerCount, checkMemoryAvailability } from "./lib/systemInfo.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "100mb" })); // Increased for large batch uploads with metadata
 
+// Structured logger
+const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+
+// Prometheus metrics
+const collectDefaultMetrics = client.collectDefaultMetrics;
+collectDefaultMetrics({ timeout: 5000 });
+
+const httpRequestDuration = new client.Histogram({
+    name: 'http_request_duration_seconds',
+    help: 'Duration of HTTP requests in seconds',
+    labelNames: ['method', 'route', 'status_code'],
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.3, 0.5, 1, 2, 5]
+});
+
+const uploadFileDuration = new client.Histogram({
+    name: 'upload_file_processing_seconds',
+    help: 'Time spent processing an uploaded file',
+    labelNames: ['status'],
+    buckets: [0.01, 0.05, 0.1, 0.3, 0.5, 1, 2, 5]
+});
+
+// Request timing middleware
+app.use((req, res, next) => {
+    const start = process.hrtime.bigint();
+    res.on('finish', () => {
+        const durationSec = Number(process.hrtime.bigint() - start) / 1e9;
+        try {
+            httpRequestDuration.labels(req.method, req.route && req.route.path ? req.route.path : req.path, String(res.statusCode)).observe(durationSec);
+        } catch (e) {
+            // ignore metric labeling errors
+        }
+        logger.info({ method: req.method, path: req.path, status: res.statusCode, duration_s: durationSec }, 'request_finished');
+    });
+    next();
+});
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const exportsRoot = path.resolve(__dirname, "../data/exports");
-const libraryImagesRoot = path.resolve(__dirname, "../data/library_images");
-const collageImagesRoot = path.resolve(__dirname, "../data/collage_images");
-const collageHighRoot = path.resolve(collageImagesRoot, "high");
-const collageLowRoot = path.resolve(collageImagesRoot, "low");
-const pixelDataRoot = path.resolve(__dirname, "../data/pixel_data");
+const libraryImagesRoot = "B:\\library_images";
+const collageImagesRoot = "B:\\collage_images";
+const collageHighRoot = "B:\\collage_images\\high";
+const collageLowRoot = "B:\\collage_images\\low";
+const pixelDataRoot = "B:\\pixel_data";
 
 // Ensure directories exist
 await fs.mkdir(exportsRoot, { recursive: true });
@@ -54,7 +94,17 @@ await fs.mkdir(collageHighRoot, { recursive: true });
 await fs.mkdir(collageLowRoot, { recursive: true });
 await fs.mkdir(pixelDataRoot, { recursive: true });
 
-// Serve static files from data directory
+// Serve static files — map frontend URL paths to actual disk locations
+// IMPORTANT: B: drive routes MUST come BEFORE the generic /data route,
+// because Express matches in order and /data would catch everything.
+
+// B: drive for large data — map /data/library_images, /data/collage_images, /data/pixel_data
+// so frontend URLs like /data/library_images/... continue to work
+app.use('/data/library_images', express.static(libraryImagesRoot));
+app.use('/data/collage_images', express.static(collageImagesRoot));
+app.use('/data/pixel_data', express.static(pixelDataRoot));
+
+// C: drive project data (exports, DB, etc.)
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
 
 // Note: Thumbnails are no longer generated separately. 
@@ -74,7 +124,12 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // Multer setup for raw file uploads (memory storage for streaming)
-const rawUpload = multer({ storage: multer.memoryStorage() });
+const rawUpload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 5000, // Support large batch raw uploads (up to 5000 files)
+  }
+});
 
 function safeNowStamp() {
     return new Date().toISOString().replace(/[:.]/g, "-");
@@ -115,6 +170,17 @@ app.get("/", (_req, res) => {
   });
 });
 
+// Prometheus metrics endpoint
+app.get('/metrics', async (_req, res) => {
+    try {
+        res.setHeader('Content-Type', client.register.contentType);
+        res.end(await client.register.metrics());
+    } catch (err) {
+        logger.error({ err: err.message }, 'Failed to collect metrics');
+        res.status(500).end(err.message);
+    }
+});
+
 // Clean up temp files older than 1 hour (runs on server startup and can be called periodically)
 async function cleanupOldTempFiles() {
   const tempDir = path.resolve(__dirname, "../data/temp");
@@ -149,6 +215,9 @@ async function cleanupOldTempFiles() {
 // Run cleanup on startup
 await cleanupOldTempFiles();
 
+// Initialize system configuration (detect CPU cores, etc.)
+await initializeSystemConfig();
+
 // Helper functions for raw file processing
 function deriveItemId(filename) {
     const dotIndex = filename.indexOf(".");
@@ -170,31 +239,52 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
     res.setHeader("Transfer-Encoding", "chunked");
     res.status(200).flushHeaders();
 
+    const operationId = generateOperationId();
+    const timer = new PipelineTimer(operationId, 'process_raw_files');
+    
     try {
-        // 1. Read existing items once for duplicate detection
+        // Stage 1: Upload Receipt
+        timer.startStage(PIPELINE_STAGES.UPLOAD_RECEIPT);
+        const files = req.files || [];
+        logger.info({ operationId, fileCount: files.length, totalSize: files.reduce((sum, f) => sum + f.buffer.length, 0) }, 'upload_receipt');
+        timer.endStage(PIPELINE_STAGES.UPLOAD_RECEIPT, { fileCount: files.length });
+        
+        // Stage 2: Validation
+        timer.startStage(PIPELINE_STAGES.VALIDATION);
+        
+        // Read existing items once for duplicate detection
         const items = await getItems();
         const existingIds = new Set(items.map(i => i.id));
 
-        // 2. Process each file: derive ID, classify type, check duplicates
+        // Process each file: derive ID, classify type, check duplicates
         const nonDuplicates = [];
         let duplicateCount = 0;
 
-        const files = req.files || [];
+        console.log(`[process-raw-files] Received ${files.length} files from multer`);
         const skippedFiles = [];
         for (const file of files) {
             const itemId = deriveItemId(file.originalname);
             const fileType = classifyFileType(file.originalname);
             if (!fileType) {
+                console.log(`[process-raw-files] Skipped ${file.originalname}: unrecognized extension`);
                 skippedFiles.push({ filename: file.originalname, reason: "Unrecognized file extension (expected .dump.pgm or .tip)" });
                 continue;
             }
 
             if (existingIds.has(itemId)) {
+                console.log(`[process-raw-files] Duplicate: ${itemId}`);
                 duplicateCount++;
             } else {
                 nonDuplicates.push({ file, itemId, fileType });
             }
         }
+        console.log(`[process-raw-files] Non-duplicates: ${nonDuplicates.length}, Duplicates: ${duplicateCount}, Skipped: ${skippedFiles.length}`);
+        
+        timer.endStage(PIPELINE_STAGES.VALIDATION, { 
+            valid: nonDuplicates.length, 
+            duplicates: duplicateCount, 
+            skipped: skippedFiles.length 
+        });
 
         // Report skipped files immediately
         for (const skipped of skippedFiles) {
@@ -218,16 +308,43 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
             return;
         }
 
-        // 3. Save file buffers to temp files and dispatch to worker pool
-        // Use larger worker pool for large batches (4-8 workers based on file count)
-        const workerCount = Math.min(8, Math.max(4, Math.ceil(nonDuplicates.length / 100)));
+        // Stage 3: File Preprocessing
+        timer.startStage(PIPELINE_STAGES.FILE_PREPROCESSING);
+        
+        // Get dynamic worker count based on system resources
+        const workerCount = await getWorkerCount('upload', 10);
+        logger.info({ operationId, workerCount, systemInfo: getSystemInfo() }, 'worker_count_determined');
+        
+        // Memory-aware upload safeguards
+        const estimatedMemoryMB = nonDuplicates.length * 4; // Estimate 4MB per file
+        const memoryCheck = checkMemoryAvailability(estimatedMemoryMB);
+        logger.info({ operationId, memoryCheck }, 'memory_check');
+        
+        if (!memoryCheck.canProceed) {
+            timer.endStage(PIPELINE_STAGES.FILE_PREPROCESSING, { 
+                tempFilesCreated: 0,
+                duration_s: 0,
+                memoryCheck 
+            });
+            
+            res.write(JSON.stringify({
+                status: "error",
+                reason: memoryCheck.recommendation,
+                memory: memoryCheck
+            }) + "\n");
+            res.end();
+            return;
+        }
+        
+        // Save file buffers to temp files and dispatch to worker pool
         const pool = new WorkerPool(workerCount);
         let processedCount = 0;
         let failedCount = 0;
         const tempDir = path.resolve(__dirname, "../data/temp");
         await fs.mkdir(tempDir, { recursive: true });
         
-
+        const preprocessingStart = process.hrtime.bigint();
+        
         for (const { file, itemId, fileType } of nonDuplicates) {
             // Write buffer to temp file
             const tempPath = path.join(tempDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
@@ -253,18 +370,38 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
                         failedCount++;
                     }
 
-                    // Clean up temp file asynchronously — log warning if cleanup fails
-                    fs.unlink(tempPath).catch((cleanupErr) => {
-                        console.warn(`[process-raw-files] Failed to delete temp file ${tempPath}:`, cleanupErr.message);
+                    // Clean up temp file asynchronously — silently ignore if already deleted
+                    fs.unlink(tempPath).catch(() => {
+                        // ENOENT is harmless — file was already cleaned up by another path
                     });
                 }
             );
         }
+        
+        const preprocessingDuration = Number(process.hrtime.bigint() - preprocessingStart) / 1e9;
+        timer.endStage(PIPELINE_STAGES.FILE_PREPROCESSING, { 
+            tempFilesCreated: nonDuplicates.length,
+            duration_s: preprocessingDuration 
+        });
 
-        // 4. Wait for all tasks to complete
+        // Stage 4: Worker Dispatch
+        timer.startStage(PIPELINE_STAGES.WORKER_DISPATCH);
+        const workerDispatchStart = process.hrtime.bigint();
+        
+        // Wait for all tasks to complete
         await pool.drain();
+        
+        const workerDispatchDuration = Number(process.hrtime.bigint() - workerDispatchStart) / 1e9;
+        timer.endStage(PIPELINE_STAGES.WORKER_DISPATCH, { 
+            workerCount,
+            batchSize: 1,
+            duration_s: workerDispatchDuration 
+        });
 
-        // 5. Write the complete summary line
+        // Stage 5: Persistence
+        timer.startStage(PIPELINE_STAGES.PERSISTENCE);
+        
+        // Write the complete summary line
         const summary = {
             status: "complete",
             total: nonDuplicates.length,
@@ -275,8 +412,26 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         const summaryLine = JSON.stringify(summary);
         res.write(summaryLine + "\n");
         res.end();
+        
+        timer.endStage(PIPELINE_STAGES.PERSISTENCE, { 
+            itemsProcessed: processedCount,
+            itemsFailed: failedCount 
+        });
+
+        // Complete pipeline and log summary
+        const pipelineSummary = timer.complete({
+            totalFiles: files.length,
+            validFiles: nonDuplicates.length,
+            duplicateFiles: duplicateCount,
+            skippedFiles: skippedFiles.length,
+            processedFiles: processedCount,
+            failedFiles: failedCount
+        });
+        
+        logger.info(pipelineSummary, 'pipeline_summary');
 
     } catch (err) {
+        timer.logError('pipeline_error', err);
         if (!res.headersSent) {
             res.status(500).json({ ok: false, error: err.message });
         } else {
@@ -650,8 +805,19 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
     }
   });
   
+  const operationId = generateOperationId();
+  const timer = new PipelineTimer(operationId, 'upload');
+  
   try {
+        // Stage 1: Upload Receipt
+        timer.startStage(PIPELINE_STAGES.UPLOAD_RECEIPT);
         const files = req.files || [];
+        logger.info({ operationId, fileCount: files.length }, 'upload_receipt');
+        timer.endStage(PIPELINE_STAGES.UPLOAD_RECEIPT, { fileCount: files.length });
+        
+        // Stage 2: Validation
+        timer.startStage(PIPELINE_STAGES.VALIDATION);
+        
         // Optional metadata: JSON string or object keyed by original filename
         let metadataArray = [];
         if (req.body.metadata) {
@@ -664,12 +830,21 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
                 console.warn('Warning: failed to parse upload metadata', err);
             }
         }
+        
+        timer.endStage(PIPELINE_STAGES.VALIDATION, { 
+            metadataItems: metadataArray.length 
+        });
 
+        // Stage 3: File Processing (per-file)
+        timer.startStage(PIPELINE_STAGES.FILE_PREPROCESSING);
+        
         const errors = [];
         const processed = [];
         const processedIds = new Set(); // Track which metadata entries were processed
+        const fileProcessingStart = process.hrtime.bigint();
 
         for (const file of files) {
+            const fileStart = process.hrtime.bigint();
             // Extract ID from filename without extension
             const itemId = path.basename(file.originalname, path.extname(file.originalname));
             
@@ -780,9 +955,23 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
 
                 processed.push(itemId);
                 processedIds.add(file.originalname);
+                try {
+                    const fileDuration = Number(process.hrtime.bigint() - fileStart) / 1e9;
+                    uploadFileDuration.labels('success').observe(fileDuration);
+                    logger.info({ filename: file.originalname, itemId, duration_s: fileDuration }, 'file_processed');
+                } catch (e) {
+                    // ignore metric/log errors
+                }
             } catch (fileErr) {
                 console.error(`Error processing file ${file.originalname}:`, fileErr);
                 errors.push({ filename: file.originalname, message: String(fileErr) });
+                try {
+                    const fileDuration = Number(process.hrtime.bigint() - fileStart) / 1e9;
+                    uploadFileDuration.labels('error').observe(fileDuration);
+                    logger.warn({ filename: file.originalname, error: String(fileErr), duration_s: fileDuration }, 'file_processing_failed');
+                } catch (e) {
+                    // ignore
+                }
                 // Clean up the uploaded file since processing failed
                 try {
                     await fs.unlink(path.join(libraryImagesRoot, file.filename));
@@ -846,13 +1035,34 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
             }
         }
 
+        // Stage 4: Persistence
+        timer.startStage(PIPELINE_STAGES.PERSISTENCE);
+        
         res.json({ 
             ok: true, 
             message: errors.length > 0 ? "Some files processed, some had errors" : "Files uploaded successfully!", 
             itemsProcessed: processed.length,
             errors
         });
+        
+        const fileProcessingDuration = Number(process.hrtime.bigint() - fileProcessingStart) / 1e9;
+        timer.endStage(PIPELINE_STAGES.PERSISTENCE, { 
+            itemsProcessed: processed.length,
+            itemsFailed: errors.length,
+            duration_s: fileProcessingDuration 
+        });
+
+        // Complete pipeline
+        const pipelineSummary = timer.complete({
+            totalFiles: files.length,
+            processedFiles: processed.length,
+            failedFiles: errors.length,
+            metadataItems: metadataArray.length
+        });
+        
+        logger.info(pipelineSummary, 'pipeline_summary');
     } catch (err) {
+        timer.logError('upload_pipeline_error', err);
         console.error(err);
         res.status(500).json({ ok: false, error: String(err) });
     }
@@ -1535,8 +1745,10 @@ app.use((req, res) => {
 
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;
 
-app.listen(port, () => {
-    // Server started
-});
+if (process.env.NODE_ENV !== 'test') {
+    app.listen(port, () => {
+        logger.info({ port }, 'server_started');
+    });
+}
 
 export default app;

@@ -1,9 +1,14 @@
 // workerPool.js — ESM Worker Pool Manager
-// Manages a pool of 4 worker threads for parallel raw file processing
+// Manages a pool of worker threads for parallel raw file processing.
+// Now supports BATCH task dispatch: each worker receives an array of tasks,
+// which reduces Python process spawn overhead by ~20x.
 
 import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import pino from 'pino';
+import client from 'prom-client';
+import { PIPELINE_STAGES } from './instrumentation.js';
 
 // Derive __dirname equivalent in ESM
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -11,11 +16,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Resolve the worker script path
 const workerScriptPath = path.join(__dirname, "rawFileWorker.js");
 
+// Controls how many files are sent per Python process spawn
+// Set to 1 to process one file per Python process, preventing memory accumulation
+const BATCH_SIZE = 1;
+
 /**
  * WorkerPool - Manages a fixed pool of Worker Threads
  * 
- * Maintains exactly 4 concurrent workers for processing raw files.
- * Queues additional tasks when all workers are busy.
+ * Maintains N concurrent workers. Tasks are batched together (up to BATCH_SIZE)
+ * before being dispatched to a worker, reducing Python process spawn overhead.
  */
 class WorkerPool {
   /**
@@ -23,71 +32,40 @@ class WorkerPool {
    * @param {number} size - Number of workers to create (default: 4)
    */
   constructor(size = 4) {
+    this.logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+
+    // Metrics
+    try {
+      this.batchDuration = new client.Histogram({
+        name: 'worker_batch_duration_seconds',
+        help: 'Time to process a worker batch',
+        buckets: [0.01, 0.05, 0.1, 0.3, 0.5, 1, 2, 5]
+      });
+    } catch (e) {
+      // metrics lib may be initialized elsewhere; ignore if fails
+    }
     this.size = size;
     this.idle = new Set();
-    this.queue = [];
+    this.queue = [];           // Array of { tasks, onResult } batches waiting
     this._drainResolvers = [];
-    this._activeTaskForWorker = new Map();
-
+    this._pendingBatches = 0;  // Track total outstanding batches
+    
+    // Accumulation buffer for incoming single tasks
+    this._batchBuffer = [];         // Array of { item, callback }
+    this._batchTimer = null;
+    
     // Pre-create workers and add them to idle set
     for (let i = 0; i < size; i++) {
       const worker = new Worker(workerScriptPath);
       
       // Attach pool-level error handler for uncaught worker errors
       worker.on("error", (err) => {
-        // Get the active task for this worker (if any)
-        const activeTask = this._activeTaskForWorker.get(worker);
-        
-        if (activeTask) {
-          // Synthesize an error result for the active task
-          const errorResult = {
-            status: "error",
-            id: activeTask.itemId,
-            reason: err.message || "Worker thread error"
-          };
-          
-          // Call the onResult callback
-          if (activeTask.onResult) {
-            activeTask.onResult(errorResult);
-          }
-          
-          // Clean up the active task mapping
-          this._activeTaskForWorker.delete(worker);
-        }
-        
         // Replace the crashed worker with a fresh one
-        const wasInIdle = this.idle.has(worker);
         this.idle.delete(worker);
         
-        // Create a new worker to replace the crashed one
         const newWorker = new Worker(workerScriptPath);
-        
-        // Attach the same error handler to the new worker
-        newWorker.on("error", (err) => {
-          const task = this._activeTaskForWorker.get(newWorker);
-          if (task) {
-            const result = {
-              status: "error",
-              id: task.itemId,
-              reason: err.message || "Worker thread error"
-            };
-            if (task.onResult) {
-              task.onResult(result);
-            }
-            this._activeTaskForWorker.delete(newWorker);
-          }
-          this.idle.delete(newWorker);
-          const replacement = new Worker(workerScriptPath);
-          // Re-attach error handler recursively
-          this._attachErrorHandler(replacement);
-          this.idle.add(replacement);
-          this._checkDrain();
-        });
-        
-        // Add the new worker to idle
+        this._attachErrorHandler(newWorker);
         this.idle.add(newWorker);
-        
-        // Check if we're now drained
         this._checkDrain();
       });
       
@@ -102,25 +80,7 @@ class WorkerPool {
    */
   _attachErrorHandler(worker) {
     worker.on("error", (err) => {
-      const activeTask = this._activeTaskForWorker.get(worker);
-      
-      if (activeTask) {
-        const errorResult = {
-          status: "error",
-          id: activeTask.itemId,
-          reason: err.message || "Worker thread error"
-        };
-        
-        if (activeTask.onResult) {
-          activeTask.onResult(errorResult);
-        }
-        
-        this._activeTaskForWorker.delete(worker);
-      }
-      
       this.idle.delete(worker);
-      
-      // Create replacement worker
       const newWorker = new Worker(workerScriptPath);
       this._attachErrorHandler(newWorker);
       this.idle.add(newWorker);
@@ -129,57 +89,137 @@ class WorkerPool {
   }
 
   /**
-   * Add a task to be processed by the worker pool
-   * @param {Object} task - The task object to process
-   * @param {Function} onResult - Callback to invoke when the task completes
+   * Flush the batch buffer and send accumulated tasks to a worker
+   * @private
    */
-  addTask(task, onResult) {
-    this._runTask(task, onResult);
+  _flushBatch() {
+    if (this._batchTimer) {
+      clearTimeout(this._batchTimer);
+      this._batchTimer = null;
+    }
+    
+    if (this._batchBuffer.length === 0) return;
+    
+    const buffer = this._batchBuffer;
+    this._batchBuffer = [];
+    this._sendBatch(buffer);
   }
 
   /**
-   * Internal method to run a task on an available worker
-   * @param {Object} task - The task object to process
-   * @param {Function} onResult - Callback to invoke when the task completes
+   * Send a pre-assembled batch of tasks to an idle worker
+   * @param {Array<{item: object, callback: Function}>} batchEntries
    * @private
    */
-  _runTask(task, onResult) {
+  _sendBatch(batchEntries) {
     if (this.idle.size > 0) {
       // Get an idle worker
       const worker = this.idle.values().next().value;
       this.idle.delete(worker);
+      this._pendingBatches++;
+      this.logger.info({ batchSize: batchEntries.length, pending: this._pendingBatches, stage: PIPELINE_STAGES.WORKER_DISPATCH }, 'workerpool_send_batch');
+      const batchStart = process.hrtime.bigint();
       
-      // Track the active task for this worker
-      this._activeTaskForWorker.set(worker, { task, onResult, itemId: task.itemId });
+      // Send the tasks array to the worker (worker expects an array)
+      worker.postMessage({ tasks: batchEntries.map(e => e.item) });
       
-      // Send the task to the worker
-      worker.postMessage(task);
+      // Track how many results we expect
+      let resultsReceived = 0;
+      const totalExpected = batchEntries.length;
+      let batchFailed = false;
       
-      // Listen for the result
-      worker.once("message", (result) => {
-        // Clean up the active task mapping
-        this._activeTaskForWorker.delete(worker);
+      // Listen for multiple results from this batch
+      const messageHandler = (result) => {
+        // Ignore results if batch already failed (worker crashed)
+        if (batchFailed) return;
         
-        // Call the onResult callback
-        if (onResult) {
-          onResult(result);
+        resultsReceived++;
+        
+        // Route the result to the matching callback by itemId
+        // The result has an "id" field (itemId) from Python, and each entry has item.itemId
+        for (const entry of batchEntries) {
+          if (entry.callback && entry.item.itemId === result.id) {
+            entry.callback(result);
+            break;
+          }
         }
         
-        // Return worker to idle
-        this.idle.add(worker);
+        // If all results received, return worker to idle
+        if (resultsReceived >= totalExpected) {
+          this._pendingBatches--;
+          worker.removeListener("message", messageHandler);
+          this.idle.add(worker);
+          const batchDurationSec = Number(process.hrtime.bigint() - batchStart) / 1e9;
+          try { this.batchDuration && this.batchDuration.observe(batchDurationSec); } catch (e) {}
+          this.logger.info({ 
+            resultsReceived, 
+            totalExpected, 
+            pending: this._pendingBatches, 
+            duration_s: batchDurationSec,
+            stage: PIPELINE_STAGES.WORKER_DISPATCH 
+          }, 'workerpool_batch_complete');
+          
+          // Process next queued batch if any
+          if (this.queue.length > 0) {
+            const nextBatch = this.queue.shift();
+            this._sendBatch(nextBatch);
+          }
+          
+          this._checkDrain();
+        }
+      };
+      
+      // Handle worker errors - retry the entire batch with a different worker
+      const errorHandler = (err) => {
+        if (batchFailed) return; // Already handled
+        batchFailed = true;
         
-        // Process the queue if there are pending tasks
+        console.error(`[WorkerPool] Worker crashed mid-batch (${resultsReceived}/${totalExpected} results received). Retrying ${batchEntries.length} tasks...`, err);
+        
+        this._pendingBatches--;
+        worker.removeListener("message", messageHandler);
+        worker.removeListener("error", errorHandler);
+        
+        // Retry all tasks in the batch (even ones that succeeded, to ensure consistency)
+        for (const entry of batchEntries) {
+          this.addTask(entry.item, entry.callback);
+        }
+        
+        // Process next queued batch
         if (this.queue.length > 0) {
-          const nextTask = this.queue.shift();
-          this._runTask(nextTask.task, nextTask.onResult);
+          const nextBatch = this.queue.shift();
+          this._sendBatch(nextBatch);
         }
         
-        // Check if we're now drained
         this._checkDrain();
-      });
+      };
+      
+      worker.on("message", messageHandler);
+      worker.on("error", errorHandler);
     } else {
-      // No idle workers, queue the task
-      this.queue.push({ task, onResult });
+      // No idle workers, queue entire batch
+      this.queue.push(batchEntries);
+      this.logger.info({ queuedSize: batchEntries.length, queueLength: this.queue.length }, 'workerpool_queued_batch');
+    }
+  }
+
+  /**
+   * Add a task to be processed by the worker pool.
+   * Tasks are accumulated into batches before dispatch.
+   * @param {Object} task - The task object to process
+   * @param {Function} onResult - Callback to invoke when the task completes
+   */
+  addTask(task, onResult) {
+    this._batchBuffer.push({ item: task, callback: onResult });
+    
+    // If buffer reaches BATCH_SIZE, flush immediately
+    if (this._batchBuffer.length >= BATCH_SIZE) {
+      this._flushBatch();
+    } else if (this.idle.size > 0 && this.queue.length === 0) {
+      // Workers are idle and no queued batches, flush after a short delay
+      // to allow more tasks to accumulate
+      if (!this._batchTimer) {
+        this._batchTimer = setTimeout(() => this._flushBatch(), 50);
+      }
     }
   }
 
@@ -188,14 +228,14 @@ class WorkerPool {
    * @returns {Promise<void>}
    */
   drain() {
+    // Flush any remaining tasks in the buffer
+    this._flushBatch();
+    
     return new Promise((resolve) => {
-      // If already drained, resolve immediately
-      if (this.idle.size === this.size && this.queue.length === 0) {
+      if (this.idle.size === this.size && this.queue.length === 0 && this._pendingBatches === 0) {
         resolve();
         return;
       }
-      
-      // Otherwise, add resolver to be called later
       this._drainResolvers.push(resolve);
     });
   }
@@ -205,8 +245,7 @@ class WorkerPool {
    * @private
    */
   _checkDrain() {
-    if (this.idle.size === this.size && this.queue.length === 0) {
-      // Resolve all pending drain promises
+    if (this.idle.size === this.size && this.queue.length === 0 && this._pendingBatches === 0) {
       const resolvers = this._drainResolvers;
       this._drainResolvers = [];
       resolvers.forEach(resolve => resolve());

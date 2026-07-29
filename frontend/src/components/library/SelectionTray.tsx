@@ -1,4 +1,5 @@
 import React from "react";
+import { Trash2 } from "lucide-react";
 
 interface SelectionTrayProps {
   selectedCount: number;
@@ -23,6 +24,7 @@ interface SelectionTrayProps {
   hasCombinations: boolean;
   hasIncompleteSelection: boolean;
   incompleteSelectionMessage: string;
+  onDeleteSelected: () => void;
 }
 
 const THREAT_LABELS: Record<number, string> = {
@@ -62,6 +64,7 @@ export default function SelectionTray({
   hasCombinations,
   hasIncompleteSelection,
   incompleteSelectionMessage,
+  onDeleteSelected,
 }: SelectionTrayProps) {
   if (selectedCount === 0) return null;
 
@@ -210,12 +213,21 @@ export default function SelectionTray({
         )}
       </div>
 
-      {/* Right: Clear and Collage buttons */}
+      {/* Right: Action buttons */}
       <button
         onClick={onClearSelection}
-        className="px-4 py-2 rounded-xl border border-border text-sm font-medium text-muted"
+        className="px-4 py-2 rounded-xl border border-border text-sm font-medium text-muted hover:bg-surface transition-colors"
       >
         Clear Selection
+      </button>
+      <button
+        onClick={onDeleteSelected}
+        disabled={selectedCount === 0 || isGenerating}
+        title={selectedCount === 0 ? "No items selected" : "Delete selected items"}
+        className="px-4 py-2 rounded-xl font-semibold text-white bg-red-600 shadow-btn flex items-center gap-1.5 text-sm hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Trash2 size={16} />
+        Delete Selected
       </button>
       <button
         onClick={onGenerateCollage}

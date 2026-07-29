@@ -15,24 +15,42 @@ def main():
     args = parser.parse_args()
     
     try:
-        # Load the .npz file
-        npz_data = np.load(args.npz_path)
+        # Load the .npz file with memory mapping to reduce memory usage
+        npz_data = np.load(args.npz_path, mmap_mode='r')
         pixel_array = npz_data['pixel_data']
         
-        # Convert to list for JSON serialization
-        pixel_list = pixel_array.tolist()
-        
         # Get dimensions
-        height = len(pixel_list)
-        width = len(pixel_list[0]) if height > 0 else 0
+        height, width = pixel_array.shape
         
-        # Output as JSON
-        result = {
-            "width": width,
-            "height": height,
-            "pixel_data": pixel_list
-        }
-        print(json.dumps(result))
+        # Stream output row by row to avoid holding entire array in memory
+        # This prevents the memory allocation error by never having both
+        # the numpy array and the full list in memory simultaneously
+        print(json.dumps({"width": width, "height": height, "pixel_data": "streaming"}))
+        sys.stdout.flush()
+        
+        # Output array start
+        print("[", end='')
+        sys.stdout.flush()
+        
+        # Stream each row as JSON
+        for i in range(height):
+            row = pixel_array[i].tolist()
+            row_json = json.dumps(row)
+            if i > 0:
+                print(",", end='')
+            print(row_json, end='')
+            sys.stdout.flush()
+            del row
+        
+        # Output array end
+        print("]")
+        sys.stdout.flush()
+        
+        # Clean up
+        del pixel_array
+        del npz_data
+        import gc
+        gc.collect()
         
     except Exception as e:
         error_result = {

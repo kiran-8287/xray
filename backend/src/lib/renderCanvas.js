@@ -5,8 +5,8 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const libraryImagesRoot = path.resolve(__dirname, "../../data/library_images");
-const pixelDataRoot = path.resolve(__dirname, "../../data/pixel_data");
+const libraryImagesRoot = "B:\\library_images";
+const pixelDataRoot = "B:\\pixel_data";
 const READ_NPZ_SCRIPT = path.join(__dirname, 'read_npz.py');
 
 async function loadPixelData(filepath) {

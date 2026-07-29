@@ -343,28 +343,39 @@ export default function LibraryPage() {
   };
 
   const deleteCategory = async (categoryKey: string) => {
-    const items = Object.values(categorizedItems[categoryKey] || {}).flat();
-    const itemCount = items.length;
-    if (itemCount === 0) {
+    const allItems = Object.values(categorizedItems[categoryKey] || {}).flat();
+    
+    // Filter to only selected items if any are selected in this category
+    const itemsToDelete = allItems.filter(item => selectedItems.has(item.id));
+    const itemCount = itemsToDelete.length;
+    
+    // If no items are selected, delete all items in the category
+    const itemsToProcess = itemCount > 0 ? itemsToDelete : allItems;
+    const actualCount = itemsToProcess.length;
+    
+    if (actualCount === 0) {
       showNotification("info", "This category is empty.");
       return;
     }
-    const confirmed = await showConfirm(
-      `Are you sure you want to delete all ${itemCount} item(s) in this category? This action cannot be undone.`
-    );
+    
+    const message = itemCount > 0 
+      ? `Are you sure you want to delete ${itemCount} selected item(s) from this category? This action cannot be undone.`
+      : `Are you sure you want to delete all ${actualCount} item(s) in this category? This action cannot be undone.`;
+    
+    const confirmed = await showConfirm(message);
     if (!confirmed) return;
 
     try {
       await Promise.all(
-        items.map((item) => fetch(`${API_BASE_URL}/api/items/${item.id}`, { method: "DELETE" }))
+        itemsToProcess.map((item) => fetch(`${API_BASE_URL}/api/items/${item.id}`, { method: "DELETE" }))
       );
       await fetchCategorizedItems();
       setSelectedItems((prev) => {
         const next = new Set(prev);
-        items.forEach((item) => next.delete(item.id));
+        itemsToProcess.forEach((item) => next.delete(item.id));
         return next;
       });
-      showNotification("success", `Deleted ${itemCount} item(s) from category.`);
+      showNotification("success", `Deleted ${actualCount} item(s) from category.`);
     } catch (err) {
       console.error("Failed to delete category items:", err);
       showNotification("error", "Failed to delete category items. Please try again.");
@@ -372,28 +383,39 @@ export default function LibraryPage() {
   };
 
   const deleteSubcategory = async (categoryKey: string, subcategoryKey: string) => {
-    const items = categorizedItems[categoryKey]?.[subcategoryKey] || [];
-    const itemCount = items.length;
-    if (itemCount === 0) {
+    const allItems = categorizedItems[categoryKey]?.[subcategoryKey] || [];
+    
+    // Filter to only selected items if any are selected in this subcategory
+    const itemsToDelete = allItems.filter(item => selectedItems.has(item.id));
+    const itemCount = itemsToDelete.length;
+    
+    // If no items are selected, delete all items in the subcategory
+    const itemsToProcess = itemCount > 0 ? itemsToDelete : allItems;
+    const actualCount = itemsToProcess.length;
+    
+    if (actualCount === 0) {
       showNotification("info", "This subcategory is empty.");
       return;
     }
-    const confirmed = await showConfirm(
-      `Are you sure you want to delete all ${itemCount} item(s) in "${subcategoryKey}" subcategory? This action cannot be undone.`
-    );
+    
+    const message = itemCount > 0 
+      ? `Are you sure you want to delete ${itemCount} selected item(s) from "${subcategoryKey}"? This action cannot be undone.`
+      : `Are you sure you want to delete all ${actualCount} item(s) in "${subcategoryKey}"? This action cannot be undone.`;
+    
+    const confirmed = await showConfirm(message);
     if (!confirmed) return;
 
     try {
       await Promise.all(
-        items.map((item) => fetch(`${API_BASE_URL}/api/items/${item.id}`, { method: "DELETE" }))
+        itemsToProcess.map((item) => fetch(`${API_BASE_URL}/api/items/${item.id}`, { method: "DELETE" }))
       );
       await fetchCategorizedItems();
       setSelectedItems((prev) => {
         const next = new Set(prev);
-        items.forEach((item) => next.delete(item.id));
+        itemsToProcess.forEach((item) => next.delete(item.id));
         return next;
       });
-      showNotification("success", `Deleted ${itemCount} item(s) from "${subcategoryKey}".`);
+      showNotification("success", `Deleted ${actualCount} item(s) from "${subcategoryKey}".`);
     } catch (err) {
       console.error("Failed to delete subcategory items:", err);
       showNotification("error", "Failed to delete subcategory items. Please try again.");
@@ -416,6 +438,31 @@ export default function LibraryPage() {
     } catch (err) {
       console.error("Failed to delete item:", err);
       showNotification("error", "Failed to delete item. Please try again.");
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedItems.size === 0) {
+      showNotification("info", "No items selected to delete.");
+      return;
+    }
+
+    const confirmed = await showConfirm(
+      `Are you sure you want to delete ${selectedItems.size} selected item(s)? This action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const itemIds = Array.from(selectedItems);
+      await Promise.all(
+        itemIds.map((id) => fetch(`${API_BASE_URL}/api/items/${id}`, { method: "DELETE" }))
+      );
+      await fetchCategorizedItems();
+      setSelectedItems(new Set());
+      showNotification("success", `Deleted ${itemIds.length} item(s) successfully.`);
+    } catch (err) {
+      console.error("Failed to delete selected items:", err);
+      showNotification("error", "Failed to delete selected items. Please try again.");
     }
   };
 
@@ -957,6 +1004,7 @@ export default function LibraryPage() {
         hasCombinations={combinations.length > 0}
         hasIncompleteSelection={hasIncompleteSelection}
         incompleteSelectionMessage={incompleteSelectionMessage}
+        onDeleteSelected={handleDeleteSelected}
       />
 
       {/* editingItem modal, notifications, confirmDialog, ValidRegionEditor, AddSubcategoryModal */}

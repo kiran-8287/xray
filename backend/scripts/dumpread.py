@@ -86,10 +86,12 @@ def ReadDump(filename, raw=False, FlippedAndRotated=False, DenoiseRequired=False
         return high, low, high_raw, low_raw
 
     elif FlippedAndRotated == True:
-        print("The Image is flipped and Rotated")
+        import sys as _sys
+        print("The Image is flipped and Rotated", file=_sys.stderr)
         return np.fliplr(np.transpose(high)), np.fliplr(np.transpose(low)), np.fliplr(np.transpose(R))
     else:
-        print("The Image is Not flipped and Rotated")
+        import sys as _sys
+        print("The Image is Not flipped and Rotated", file=_sys.stderr)
 
         return high, low, R
 
