@@ -105,7 +105,7 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       <input
         id="fileInput"
         type="file"
-        accept=".dump.pgm,.tip"
+        accept=".pgm,.tip,.dump,.png,.jpg,.jpeg,*"
         multiple
         className="hidden"
         onChange={handleFileChange}
@@ -113,7 +113,7 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       <input
         id="folderInput"
         type="file"
-        accept=".dump.pgm,.tip"
+        accept=".pgm,.tip,.dump,.png,.jpg,.jpeg,*"
         multiple
         // @ts-ignore webkitdirectory
         webkitdirectory=""

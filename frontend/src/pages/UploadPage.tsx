@@ -119,7 +119,13 @@ export default function UploadPage() {
     const invalidFiles: string[] = [];
     
     for (const f of uniqueNewFiles) {
-      if (f.name.endsWith(".dump.pgm") || f.name.endsWith(".tip")) {
+      const lowerName = f.name.toLowerCase();
+      if (
+        lowerName.endsWith(".dump.pgm") || 
+        lowerName.endsWith(".pgm") || 
+        lowerName.endsWith(".tip") || 
+        lowerName.endsWith(".dump")
+      ) {
         validFiles.push(f);
       } else {
         invalidFiles.push(f.name);
@@ -128,7 +134,7 @@ export default function UploadPage() {
     
     // Show error if any invalid files were found
     if (invalidFiles.length > 0) {
-      const errorMessage = `Invalid file type(s): ${invalidFiles.slice(0, 5).join(", ")}${invalidFiles.length > 5 ? ` and ${invalidFiles.length - 5} more` : ""}. Only .dump.pgm and .tip files are allowed.`;
+      const errorMessage = `Invalid file type(s): ${invalidFiles.slice(0, 5).join(", ")}${invalidFiles.length > 5 ? ` and ${invalidFiles.length - 5} more` : ""}. Supported extensions: .dump.pgm, .pgm, .tip, .dump.`;
       setValidationMessage(errorMessage);
       setTimeout(() => setValidationMessage(null), 5000);
     }
@@ -154,6 +160,23 @@ export default function UploadPage() {
    * Accumulates totals across multiple batch uploads so the progress bar shows the correct total.
    */
   async function processRawFiles(files: File[]) {
+    // Perform pre-upload memory check
+    try {
+      const memRes = await fetch(`${API_BASE_URL}/api/system/memory-check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileCount: files.length }),
+      });
+      const memData = await memRes.json();
+      if (memData && memData.ok === false) {
+        setValidationMessage(memData.memoryCheck?.recommendation || "Insufficient memory available for upload. Please try a smaller batch.");
+        setTimeout(() => setValidationMessage(null), 8000);
+        return;
+      }
+    } catch (memErr) {
+      console.warn("Memory check bypassed:", memErr);
+    }
+
     // Update total immediately so the progress bar shows the combined count right away
     processingTotalRef.current += files.length;
     setProcessing(true);

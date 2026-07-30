@@ -103,13 +103,37 @@ class ConcurrencyController {
 // Export singleton instance
 export const concurrencyController = new ConcurrencyController();
 
-// Default pool configurations
+/**
+ * Detect host system CPU cores once per user and persist in localStorage
+ */
+export function getDetectedCpuCores(): number {
+  try {
+    const cachedCores = localStorage.getItem('user_cpu_cores');
+    if (cachedCores) {
+      const parsed = parseInt(cachedCores, 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+  } catch (e) {}
+
+  const hardwareCores = typeof navigator !== 'undefined' && navigator.hardwareConcurrency 
+    ? navigator.hardwareConcurrency 
+    : 4;
+
+  try {
+    localStorage.setItem('user_cpu_cores', String(hardwareCores));
+  } catch (e) {}
+
+  return hardwareCores;
+}
+
+// Default pool configurations based on detected hardware cores
 export function initializeConcurrencyPools(): void {
-  // Upload processing: 4-6 parallel workers (higher priority)
-  concurrencyController.registerPool('upload', 4);
-  
-  // Auto-generate: 1-2 parallel workers (lower priority, x/4 of upload)
-  concurrencyController.registerPool('auto-generate', 1);
+  const cores = getDetectedCpuCores();
+  const uploadConcurrency = Math.max(2, cores);
+  const autoGenConcurrency = Math.max(1, Math.floor(cores / 2));
+
+  concurrencyController.registerPool('upload', uploadConcurrency);
+  concurrencyController.registerPool('auto-generate', autoGenConcurrency);
 }
 
 /**
@@ -117,14 +141,12 @@ export function initializeConcurrencyPools(): void {
  * @param uploadProcessing - Whether upload processing is currently active
  */
 export function adjustConcurrencyForLoad(uploadProcessing: boolean): void {
+  const cores = getDetectedCpuCores();
   if (uploadProcessing) {
-    // When processing: upload gets 10 workers (matches backend for maximum speed)
-    // auto-generate gets 2 workers (2 parallel batch requests = max 10 files at a time)
-    concurrencyController.setConcurrency('upload', 10);
-    concurrencyController.setConcurrency('auto-generate', 2);
+    concurrencyController.setConcurrency('upload', Math.max(2, cores));
+    concurrencyController.setConcurrency('auto-generate', Math.max(1, Math.floor(cores / 4)));
   } else {
-    // When idle: both can use more resources
-    concurrencyController.setConcurrency('upload', 10);
-    concurrencyController.setConcurrency('auto-generate', 4);
+    concurrencyController.setConcurrency('upload', Math.max(2, cores));
+    concurrencyController.setConcurrency('auto-generate', Math.max(1, Math.floor(cores / 2)));
   }
 }

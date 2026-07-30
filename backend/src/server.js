@@ -1,4 +1,3 @@
-
 import express from "express";
 import cors from "cors";
 import fs from "node:fs/promises";
@@ -8,9 +7,13 @@ import multer from "multer";
 import { generateValidRegion } from "./lib/autoValidRegion.js";
 import { renderSceneAsync } from "./lib/renderCanvas.js";
 import Jimp from "jimp";
+import sharp from "sharp";
 import WorkerPool from "./lib/workerPool.js";
 import pino from 'pino';
 import client from 'prom-client';
+import config from './lib/config.js';
+import { requireAuth, protectWriteRoutes } from './lib/auth.js';
+import { sanitizeFilename, validatePathComponent, safeJoin, safeDeleteFile } from './lib/safePath.js';
 import {
     getItems,
     getItemById,
@@ -39,10 +42,10 @@ import { initializeSystemConfig, getWorkerCount, checkMemoryAvailability } from 
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "100mb" })); // Increased for large batch uploads with metadata
+app.use(express.json({ limit: "100mb" }));
 
 // Structured logger
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+const logger = pino({ level: config.logLevel });
 
 // Prometheus metrics
 const collectDefaultMetrics = client.collectDefaultMetrics;
@@ -79,12 +82,17 @@ app.use((req, res, next) => {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const exportsRoot = path.resolve(__dirname, "../data/exports");
-const libraryImagesRoot = "B:\\library_images";
-const collageImagesRoot = "B:\\collage_images";
-const collageHighRoot = "B:\\collage_images\\high";
-const collageLowRoot = "B:\\collage_images\\low";
-const pixelDataRoot = "B:\\pixel_data";
+
+// Use config-based paths instead of hard-coded B:\ drives
+const {
+    libraryImagesRoot,
+    collageImagesRoot,
+    collageHighRoot,
+    collageLowRoot,
+    pixelDataRoot,
+    exportsRoot,
+    tempDir,
+} = config;
 
 // Ensure directories exist
 await fs.mkdir(exportsRoot, { recursive: true });
@@ -93,22 +101,13 @@ await fs.mkdir(collageImagesRoot, { recursive: true });
 await fs.mkdir(collageHighRoot, { recursive: true });
 await fs.mkdir(collageLowRoot, { recursive: true });
 await fs.mkdir(pixelDataRoot, { recursive: true });
+await fs.mkdir(tempDir, { recursive: true });
 
 // Serve static files — map frontend URL paths to actual disk locations
-// IMPORTANT: B: drive routes MUST come BEFORE the generic /data route,
-// because Express matches in order and /data would catch everything.
-
-// B: drive for large data — map /data/library_images, /data/collage_images, /data/pixel_data
-// so frontend URLs like /data/library_images/... continue to work
 app.use('/data/library_images', express.static(libraryImagesRoot));
 app.use('/data/collage_images', express.static(collageImagesRoot));
 app.use('/data/pixel_data', express.static(pixelDataRoot));
-
-// C: drive project data (exports, DB, etc.)
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
-
-// Note: Thumbnails are no longer generated separately. 
-// The frontend uses library_images directly for display.
 
 // Multer setup for file uploads (use actual filenames, no UUID)
 const storage = multer.diskStorage({
@@ -116,9 +115,9 @@ const storage = multer.diskStorage({
         cb(null, libraryImagesRoot);
     },
     filename: (req, file, cb) => {
-        // Start with original filename; multer will save with this name
-        // Duplicates are handled in the upload handler
-        cb(null, file.originalname);
+        // Sanitize the original filename to prevent path traversal
+        const safeName = sanitizeFilename(file.originalname);
+        cb(null, safeName);
     },
 });
 const upload = multer({ storage: storage });
@@ -127,7 +126,7 @@ const upload = multer({ storage: storage });
 const rawUpload = multer({ 
   storage: multer.memoryStorage(),
   limits: {
-    files: 5000, // Support large batch raw uploads (up to 5000 files)
+    files: 5000,
   }
 });
 
@@ -183,7 +182,6 @@ app.get('/metrics', async (_req, res) => {
 
 // Clean up temp files older than 1 hour (runs on server startup and can be called periodically)
 async function cleanupOldTempFiles() {
-  const tempDir = path.resolve(__dirname, "../data/temp");
   try {
     await fs.mkdir(tempDir, { recursive: true });
     const files = await fs.readdir(tempDir);
@@ -218,7 +216,39 @@ await cleanupOldTempFiles();
 // Initialize system configuration (detect CPU cores, etc.)
 await initializeSystemConfig();
 
-// Helper functions for raw file processing
+// System Hardware Information & Dynamic Worker Config Endpoint
+app.get("/api/system/info", async (_req, res) => {
+    try {
+        const config = await initializeSystemConfig();
+        res.json({
+            ok: true,
+            cpuCount: config.cpuCount,
+            cpuModel: config.cpuModel,
+            optimalWorkerCount: config.optimalWorkerCount,
+            detectedAt: config.detectedAt
+        });
+    } catch (err) {
+        logger.error({ err: err.message }, 'Failed to fetch system info');
+        res.status(500).json({ ok: false, error: err.message });
+    }
+});
+
+// Pre-upload Memory Availability Check Endpoint
+app.post("/api/system/memory-check", (req, res) => {
+    try {
+        const fileCount = Number(req.body?.fileCount || 0);
+        const estimatedMemoryMB = Math.max(20, Math.ceil((fileCount / 100) * 15));
+        const memoryCheck = checkMemoryAvailability(estimatedMemoryMB);
+        res.json({
+            ok: memoryCheck.canProceed,
+            estimatedMemoryMB,
+            memoryCheck
+        });
+    } catch (err) {
+        logger.error({ err: err.message }, 'Failed to perform memory check');
+        res.status(500).json({ ok: false, error: err.message });
+    }
+});
 function deriveItemId(filename) {
     const dotIndex = filename.indexOf(".");
     if (dotIndex === -1) return filename;
@@ -226,15 +256,14 @@ function deriveItemId(filename) {
 }
 
 function classifyFileType(filename) {
-    if (filename.endsWith(".dump.pgm")) return "dump";
-    if (filename.endsWith(".tip")) return "tip";
+    const lower = filename.toLowerCase();
+    if (lower.endsWith(".dump.pgm") || lower.endsWith(".pgm") || lower.endsWith(".dump")) return "dump";
+    if (lower.endsWith(".tip")) return "tip";
     return null;
 }
 
 // Endpoint to process raw files (.dump.pgm and .tip) with worker pool
-// Streams NDJSON results back to client as files are processed
-app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res) => {
-    // Set NDJSON headers immediately before any async work
+app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), async (req, res) => {
     res.setHeader("Content-Type", "application/x-ndjson");
     res.setHeader("Transfer-Encoding", "chunked");
     res.status(200).flushHeaders();
@@ -252,11 +281,9 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         // Stage 2: Validation
         timer.startStage(PIPELINE_STAGES.VALIDATION);
         
-        // Read existing items once for duplicate detection
         const items = await getItems();
         const existingIds = new Set(items.map(i => i.id));
 
-        // Process each file: derive ID, classify type, check duplicates
         const nonDuplicates = [];
         let duplicateCount = 0;
 
@@ -286,7 +313,6 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
             skipped: skippedFiles.length 
         });
 
-        // Report skipped files immediately
         for (const skipped of skippedFiles) {
             res.write(JSON.stringify({
                 status: "skipped",
@@ -295,7 +321,6 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
             }) + "\n");
         }
 
-        // If no non-duplicate files, send complete line immediately
         if (nonDuplicates.length === 0) {
             res.write(JSON.stringify({
                 status: "complete",
@@ -311,14 +336,13 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         // Stage 3: File Preprocessing
         timer.startStage(PIPELINE_STAGES.FILE_PREPROCESSING);
         
-        // Get dynamic worker count based on system resources
+        // Files are already loaded into memory by multer's memoryStorage.
+        // The workers process files one at a time via temp files on disk, so overhead is minimal.
+        // Only account for additional processing overhead, not file sizes (already allocated).
         const workerCount = await getWorkerCount('upload', 10);
-        logger.info({ operationId, workerCount, systemInfo: getSystemInfo() }, 'worker_count_determined');
-        
-        // Memory-aware upload safeguards
-        const estimatedMemoryMB = nonDuplicates.length * 4; // Estimate 4MB per file
+        const estimatedMemoryMB = 50;
         const memoryCheck = checkMemoryAvailability(estimatedMemoryMB);
-        logger.info({ operationId, memoryCheck }, 'memory_check');
+        logger.info({ operationId, workerCount, memoryCheck }, 'memory_check');
         
         if (!memoryCheck.canProceed) {
             timer.endStage(PIPELINE_STAGES.FILE_PREPROCESSING, { 
@@ -336,17 +360,14 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
             return;
         }
         
-        // Save file buffers to temp files and dispatch to worker pool
         const pool = new WorkerPool(workerCount);
         let processedCount = 0;
         let failedCount = 0;
-        const tempDir = path.resolve(__dirname, "../data/temp");
         await fs.mkdir(tempDir, { recursive: true });
         
         const preprocessingStart = process.hrtime.bigint();
         
         for (const { file, itemId, fileType } of nonDuplicates) {
-            // Write buffer to temp file
             const tempPath = path.join(tempDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
             await fs.writeFile(tempPath, file.buffer);
 
@@ -359,7 +380,6 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
                     libraryImagesDir: libraryImagesRoot,
                 },
                 async (result) => {
-                    // Write NDJSON line immediately — flush to stream
                     const line = JSON.stringify(result);
                     res.write(line + "\n");
 
@@ -370,10 +390,7 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
                         failedCount++;
                     }
 
-                    // Clean up temp file asynchronously — silently ignore if already deleted
-                    fs.unlink(tempPath).catch(() => {
-                        // ENOENT is harmless — file was already cleaned up by another path
-                    });
+                    fs.unlink(tempPath).catch(() => {});
                 }
             );
         }
@@ -388,7 +405,6 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         timer.startStage(PIPELINE_STAGES.WORKER_DISPATCH);
         const workerDispatchStart = process.hrtime.bigint();
         
-        // Wait for all tasks to complete
         await pool.drain();
         
         const workerDispatchDuration = Number(process.hrtime.bigint() - workerDispatchStart) / 1e9;
@@ -401,7 +417,6 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         // Stage 5: Persistence
         timer.startStage(PIPELINE_STAGES.PERSISTENCE);
         
-        // Write the complete summary line
         const summary = {
             status: "complete",
             total: nonDuplicates.length,
@@ -418,7 +433,6 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
             itemsFailed: failedCount 
         });
 
-        // Complete pipeline and log summary
         const pipelineSummary = timer.complete({
             totalFiles: files.length,
             validFiles: nonDuplicates.length,
@@ -435,7 +449,6 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
         if (!res.headersSent) {
             res.status(500).json({ ok: false, error: err.message });
         } else {
-            // Stream already started, try to end gracefully
             try {
                 res.end();
             } catch (_) {}
@@ -446,7 +459,6 @@ app.post("/api/process-raw-files", rawUpload.array("rawFiles"), async (req, res)
 // Helper to normalize category name into exactly three main categories
 function normalizeCategory(cat) {
     const normalized = (cat || "").toLowerCase().trim();
-    // Match non-threat first before 'threat' to prevent 'non-threat' matching 'threat'
     if (/^non[- ]?threat/.test(normalized)) return "non-threats";
     if (normalized.includes("bag")) return "bags";
     if (normalized.includes("threat") || normalized.includes("electronic") || normalized === "electronics") return "threats";
@@ -457,25 +469,19 @@ function normalizeCategory(cat) {
 app.get("/api/items/categorized", async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    // Limit to 500 items per request to prevent memory issues
     const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 100));
     const categoryFilter = req.query.category || null;
     
-    // Use database-level pagination - only load the items we need
     const { items: paginatedItems, pagination } = await getItemsPaginated(page, limit);
     
-    // Normalize and categorize items
     const categorized = {};
     const categoryCounts = {};
     
-    // Process and categorize items
     for (const item of paginatedItems) {
       const normalizedCategory = normalizeCategory(item.category);
       
-      // Count items per category (we'll estimate based on what we have)
       categoryCounts[normalizedCategory] = (categoryCounts[normalizedCategory] || 0) + 1;
       
-      // Skip if filtering by category and doesn't match
       if (categoryFilter && normalizedCategory !== categoryFilter) {
         continue;
       }
@@ -488,7 +494,6 @@ app.get("/api/items/categorized", async (req, res) => {
         categorized[normalizedCategory][subcat] = [];
       }
       
-      // Bag data (valid_region_points) is already stored directly on the item
       if (normalizedCategory === "bags" && item.valid_region_points) {
         const vr = item.valid_region_points;
         item.validRegionData = vr;
@@ -508,7 +513,6 @@ app.get("/api/items/categorized", async (req, res) => {
         totalPages: pagination.totalPages,
         totalCategories: Object.keys(categoryCounts).length,
         categoryCounts: {
-          // Return estimated counts based on loaded data
           ...categoryCounts
         }
       }
@@ -530,7 +534,6 @@ app.get('/api/saved-layouts', async (_req, res) => {
     }
 });
 
-// Return only the saved layout IDs (used to continue the synthesized ID sequence)
 app.get('/api/saved-layouts/ids', async (_req, res) => {
     try {
         const layouts = await getSavedLayouts();
@@ -542,13 +545,11 @@ app.get('/api/saved-layouts/ids', async (_req, res) => {
     }
 });
 
-// Filtered/paginated saved layouts endpoint
 app.get('/api/saved-layouts/filtered', async (req, res) => {
     try {
       const page = Math.max(1, parseInt(req.query.page) || 1);
       const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
       
-      // New filter parameters for subcategories
       const bagSubcategories = req.query.bagSubcategories ? String(req.query.bagSubcategories).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
       const threatSubcategories = req.query.threatSubcategories ? String(req.query.threatSubcategories).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
       const tags = req.query.tags ? String(req.query.tags).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
@@ -556,11 +557,9 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
 
       const allLayouts = await getSavedLayouts();
 
-      // Helper to extract objects from either new or legacy structure
       function extractObjects(layout) {
         const obj = layout.layout_json?.objects;
         if (!obj) return [];
-        // New structure: { bag: {...}, threats: [...], non-threats: [...] }
         if (obj.bag || obj.threats || obj['non-threats']) {
           const result = [];
           if (obj.bag) result.push({ ...obj.bag, library: 'bag' });
@@ -572,32 +571,25 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
           }
           return result;
         }
-        // Legacy flat array structure
         if (Array.isArray(obj)) return obj;
         return [];
       }
 
-      // Filter layouts based on criteria
       const filtered = allLayouts.filter((layout) => {
         try {
           const objects = extractObjects(layout);
           if (!objects.length) return false;
 
-// Extract bag and threat objects
            const bagObjs = objects.filter(o => (o.library || '').toLowerCase().includes('bag'));
            const threatObjs = objects.filter(o => {
              const lib = (o.library || '').toLowerCase();
              return lib.includes('threat') && !lib.includes('non-threat');
            });
            
-           // Get subcategories from objects (use subcategory field if available, otherwise extract from library)
            const layoutBagSubcategories = bagObjs.map(o => {
-             // First try the subcategory field (Option A: stored in layout)
              if (o.subcategory) {
-               // Normalize to slug format (replace spaces with hyphens) to match frontend
                return o.subcategory.toLowerCase().replace(/\s+/g, '-');
              }
-             // Fallback: extract from library field (e.g., "bag-backpack" -> "backpack")
              const lib = (o.library || '').toLowerCase();
              if (lib.includes('bag')) {
                const parts = lib.split('-');
@@ -607,12 +599,9 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
            });
            
            const layoutThreatSubcategories = threatObjs.map(o => {
-             // First try the subcategory field (Option A: stored in layout)
              if (o.subcategory) {
-               // Normalize to slug format (replace spaces with hyphens) to match frontend
                return o.subcategory.toLowerCase().replace(/\s+/g, '-');
              }
-             // Fallback: extract from library field
              const lib = (o.library || '').toLowerCase();
              if (lib.includes('threat') && !lib.includes('non-threat')) {
                const parts = lib.split('-');
@@ -621,41 +610,32 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
              return 'general';
            });
 
-          // If no filters selected, include all layouts
           if (bagSubcategories.length === 0 && threatSubcategories.length === 0 && tags.length === 0) {
             return true;
           }
 
-          // Bags always use OR logic (each layout has only one bag)
           const bagMatch = bagSubcategories.length === 0 || 
                           bagSubcategories.some(sub => layoutBagSubcategories.includes(sub));
           
-          // Threats use the selected filter logic
           let threatMatch = true;
           if (threatSubcategories.length > 0) {
             if (filterLogic === 'or') {
-              // OR: Layout has ANY of the selected threats
               threatMatch = threatSubcategories.some(sub => layoutThreatSubcategories.includes(sub));
             } else if (filterLogic === 'and') {
-              // AND: Layout has ALL of the selected threats
               threatMatch = threatSubcategories.every(sub => layoutThreatSubcategories.includes(sub));
             }
           }
 
-          // Tags filter - uses the selected filter logic (same as threats)
           const layoutBagTags = bagObjs.length > 0 ? (bagObjs[0].tags || []) : [];
           let tagMatch = true;
           if (tags.length > 0) {
             if (filterLogic === 'or') {
-              // OR: Layout has ANY of the selected tags
               tagMatch = tags.some(tag => layoutBagTags.includes(tag));
             } else if (filterLogic === 'and') {
-              // AND: Layout has ALL of the selected tags
               tagMatch = tags.every(tag => layoutBagTags.includes(tag));
             }
           }
           
-          // Match if bag matches AND threat matches AND tag matches
           return bagMatch && threatMatch && tagMatch;
         } catch {
           return false;
@@ -684,7 +664,7 @@ app.get('/api/saved-layouts/filtered', async (req, res) => {
     }
 });
 
-app.post('/api/saved-layouts', async (req, res) => {
+app.post('/api/saved-layouts', requireAuth, async (req, res) => {
     const { id, name, filepath, layout_json } = req.body;
     if (!name || !layout_json) return res.status(400).json({ ok: false, error: 'Missing name or layout_json' });
     
@@ -694,18 +674,15 @@ app.post('/api/saved-layouts', async (req, res) => {
             return res.status(400).json({ ok: false, error: 'Invalid layout_json: missing or invalid objects field' });
         }
         
-        // Ensure objects has the expected structure
         const obj = layout_json.objects;
         if (!obj.bag && !obj.threats && !obj['non-threats']) {
             return res.status(400).json({ ok: false, error: 'Invalid layout_json: objects must contain at least one of bag, threats, or non-threats' });
         }
         
-        // Validate threats is an array if present
         if (obj.threats && !Array.isArray(obj.threats)) {
             return res.status(400).json({ ok: false, error: 'Invalid layout_json: threats must be an array' });
         }
         
-        // Validate non-threats is an array if present
         if (obj['non-threats'] && !Array.isArray(obj['non-threats'])) {
             return res.status(400).json({ ok: false, error: 'Invalid layout_json: non-threats must be an array' });
         }
@@ -733,7 +710,7 @@ app.get('/api/saved-layouts/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/saved-layouts/:id', async (req, res) => {
+app.delete('/api/saved-layouts/:id', requireAuth, async (req, res) => {
     try {
         await deleteSavedLayout(req.params.id);
         res.json({ ok: true });
@@ -754,7 +731,7 @@ app.get('/api/custom-subcategories', async (req, res) => {
     }
 });
 
-app.post('/api/custom-subcategories', async (req, res) => {
+app.post('/api/custom-subcategories', requireAuth, async (req, res) => {
     try {
         const { category, name } = req.body;
         if (!category || !name) {
@@ -773,7 +750,7 @@ app.post('/api/custom-subcategories', async (req, res) => {
     }
 });
 
-app.delete('/api/custom-subcategories/:category/:slug', async (req, res) => {
+app.delete('/api/custom-subcategories/:category/:slug', requireAuth, async (req, res) => {
     try {
         const { category, slug } = req.params;
         await removeCustomSubcategory(category, slug);
@@ -785,21 +762,19 @@ app.delete('/api/custom-subcategories/:category/:slug', async (req, res) => {
 });
 
 // Upload endpoint - supports large batches (2k-5k files)
-// Create a separate multer instance with increased limits for large uploads
 const uploadWithLimits = multer({
   storage: storage,
   limits: {
-    fieldNameSize: 10000000,  // 10MB for field names (generous)
-    fieldSize: 100000000,     // 100MB for individual fields (metadata can be large)
-    fields: 10000,            // Max number of fields
-    fileSize: 100000000,      // 100MB per file
-    files: 5000               // Max files
+    fieldNameSize: 10000000,
+    fieldSize: 100000000,
+    fields: 10000,
+    fileSize: config.maxFileSize,
+    files: config.maxFilesPerUpload,
   }
 });
 
-app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res) => {
-  // Increase timeout for large uploads (30 minutes)
-  req.setTimeout(1800000, () => {
+app.post("/api/upload", requireAuth, uploadWithLimits.array("images", config.maxFilesPerUpload), async (req, res) => {
+  req.setTimeout(config.uploadTimeoutMs, () => {
     if (!res.headersSent) {
       res.status(408).json({ ok: false, error: "Upload timeout. Please try again with a smaller batch." });
     }
@@ -818,7 +793,6 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
         // Stage 2: Validation
         timer.startStage(PIPELINE_STAGES.VALIDATION);
         
-        // Optional metadata: JSON string or object keyed by original filename
         let metadataArray = [];
         if (req.body.metadata) {
             try {
@@ -840,22 +814,18 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
         
         const errors = [];
         const processed = [];
-        const processedIds = new Set(); // Track which metadata entries were processed
+        const processedIds = new Set();
         const fileProcessingStart = process.hrtime.bigint();
 
         for (const file of files) {
             const fileStart = process.hrtime.bigint();
-            // Extract ID from filename without extension
             const itemId = path.basename(file.originalname, path.extname(file.originalname));
             
-            // Find metadata for this file
             const fileMeta = metadataArray.find(m => m.originalname === file.originalname) || {};
 
             try {
-                // Check if item already exists
                 if (await itemExists(itemId)) {
                     errors.push({ filename: file.originalname, message: `Item ${itemId} already exists in library` });
-                    // Clean up the uploaded file since we won't use it
                     try {
                         await fs.unlink(path.join(libraryImagesRoot, file.filename));
                     } catch (unlinkErr) {
@@ -864,7 +834,6 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
                     continue;
                 }
 
-                // Classify by filename prefix only
                 const filename = file.originalname.toLowerCase();
                 let category, subcategory;
 
@@ -885,23 +854,34 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
                 if (fileMeta.subcategory) subcategory = fileMeta.subcategory;
                 const tags = fileMeta.tags || [];
                 
-                // Detect actual image dimensions from the saved file
                 let width = 512;
                 let height = 512;
                 try {
                     const savedFilePath = path.join(libraryImagesRoot, file.filename);
-                    const loadedImg = await Jimp.read(savedFilePath);
-                    width = loadedImg.bitmap.width;
-                    height = loadedImg.bitmap.height;
+                    const meta = await sharp(savedFilePath).metadata();
+                    if (meta && meta.width && meta.height) {
+                        width = meta.width;
+                        height = meta.height;
+                    } else {
+                        const loadedImg = await Jimp.read(savedFilePath);
+                        width = loadedImg.bitmap.width;
+                        height = loadedImg.bitmap.height;
+                    }
                 } catch (dimErr) {
-                    console.warn("Warning: could not detect image dimensions for", file.filename, dimErr);
+                    try {
+                        const savedFilePath = path.join(libraryImagesRoot, file.filename);
+                        const loadedImg = await Jimp.read(savedFilePath);
+                        width = loadedImg.bitmap.width;
+                        height = loadedImg.bitmap.height;
+                    } catch (e) {
+                        // Default to 512x512 fallback
+                    }
                 }
 
-                // Create item with actual filename (no UUID)
                 const item = await createItem({
                     id: itemId,
                     filename: file.originalname,
-                    filepath: file.filename, // This is the actual filename, not a UUID
+                    filepath: file.filename,
                     category,
                     subcategory,
                     name,
@@ -915,7 +895,6 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
                 if (category === "bags") {
                     let vr = null;
                     if (fileMeta.valid_region_points) {
-                        // Normalize valid region data to only points/simplifiedPoints
                         const data = fileMeta.valid_region_points;
                         if (data && typeof data === 'object') {
                             vr = {
@@ -939,13 +918,11 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
                         threat_type: fileMeta.threat_type || null,
                         severity: fileMeta.severity || null
                     });
-                    // Also add to threat_items for backward compatibility
                     await createNonThreatItem({
                         item_id: item.id,
                         subcategory_slug: subcategory.toLowerCase().replace(/\s+/g, "-")
                     });
                 } else {
-                    // All other categories are treated as non-threats
                     const subSlug = subcategory ? String(subcategory).toLowerCase().replace(/\s+/g, "-") : null;
                     await createNonThreatItem({
                         item_id: item.id,
@@ -972,7 +949,6 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
                 } catch (e) {
                     // ignore
                 }
-                // Clean up the uploaded file since processing failed
                 try {
                     await fs.unlink(path.join(libraryImagesRoot, file.filename));
                 } catch (unlinkErr) {
@@ -982,7 +958,6 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
         }
 
         // Process pre-processed metadata items that were NOT in req.files
-        // (i.e., items already processed by /api/process-raw-files)
         for (const m of metadataArray) {
             if (m.preProcessed === true && !processedIds.has(m.originalname)) {
                 try {
@@ -990,11 +965,21 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
                     const category = m.category || "non-threats";
                     const subcategory = m.subcategory || "General";
 
-                    // Create item with pre-generated filepath — file already exists on disk
+                    // Validate preGeneratedFilepath to prevent path traversal
+                    let safeFilepath = m.preGeneratedFilepath;
+                    if (safeFilepath) {
+                        const validation = validatePathComponent(safeFilepath);
+                        if (!validation.valid) {
+                            errors.push({ filename: m.originalname, message: `Invalid filepath: ${validation.error}` });
+                            continue;
+                        }
+                        safeFilepath = validation.cleaned;
+                    }
+
                     const item = await createItem({
                         id: metaItemId,
                         filename: metaItemId,
-                        filepath: m.preGeneratedFilepath,
+                        filepath: safeFilepath,
                         category,
                         subcategory,
                         name: metaItemId,
@@ -1004,7 +989,6 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
                         tags: m.tags && m.tags.length > 0 ? m.tags : null
                     });
 
-                    // Create sub-table records based on category
                     if (category === "bags") {
                         await createBag({
                             item_id: item.id,
@@ -1052,7 +1036,6 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
             duration_s: fileProcessingDuration 
         });
 
-        // Complete pipeline
         const pipelineSummary = timer.complete({
             totalFiles: files.length,
             processedFiles: processed.length,
@@ -1069,7 +1052,7 @@ app.post("/api/upload", uploadWithLimits.array("images", 5000), async (req, res)
 });
 
 // Update item metadata
-app.put("/api/items/:id", async (req, res) => {
+app.put("/api/items/:id", requireAuth, async (req, res) => {
   try {
     const { category, subcategory } = req.body;
     if (!category || !subcategory) {
@@ -1088,14 +1071,20 @@ app.put("/api/items/:id", async (req, res) => {
 });
 
 // Delete an individual item
-app.delete("/api/items/:id", async (req, res) => {
+app.delete("/api/items/:id", requireAuth, async (req, res) => {
     try {
         const item = await getItemById(req.params.id);
         if (item) {
-            try {
-                await fs.unlink(path.join(libraryImagesRoot, item.filepath));
-            } catch (err) {
-                console.error("Error deleting file:", err);
+            // Use safe path resolution for file deletion
+            const safeResult = safeJoin(libraryImagesRoot, item.filepath || '');
+            if (safeResult.safe) {
+                try {
+                    await fs.unlink(safeResult.fullPath);
+                } catch (err) {
+                    console.error("Error deleting file:", err);
+                }
+            } else {
+                console.warn("Skipping unsafe file deletion path:", item.filepath);
             }
         }
         await deleteItem(req.params.id);
@@ -1107,39 +1096,43 @@ app.delete("/api/items/:id", async (req, res) => {
 });
 
 // Delete temporary files for pre-processed items (before they're uploaded to library)
-app.delete("/api/temp-files/:itemId", async (req, res) => {
+app.delete("/api/temp-files/:itemId", requireAuth, async (req, res) => {
     try {
         const { itemId } = req.params;
+        const safeItemId = sanitizeFilename(itemId);
         const errors = [];
         
-        // Delete library image
-        const imagePath = path.join(libraryImagesRoot, `${itemId}.png`);
-        try {
-            await fs.unlink(imagePath);
-        } catch (err) {
-            // File might not exist, that's okay
-            if (err.code !== 'ENOENT') {
-                errors.push(`Failed to delete image: ${err}`);
+        // Use safe path resolution for all file operations
+        const imageResult = safeJoin(libraryImagesRoot, `${safeItemId}.png`);
+        if (imageResult.safe) {
+            try {
+                await fs.unlink(imageResult.fullPath);
+            } catch (err) {
+                if (err.code !== 'ENOENT') {
+                    errors.push(`Failed to delete image: ${err}`);
+                }
             }
         }
         
-        // Delete pixel data files (both high and low energy)
-        const highEnergyPath = path.join(pixelDataRoot, "highenergy", `${itemId}.npz`);
-        const lowEnergyPath = path.join(pixelDataRoot, "lowenergy", `${itemId}.npz`);
-        
-        try {
-            await fs.unlink(highEnergyPath);
-        } catch (err) {
-            if (err.code !== 'ENOENT') {
-                errors.push(`Failed to delete high energy pixel data: ${err}`);
+        const highEnergyResult = safeJoin(pixelDataRoot, 'highenergy', `${safeItemId}.npz`);
+        if (highEnergyResult.safe) {
+            try {
+                await fs.unlink(highEnergyResult.fullPath);
+            } catch (err) {
+                if (err.code !== 'ENOENT') {
+                    errors.push(`Failed to delete high energy pixel data: ${err}`);
+                }
             }
         }
         
-        try {
-            await fs.unlink(lowEnergyPath);
-        } catch (err) {
-            if (err.code !== 'ENOENT') {
-                errors.push(`Failed to delete low energy pixel data: ${err}`);
+        const lowEnergyResult = safeJoin(pixelDataRoot, 'lowenergy', `${safeItemId}.npz`);
+        if (lowEnergyResult.safe) {
+            try {
+                await fs.unlink(lowEnergyResult.fullPath);
+            } catch (err) {
+                if (err.code !== 'ENOENT') {
+                    errors.push(`Failed to delete low energy pixel data: ${err}`);
+                }
             }
         }
         
@@ -1156,7 +1149,7 @@ app.delete("/api/temp-files/:itemId", async (req, res) => {
 });
 
 // Auto-generate valid region from raw pixel data (for pre-upload staged items)
-app.post("/api/auto-valid-region", async (req, res) => {
+app.post("/api/auto-valid-region", requireAuth, async (req, res) => {
     try {
         const { itemId, pixelDataPath } = req.body;
         
@@ -1164,9 +1157,19 @@ app.post("/api/auto-valid-region", async (req, res) => {
             return res.status(400).json({ ok: false, error: "Missing itemId or pixelDataPath" });
         }
 
-        const fullPath = path.join(pixelDataRoot, pixelDataPath);
+        // Validate pixelDataPath to prevent path traversal
+        const validation = validatePathComponent(pixelDataPath);
+        if (!validation.valid) {
+            return res.status(400).json({ ok: false, error: `Invalid pixelDataPath: ${validation.error}` });
+        }
+
+        const safePathResult = safeJoin(pixelDataRoot, validation.cleaned);
+        if (!safePathResult.safe) {
+            return res.status(400).json({ ok: false, error: `Invalid pixel data path: ${safePathResult.error}` });
+        }
+
+        const fullPath = safePathResult.fullPath;
         
-        // Check if pixel data file exists
         try {
             await fs.access(fullPath);
         } catch {
@@ -1192,7 +1195,7 @@ app.post("/api/auto-valid-region", async (req, res) => {
 });
 
 // Batch auto-generate valid regions for multiple items in parallel
-app.post("/api/auto-valid-region-batch", async (req, res) => {
+app.post("/api/auto-valid-region-batch", requireAuth, async (req, res) => {
     try {
         const { items } = req.body;
         
@@ -1204,7 +1207,6 @@ app.post("/api/auto-valid-region-batch", async (req, res) => {
             return res.status(400).json({ ok: false, error: "Maximum 50 items per batch request" });
         }
 
-        // Process all items in parallel using Promise.all
         const results = await Promise.allSettled(
             items.map(async (item) => {
                 const { itemId, pixelDataPath } = item;
@@ -1217,9 +1219,27 @@ app.post("/api/auto-valid-region-batch", async (req, res) => {
                     };
                 }
 
-                const fullPath = path.join(pixelDataRoot, pixelDataPath);
+                // Validate pixelDataPath
+                const validation = validatePathComponent(pixelDataPath);
+                if (!validation.valid) {
+                    return {
+                        itemId,
+                        ok: false,
+                        error: `Invalid pixelDataPath: ${validation.error}`
+                    };
+                }
+
+                const safePathResult = safeJoin(pixelDataRoot, validation.cleaned);
+                if (!safePathResult.safe) {
+                    return {
+                        itemId,
+                        ok: false,
+                        error: `Invalid pixel data path: ${safePathResult.error}`
+                    };
+                }
+
+                const fullPath = safePathResult.fullPath;
                 
-                // Check if pixel data file exists
                 try {
                     await fs.access(fullPath);
                 } catch {
@@ -1252,7 +1272,6 @@ app.post("/api/auto-valid-region-batch", async (req, res) => {
             })
         );
 
-        // Format results
         const processedResults = results.map((result, index) => {
             if (result.status === 'fulfilled') {
                 return result.value;
@@ -1285,10 +1304,9 @@ app.post("/api/auto-valid-region-batch", async (req, res) => {
 });
 
 // Update bag valid region (only supports points and simplifiedPoints)
-app.put("/api/items/:id/valid-region", async (req, res) => {
+app.put("/api/items/:id/valid-region", requireAuth, async (req, res) => {
     try {
         const { points, simplifiedPoints } = req.body;
-        // Store just points and simplifiedPoints
         const dataToStore = {
             points,
             simplifiedPoints
@@ -1302,7 +1320,7 @@ app.put("/api/items/:id/valid-region", async (req, res) => {
 });
 
 // Delete bag valid region (set to null)
-app.delete("/api/items/:id/valid-region", async (req, res) => {
+app.delete("/api/items/:id/valid-region", requireAuth, async (req, res) => {
     try {
         await updateBag(req.params.id, { valid_region_points: null });
         res.json({ ok: true });
@@ -1327,19 +1345,29 @@ app.get("/api/items/:id/pixel-data", async (req, res) => {
             return res.status(404).json({ ok: false, error: "No pixel data path for this item" });
         }
 
+        // Validate pixelDataFilename to prevent path traversal
+        const validation = validatePathComponent(pixelDataFilename);
+        if (!validation.valid) {
+            return res.status(400).json({ ok: false, error: `Invalid pixel data path: ${validation.error}` });
+        }
+
         // If low energy requested, replace the folder prefix
         if (energyType === "lowenergy") {
             pixelDataFilename = pixelDataFilename.replace(/^highenergy[\\/]/, "lowenergy/");
         }
 
-        const fullPath = path.join(pixelDataRoot, pixelDataFilename);
+        const safePathResult = safeJoin(pixelDataRoot, pixelDataFilename);
+        if (!safePathResult.safe) {
+            return res.status(400).json({ ok: false, error: `Invalid pixel data path: ${safePathResult.error}` });
+        }
+
+        const fullPath = safePathResult.fullPath;
         try {
             await fs.access(fullPath);
         } catch {
             return res.status(404).json({ ok: false, error: `Pixel data file not found: ${pixelDataFilename}` });
         }
 
-        // Read .npz via Python subprocess
         const { spawn } = await import('node:child_process');
         const readNpzScript = path.join(__dirname, 'lib', 'read_npz.py');
         
@@ -1410,7 +1438,7 @@ async function enrichObjectsWithPixelData(objects) {
 }
 
 // Render and save a collage combination as a PNG image
-app.post("/api/render-and-save-collage", async (req, res) => {
+app.post("/api/render-and-save-collage", requireAuth, async (req, res) => {
     try {
         const { objects, name, energyType = "highenergy" } = req.body;
         if (!objects || !Array.isArray(objects) || objects.length === 0) {
@@ -1420,26 +1448,17 @@ app.post("/api/render-and-save-collage", async (req, res) => {
             return res.status(400).json({ ok: false, error: "Missing name" });
         }
 
-        // Determine output directory based on energy type
         const energyDir = energyType === "lowenergy" ? collageLowRoot : collageHighRoot;
 
-        // Sanitize the filename - use the synthesized ID directly (already unique)
         const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
         const filename = `${safeName}.png`;
         const outputPath = path.join(energyDir, filename);
 
-        // Rendering scene
-
-        // Enrich objects with pixel_data_path from items database (frontend objects lack this)
         const enrichedObjects = await enrichObjectsWithPixelData(objects);
 
-        // Render the scene to a PNG buffer
         const pngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, energyType);
 
-        // Write to disk
         await fs.writeFile(outputPath, pngBuffer);
-
-        // Saved successfully
 
         res.json({
             ok: true,
@@ -1453,7 +1472,7 @@ app.post("/api/render-and-save-collage", async (req, res) => {
 });
 
 // Render and save BOTH high-energy and low-energy collage images at once
-app.post("/api/render-and-save-collage-both", async (req, res) => {
+app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
     try {
         const { objects, name, outputPath } = req.body;
         if (!objects || !Array.isArray(objects) || objects.length === 0) {
@@ -1466,56 +1485,44 @@ app.post("/api/render-and-save-collage-both", async (req, res) => {
         const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
         const filename = `${safeName}.png`;
 
-        // Determine output directory
         let highEnergyDir, lowEnergyDir;
         
         if (outputPath && typeof outputPath === 'string') {
-            // Sanitize: only strip truly invalid filename characters, NOT colons (valid in Windows drive letters)
+            // Sanitize output path to prevent traversal
             const sanitizedPath = outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '');
             
-            // Prevent directory traversal attacks using resolved normalized path
+            // Prevent directory traversal
+            if (sanitizedPath.includes('..')) {
+                return res.status(400).json({ ok: false, error: "Invalid output path. Directory traversal is not allowed." });
+            }
+            
             const resolvedProjectRoot = path.resolve(__dirname, '..');
             
-            // If it's NOT an absolute Windows path (e.g., C:\Users\...), check it stays within project
             if (!path.isAbsolute(sanitizedPath)) {
-                // Resolve relative to project's data directory
                 const customCollageRoot = path.resolve(resolvedProjectRoot, 'data', sanitizedPath, 'collage_images');
                 highEnergyDir = path.resolve(customCollageRoot, 'high');
                 lowEnergyDir = path.resolve(customCollageRoot, 'low');
             } else {
-                // Absolute Windows path (e.g., C:\Users\saikiran\Desktop) — use directly
-                // Check for directory traversal within the absolute path
-                if (sanitizedPath.includes('..')) {
-                    return res.status(400).json({ ok: false, error: "Invalid output path. Directory traversal is not allowed." });
-                }
                 const customCollageRoot = path.resolve(sanitizedPath, 'collage_images');
                 highEnergyDir = path.resolve(customCollageRoot, 'high');
                 lowEnergyDir = path.resolve(customCollageRoot, 'low');
             }
             
-            // Ensure directories exist
             await fs.mkdir(highEnergyDir, { recursive: true });
             await fs.mkdir(lowEnergyDir, { recursive: true });
         } else {
-            // Use default directories
             highEnergyDir = collageHighRoot;
             lowEnergyDir = collageLowRoot;
         }
 
-        // Rendering both energies
-
-        // Enrich objects with pixel_data_path from items database (frontend objects lack this)
         const enrichedObjects = await enrichObjectsWithPixelData(objects);
 
-        // Render high energy
         const highPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "highenergy");
         await fs.writeFile(path.join(highEnergyDir, filename), highPngBuffer);
 
-        // Render low energy
         const lowPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "lowenergy");
         await fs.writeFile(path.join(lowEnergyDir, filename), lowPngBuffer);
 
-        // Determine the URL path based on whether custom or default
         let isAbsolutePath = false;
         let customCollageRootForUrl;
         if (outputPath && typeof outputPath === 'string') {
@@ -1581,7 +1588,6 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
             message: `Item ${obj.id} has no pixel data`
           });
         } else {
-          // Check if pixel data file exists
           const pixelDataPath = item.pixel_data_path;
           const highEnergyPath = path.join(pixelDataRoot, pixelDataPath);
           const lowEnergyPath = path.join(pixelDataRoot, pixelDataPath.replace(/^highenergy[\\/]/, 'lowenergy/'));
@@ -1616,16 +1622,14 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
 });
 
 // Render a preview image from a saved layout using real pixel data (I1*I2/65535)
-app.post('/api/render-preview', async (req, res) => {
+app.post('/api/render-preview', requireAuth, async (req, res) => {
     try {
         const { objects } = req.body;
         if (!objects) return res.status(400).json({ ok: false, error: 'Missing objects' });
 
-        // Load all items to look up pixel_data_path by id
         const allItems = await getItems();
         const itemMap = new Map(allItems.map(i => [i.id, i]));
 
-        // Flatten objects into renderScene format
         const flatObjects = [];
         let bagWidth = 800;
         let bagHeight = 600;
@@ -1693,20 +1697,16 @@ app.post('/api/render-preview', async (req, res) => {
             return res.status(400).json({ ok: false, error: 'No objects to render' });
         }
 
-        // Collect warnings during rendering
         const renderWarnings = [];
         
-        // Check if there are any objects that have pixel_data_path set
         const objectsWithData = flatObjects.filter(o => o.pixel_data_path);
         if (objectsWithData.length === 0 && missingPixelDataObjs.length > 0) {
             renderWarnings.push('No pixel data files (.npz) found for any objects. Preview may not render correctly.');
         }
 
-        // Render using the bag's dimensions as canvas size
         const pngBuffer = await renderSceneAsync(flatObjects, bagWidth, bagHeight, undefined, renderWarnings);
 
-        // Check if ALL objects were skipped (density buffer is all zeros)
-        const isBlank = pngBuffer.length < 500; // Very small buffer = likely blank image
+        const isBlank = pngBuffer.length < 500;
         
         res.json({
             ok: true,
@@ -1725,16 +1725,14 @@ app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   console.error('Error stack:', err.stack);
   
-  // If headers already sent, delegate to Express default handler
   if (res.headersSent) {
     return next(err);
   }
   
-  // Always return JSON
   res.status(500).json({ 
     ok: false, 
     error: err.message || String(err),
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    ...(config.nodeEnv === 'development' && { stack: err.stack })
   });
 });
 
@@ -1743,9 +1741,9 @@ app.use((req, res) => {
   res.status(404).json({ ok: false, error: 'Not found' });
 });
 
-const port = process.env.PORT ? Number(process.env.PORT) : 8080;
+const port = config.port;
 
-if (process.env.NODE_ENV !== 'test') {
+if (config.nodeEnv !== 'test') {
     app.listen(port, () => {
         logger.info({ port }, 'server_started');
     });

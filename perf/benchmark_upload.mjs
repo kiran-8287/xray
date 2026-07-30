@@ -1,7 +1,8 @@
 /**
  * Upload Benchmark Suite
- * Tests upload performance with 500, 1000, 5000, 10000 files
+ * Tests upload performance with 1000, 5000, 10000 files
  * Measures: throughput, latency, memory growth, worker efficiency
+ * Note: Uses valid PNG files (Jimp-compatible) with .png extension
  * Note: Server has a 5000-file limit per request, so 10000 is split into 2 batches
  */
 
@@ -20,36 +21,61 @@ const RESULTS_DIR = path.join(__dirname, 'reports');
 const BENCHMARK_SIZES = [500, 1000, 5000, 10000];
 
 /**
- * Generate a small test file (simulating a .dump.pgm file)
+ * Generate a valid minimal PNG file (1x1 pixel, 8-bit grayscale)
+ * This ensures Jimp can read the file and extract dimensions cleanly.
  */
-function generateTestFile(sizeKB = 50) {
-  const buffer = Buffer.alloc(sizeKB * 1024);
-  for (let i = 0; i < buffer.length; i++) {
-    buffer[i] = Math.floor(Math.random() * 256);
-  }
-  return buffer;
+function generateTestFile() {
+  // Minimal valid PNG: 1x1 pixel, 8-bit grayscale with proper CRC
+  return Buffer.from([
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+    0x00, 0x00, 0x00, 0x0D, // IHDR chunk length (13)
+    0x49, 0x48, 0x44, 0x52, // "IHDR" type
+    0x00, 0x00, 0x00, 0x01, // width = 1
+    0x00, 0x00, 0x00, 0x01, // height = 1
+    0x08,                   // bit depth = 8
+    0x00,                   // color type = grayscale
+    0x00,                   // compression
+    0x00,                   // filter
+    0x00,                   // interlace
+    0x77, 0x4F, 0x5A, 0x06, // IHDR CRC (calculated)
+    
+    0x00, 0x00, 0x00, 0x0A, // IDAT chunk length (10)
+    0x49, 0x44, 0x41, 0x54, // "IDAT" type
+    0x78, 0x01, 0x63, 0x60, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, // compressed data
+    0xE2, 0x21, 0xBC, 0x33, // IDAT CRC
+    
+    0x00, 0x00, 0x00, 0x00, // IEND chunk length
+    0x49, 0x45, 0x4E, 0x44, // "IEND" type
+    0xAE, 0x42, 0x60, 0x82  // IEND CRC
+  ]);
 }
 
 /**
- * Create test files for benchmarking
+ * Create test files using .png extension (valid PNG format that Jimp can read)
  */
-async function createTestFiles(count, outputDir) {
+async function createTestFiles(count, outputDir, sizeKB = 100) {
   await fs.mkdir(outputDir, { recursive: true });
   
-  console.log(`Creating ${count} test files...`);
+  console.log(`Creating ${count} test files (${sizeKB}KB each, valid PNG format)...`);
   const startTime = Date.now();
+  
+  // Generate a single valid PNG buffer to reuse
+  const pngBuffer = generateTestFile(sizeKB);
   
   // Create files in batches to avoid "too many open files" error
   const BATCH_SIZE = 100;
-  const buffer = generateTestFile(50); // 50KB per file
   
   for (let i = 0; i < count; i += BATCH_SIZE) {
     const batchPromises = [];
     const batchEnd = Math.min(i + BATCH_SIZE, count);
     
     for (let j = i; j < batchEnd; j++) {
-      const filePath = path.join(outputDir, `test_file_${j}_P01X010-2024101200${String(j).padStart(4, '0')}.dump.pgm`);
-      batchPromises.push(fs.writeFile(filePath, buffer));
+      // Use .png extension so Jimp can recognize the format
+      const newFileName = `test_file_${String(j).padStart(5, '0')}.png`;
+      const filePath = path.join(outputDir, newFileName);
+      
+      // Use the valid PNG buffer for all files (Jimp can read it)
+      batchPromises.push(fs.writeFile(filePath, pngBuffer));
     }
     
     await Promise.all(batchPromises);
@@ -104,11 +130,27 @@ async function uploadBatch(files, batchSize) {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
+        // Parse response to check for actual success/failure
+        let responseData = {};
+        try {
+          responseData = JSON.parse(data);
+        } catch (e) {
+          // Response is not JSON, use HTTP status only
+        }
+        
+        const httpSuccess = res.statusCode >= 200 && res.statusCode < 300;
+        const actualSuccess = httpSuccess && 
+                              responseData.ok === true && 
+                              (!responseData.errors || responseData.errors.length === 0);
+        
         resolve({
-          success: res.statusCode >= 200 && res.statusCode < 300,
+          success: actualSuccess,
           statusCode: res.statusCode,
           filesUploaded: batch.length,
           response: data,
+          responseData: responseData,
+          processedCount: responseData.itemsProcessed || 0,
+          errorCount: responseData.errors ? responseData.errors.length : 0,
         });
       });
     });
@@ -156,12 +198,14 @@ async function uploadFiles(fileDir, fileCount) {
   const throughput = totalUploaded / duration;
   
   return {
-    success: lastError === null,
+    success: lastError === null && totalUploaded === filePaths.length,
     statusCode: lastError ? lastError.statusCode : 200,
     filesUploaded: totalUploaded,
     duration,
     throughput,
     response: lastError ? lastError.response : null,
+    processedCount: lastError ? (lastError.processedCount || 0) : totalUploaded,
+    errorCount: lastError ? (lastError.errorCount || 0) : 0,
   };
 }
 
@@ -203,10 +247,12 @@ async function runBenchmark(fileCount, testDir) {
     console.log(`  Status: ${uploadResult.success ? '✅ SUCCESS' : '❌ FAILED'}`);
     console.log(`  HTTP Status: ${uploadResult.statusCode}`);
     console.log(`  Files Uploaded: ${uploadResult.filesUploaded}`);
+    console.log(`  Files Processed: ${uploadResult.processedCount}`);
+    console.log(`  Files Failed: ${uploadResult.errorCount}`);
     console.log(`  Total Time: ${uploadResult.duration.toFixed(2)}s`);
     console.log(`  Throughput: ${uploadResult.throughput.toFixed(2)} files/sec`);
     
-    if (!uploadResult.success) {
+    if (!uploadResult.success || uploadResult.errorCount > 0) {
       console.log(`  Response: ${uploadResult.response}`);
     }
     
@@ -247,7 +293,7 @@ async function saveReport(results) {
   console.log(`\nJSON report saved: ${reportPath}`);
   
   // Build CSV
-  const csvHeader = 'fileCount,status,httpStatus,filesUploaded,duration_s,throughput_fps,totalMemoryMB,freeMemoryMB\n';
+  const csvHeader = 'fileCount,status,httpStatus,filesUploaded,filesProcessed,filesFailed,duration_s,throughput_fps,totalMemoryMB,freeMemoryMB\n';
   const csvRows = results.map(r => {
     const u = r.upload || {};
     const m = r.systemMetrics || {};
@@ -256,6 +302,8 @@ async function saveReport(results) {
       r.success ? 'SUCCESS' : 'FAILED',
       u.statusCode || '',
       u.filesUploaded || '',
+      u.processedCount || 0,
+      u.errorCount || 0,
       u.duration ? u.duration.toFixed(3) : '',
       u.throughput ? u.throughput.toFixed(2) : '',
       m.totalMemoryMB || '',
@@ -281,11 +329,11 @@ async function saveReport(results) {
  * Print summary table
  */
 function printSummary(results) {
-  console.log('\n' + '='.repeat(80));
+  console.log('\n' + '='.repeat(100));
   console.log('BENCHMARK SUMMARY');
-  console.log('='.repeat(80));
-  console.log('Size        Status    Time (s)    Throughput     Memory (MB)');
-  console.log('-'.repeat(80));
+  console.log('='.repeat(100));
+  console.log('Size        Status    Time (s)    Throughput   Processed   Failed   Memory (MB)');
+  console.log('-'.repeat(100));
   
   for (const result of results) {
     const status = result.success ? '✅' : '❌';
@@ -295,17 +343,21 @@ function printSummary(results) {
     const mem = result.systemMetrics || {};
     const memory = mem.freeMemoryMB ? mem.freeMemoryMB.toFixed(0) : 'N/A';
     const size = result.fileCount + ' files';
+    const processed = upload.processedCount ? upload.processedCount.toString() : '0';
+    const failed = upload.errorCount ? upload.errorCount.toString() : '0';
     
     console.log(
       size.padEnd(12) + 
       status.padEnd(11) + 
       time.padEnd(13) + 
-      throughput.padEnd(16) + 
+      throughput.padEnd(14) + 
+      processed.padEnd(11) + 
+      failed.padEnd(9) + 
       memory
     );
   }
   
-  console.log('='.repeat(80));
+  console.log('='.repeat(100));
 }
 
 /**
@@ -315,14 +367,16 @@ async function main() {
   console.log('Upload Benchmark Suite');
   console.log(`Target: ${TARGET_URL}`);
   console.log(`Sizes: ${BENCHMARK_SIZES.join(', ')} files`);
+  console.log('Note: Uses valid PNG files (Jimp-compatible) with .png extension');
   console.log('Note: 10000 files will be split into batches of 4500 due to server limits');
   
   // Create temporary directory for test files
   const testDir = path.join(__dirname, 'temp-test-files');
   
   try {
-    // Create test files (use smallest size for all benchmarks)
-    await createTestFiles(Math.max(...BENCHMARK_SIZES), testDir);
+    // Create test files (100KB each, valid PNG format)
+    // 10000 files x 100KB = ~1GB total
+    await createTestFiles(Math.max(...BENCHMARK_SIZES), testDir, 100);
     
     // Run benchmarks
     const results = [];

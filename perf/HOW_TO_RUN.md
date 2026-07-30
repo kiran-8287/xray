@@ -4,11 +4,12 @@ This guide explains how to run benchmarks, tests, and view instrumentation logs.
 
 ## 📊 1. Run Upload Benchmarks
 
-The benchmark suite tests upload performance with 500, 1000, 5000, and 10000 files.
+The benchmark suite tests upload performance with 1000, 5000, and 10000 files using real X-ray files from the `dump and tip` folder.
 
 ### Prerequisites
 - Backend server must be running on `http://localhost:8080` (or set `TARGET_URL` env var)
 - Node.js 18+ installed
+- Source files available in `dump and tip/` folder (37 real .dump.pgm and .tip files)
 
 ### Run the Benchmark
 
@@ -25,11 +26,20 @@ TARGET_URL=http://localhost:3000 node perf/benchmark_upload.mjs
 ```
 
 ### What It Does
-1. Creates test files (50KB each) in `perf/temp-test-files/`
-2. Uploads 500, 1000, 5000, 10000 files sequentially
-3. Measures throughput, latency, and memory usage
-4. Saves structured JSON reports to `perf/reports/`
-5. Cleans up temp files
+1. Scans `dump and tip/` folder for source files (47 real X-ray files)
+2. Loads source files as templates and truncates to 100KB each
+3. Creates unique filenames: `test_file_00001.pgm`, `test_file_00001.tip`
+4. Uploads 1000, 5000, 10000 files sequentially
+5. Measures throughput, latency, and memory usage
+6. Saves structured JSON reports to `perf/reports/`
+7. Cleans up temp files
+
+### File Duplication Strategy
+- Cycles through the 47 source files (bags_easy, bags_hard, bags_medium, guns, knife)
+- Truncates large files (5-8MB) to 100KB to manage disk space
+- 10,000 files × 100KB = ~1GB total disk space required
+- Maintains original file extensions (.dump.pgm, .tip)
+- Uses real file headers and structure (not synthetic files)
 
 ### View Reports
 
@@ -41,33 +51,112 @@ cat perf/reports/benchmark-latest.json
 ls perf/reports/benchmark-*.json
 ```
 
+---
+
+## 🧪 2. Run Stress Test Suite
+
+The stress test suite simulates real user flows and finds breaking points.
+
+### Prerequisites
+- Backend server must be running on `http://localhost:8080`
+- Node.js 18+ installed
+
+### Run All Scenarios
+
+```bash
+# From the project root
+node perf/stress-test.mjs
+```
+
+### Run Specific Scenario
+
+```bash
+# Upload stress only
+node perf/stress-test.mjs --scenario upload
+
+# Generation stress only
+node perf/stress-test.mjs --scenario generation
+
+# Buffer stress only
+node perf/stress-test.mjs --scenario buffer
+
+# API timeout/error handling only
+node perf/stress-test.mjs --scenario api-timeout
+
+# Concurrent operations stress only
+node perf/stress-test.mjs --scenario concurrent-ops
+```
+
+### Quick Mode (lower limits for fast testing)
+
+```bash
+node perf/stress-test.mjs --quick
+```
+
+### Custom Target URL
+
+```bash
+node perf/stress-test.mjs --target http://localhost:3000
+```
+
+### What It Does
+
+Each scenario ramps up load until the system breaks:
+
+1. **upload-stress**: Uploads files while simultaneously calling bulk operations (assign category, auto-generate mask)
+2. **generation-stress**: Tests increasing K (combinations) and N (objects per combination)
+3. **buffer-stress**: Tests how many layouts can be saved before crash
+4. **api-timeout**: Verifies proper error codes (400/404/500) are returned
+5. **concurrent-ops**: Simulates multiple users calling APIs simultaneously
+
+### View Reports
+
+```bash
+# Latest report for a scenario
+cat perf/reports/stress-upload-stress-latest.json
+cat perf/reports/stress-generation-stress-latest.json
+
+# All stress reports
+ls perf/reports/stress-*.json
+
+# CSV reports (open in Excel)
+ls perf/reports/stress-*.csv
+```
+
 ### Sample Report Structure
+
 ```json
 {
-  "timestamp": "2026-07-29T12:00:00.000Z",
+  "scenario": "upload-stress",
+  "timestamp": "2026-07-29T14:17:42.842Z",
   "targetUrl": "http://localhost:8080",
   "results": [
     {
-      "fileCount": 500,
-      "success": true,
-      "upload": {
-        "filesUploaded": 500,
-        "duration": 45.2,
-        "throughput": 11.06
-      }
+      "runNumber": 1,
+      "config": "5 files x 2 concurrent",
+      "files": 5,
+      "concurrency": 2,
+      "passed": true,
+      "uploadDuration_ms": 1234,
+      "bulkOpsDuration_ms": 567,
+      "totalDuration_ms": 1801,
+      "memoryGrowth_mb": 12,
+      "peakRSS_mb": 58
     }
   ],
   "summary": {
-    "totalBenchmarks": 4,
-    "successful": 4,
-    "failed": 0
+    "totalRuns": 1,
+    "passed": 1,
+    "failed": 0,
+    "peakMemoryMB": 58,
+    "breakingPoint": null
   }
 }
 ```
 
 ---
 
-## 🧪 2. Run Test Suite
+## 🧪 3. Run Test Suite
 
 ### Run All Backend Tests
 
@@ -100,45 +189,9 @@ cd backend
 npx jest --coverage
 ```
 
-### Test Output Example
-```
-PASS backend/tests/api.test.js
-  API Tests
-    GET /
-      ✓ should return api info (45ms)
-    GET /api/items/categorized
-      ✓ should return ok true (12ms)
-      ✓ should support pagination (8ms)
-    POST /api/upload
-      ✓ should upload a small file successfully (234ms)
-      ✓ should reject invalid file types (189ms)
-      ✓ should handle duplicate filenames (312ms)
-      ✓ should handle metadata correctly (198ms)
-
-PASS backend/tests/workerPool.test.js
-  WorkerPool
-    constructor
-      ✓ should create a pool with default size of 4
-      ✓ should create a pool with custom size
-    addTask
-      ✓ should add a task to the pool
-      ✓ should handle multiple tasks
-
-PASS backend/tests/load.test.js
-  Load Tests
-    POST /api/upload - concurrent uploads
-      ✓ should handle 10 concurrent uploads (5.2s)
-      ✓ should handle 50 concurrent uploads (28.1s)
-    GET /api/items/categorized - concurrent requests
-      ✓ should handle 100 concurrent requests (1.3s)
-
-Test Suites: 3 passed, 3 total
-Tests:       23 passed, 23 total
-```
-
 ---
 
-## 📈 3. View Instrumentation Logs
+## 📈 4. View Instrumentation Logs
 
 The instrumentation system logs detailed timing and memory metrics for every pipeline stage.
 
@@ -186,18 +239,9 @@ Logs are structured JSON (using Pino) and include:
     "external": 0
   },
   "stages": {
-    "upload_receipt": {
-      "duration_s": 0.001,
-      "memory_delta_bytes": { "rss": 0, "heapUsed": 0, "heapTotal": 0, "external": 0 }
-    },
-    "validation": {
-      "duration_s": 0.045,
-      "memory_delta_bytes": { "rss": 1048576, "heapUsed": 524288, "heapTotal": 1048576, "external": 0 }
-    },
-    "worker_dispatch": {
-      "duration_s": 11.234,
-      "memory_delta_bytes": { "rss": 14680064, "heapUsed": 7864320, "heapTotal": 14680064, "external": 0 }
-    }
+    "upload_receipt": { "duration_s": 0.001 },
+    "validation": { "duration_s": 0.045 },
+    "worker_dispatch": { "duration_s": 11.234 }
   }
 }
 ```
@@ -227,7 +271,7 @@ cd backend && npm run dev | pino-pretty
 
 ---
 
-## 🔍 4. Monitor Real-Time Metrics
+## 🔍 5. Monitor Real-Time Metrics
 
 ### Prometheus Metrics Endpoint
 
@@ -237,7 +281,6 @@ curl http://localhost:8080/metrics
 
 # Filter for specific metrics
 curl http://localhost:8080/metrics | grep http_request_duration_seconds
-curl http://localhost:8080/metrics | grep worker_batch_duration_seconds
 curl http://localhost:8080/metrics | grep upload_file_processing_seconds
 ```
 
@@ -247,14 +290,13 @@ curl http://localhost:8080/metrics | grep upload_file_processing_seconds
 |--------|------|-------------|
 | `http_request_duration_seconds` | Histogram | HTTP request latency by method/route/status |
 | `upload_file_processing_seconds` | Histogram | Time to process each uploaded file |
-| `worker_batch_duration_seconds` | Histogram | Time to process a worker batch |
 | `nodejs_heap_size_total_bytes` | Gauge | Total heap size |
 | `nodejs_heap_used_bytes` | Gauge | Used heap size |
 | `nodejs_external_memory_bytes` | Gauge | External memory (C++ objects) |
 
 ---
 
-## 🚀 5. Quick Start - Complete Workflow
+## 🚀 6. Quick Start - Complete Workflow
 
 ### Step 1: Start the Backend
 ```bash
@@ -264,19 +306,30 @@ npm run dev
 
 ### Step 2: Run Benchmarks (in another terminal)
 ```bash
+# This will create 10000 test files (100KB each) by truncating real files from "dump and tip" folder
+# Total disk space required: ~1GB
+# Then upload 1000, 5000, and 10000 files sequentially
 node perf/benchmark_upload.mjs
 ```
 
-### Step 3: Run Tests (in another terminal)
+### Step 3: Run Stress Tests (in another terminal)
+```bash
+node perf/stress-test.mjs --quick
+```
+
+### Step 4: Run Unit Tests (in another terminal)
 ```bash
 cd backend
 npm test
 ```
 
-### Step 4: View Reports
+### Step 5: View Reports
 ```bash
 # Latest benchmark report
 cat perf/reports/benchmark-latest.json | jq .
+
+# Latest stress report
+cat perf/reports/stress-upload-stress-latest.json | jq .
 
 # System config
 cat backend/data/system-config.json
@@ -284,61 +337,57 @@ cat backend/data/system-config.json
 
 ---
 
-## 📝 6. Example: Complete Benchmark Run
+## 📝 7. Example: Complete Stress Test Run
 
 ```bash
 # Terminal 1: Start server
 cd c:\Users\saikiran\Desktop\xray\backend
 npm run dev
 
-# Terminal 2: Run benchmark
+# Terminal 2: Run stress tests
 cd c:\Users\saikiran\Desktop\xray
-node perf/benchmark_upload.mjs
+node perf/stress-test.mjs --scenario upload
 
 # Output:
-# Upload Benchmark Suite
-# Target: http://localhost:8080
-# Sizes: 500, 1000, 5000, 10000 files
+# ╔══════════════════════════════════════════════════════════╗
+# ║         X-RAY STRESS TEST SUITE                         ║
+# ╚══════════════════════════════════════════════════════════╝
+#   Target: http://localhost:8080
+#   Mode:   FULL
+#   Reports: perf/reports
 #
-# Creating 10000 test files...
-# Created 10000 files in 12.34s
+# ▶ Running scenario: upload-stress
 #
-# ============================================================
-# BENCHMARK: 500 files
-# ============================================================
-# Uploading 500 files...
+#   ── Upload stress: 5 files x 2 concurrent ──
+#   ✅ Uploaded 5 files in 1.2s (4.2 f/s)
+#   ── Upload stress: 10 files x 5 concurrent ──
+#   ✅ Uploaded 10 files in 2.1s (4.8 f/s)
+#   ── Upload stress: 20 files x 10 concurrent ──
+#   ✅ Uploaded 20 files in 3.5s (5.7 f/s)
+#   ...
 #
-# Results:
-#   Status: ✅ SUCCESS
-#   HTTP Status: 200
-#   Files Uploaded: 500
-#   Total Time: 23.45s
-#   Throughput: 21.32 files/sec
+# 📄 Report saved: perf/reports/stress-upload-stress-2026-07-29T14-17-42-842Z.json
+# 📄 CSV saved: perf/reports/stress-upload-stress-2026-07-29T14-17-42-842Z.csv
 #
-# ============================================================
-# BENCHMARK: 1000 files
-# ============================================================
-# ...
+# ════════════════════════════════════════════════════════════
+#  📊 SCENARIO: upload-stress
+# ════════════════════════════════════════════════════════════
+#    Total runs:    8
+#    Passed:        7
+#    Failed:        1
+#    Peak memory:   512 MB
 #
-# Report saved: perf/reports/benchmark-2026-07-29T12-34-56-789.json
-#
-# ================================================================================
-# BENCHMARK SUMMARY
-# ================================================================================
-# Size        Status    Time (s)    Throughput     Memory (MB)   
-# --------------------------------------------------------------------------------
-# 500 files   ✅         23.45       21.32 f/s      8192         
-# 1000 files  ✅         45.67       21.90 f/s      6144         
-# 5000 files  ✅         234.12      21.35 f/s      4096         
-# 10000 files ✅         467.89      21.38 f/s      2048         
-# ================================================================================
+#    ❌ BREAKING POINT at run #8
+#       Error: Upload failed with status 500
+#    ✅ Memory stable: 45 MB total growth
+# ════════════════════════════════════════════════════════════
 ```
 
 ---
 
 ## 🐛 Troubleshooting
 
-### Benchmark fails with "ECONNREFUSED"
+### Stress test fails with "ECONNREFUSED"
 - Make sure backend is running on the correct port
 - Check `TARGET_URL` environment variable
 
@@ -362,5 +411,5 @@ node perf/benchmark_upload.mjs
 - **Instrumentation Code**: `backend/src/lib/instrumentation.js`
 - **System Info Code**: `backend/src/lib/systemInfo.js`
 - **Benchmark Code**: `perf/benchmark_upload.mjs`
+- **Stress Test Code**: `perf/stress-test.mjs` + `perf/scenarios/*.mjs`
 - **Test Files**: `backend/tests/*.test.js`
-- **Existing k6 Scripts**: `perf/k6/` (for load testing)
