@@ -126,21 +126,6 @@ async function getItemById(id) {
   return items.find(item => item.id === id);
 }
 
-async function* streamItems(batchSize = 1000) {
-  await ensureDataDir();
-  try {
-    const data = await fs.readFile(ITEMS_FILE, 'utf8');
-    const items = JSON.parse(data);
-
-    for (let i = 0; i < items.length; i += batchSize) {
-      yield items.slice(i, i + batchSize);
-    }
-  } catch (err) {
-    console.error('Error streaming items:', err);
-    yield [];
-  }
-}
-
 async function getItemsPaginated(page = 1, limit = 100) {
   await ensureDataDir();
   const allItems = await getItems();
@@ -365,6 +350,5 @@ export {
   getCustomSubcategories,
   addCustomSubcategory,
   removeCustomSubcategory,
-  streamItems,
   getItemsPaginated,
 };

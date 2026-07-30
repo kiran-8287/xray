@@ -7,10 +7,11 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import config from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const CONFIG_FILE = path.join(__dirname, '..', 'data', 'system-config.json');
+const CONFIG_FILE = path.join(config.dataDir, 'system-config.json');
 
 /**
  * Get system information

@@ -34,10 +34,9 @@ import {
     getCustomSubcategories,
     addCustomSubcategory,
     removeCustomSubcategory,
-    streamItems,
     getItemsPaginated
 } from "./lib/storage.js";
-import { PipelineTimer, PIPELINE_STAGES, generateOperationId, getMemoryUsageMB, queueWaitTracker } from "./lib/instrumentation.js";
+import { PipelineTimer, PIPELINE_STAGES, generateOperationId } from "./lib/instrumentation.js";
 import { initializeSystemConfig, getWorkerCount, checkMemoryAvailability } from "./lib/systemInfo.js";
 
 const app = express();
