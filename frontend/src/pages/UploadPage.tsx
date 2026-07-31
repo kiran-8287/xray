@@ -50,6 +50,36 @@ export default function UploadPage() {
     initializeConcurrencyPools();
   }, []);
 
+  // Reset upload context + local refs/state on component MOUNT.
+  // UploadProvider wraps the entire app, so stale files/staged from a previous
+  // visit to UploadPage (e.g. user saved all batches, went to Library/Collage,
+  // then came back) would otherwise show an empty progress bar "0 / 1000".
+  const didMountResetRef = useRef(false);
+  useEffect(() => {
+    if (didMountResetRef.current) return;
+    didMountResetRef.current = true;
+
+    // Wipe context (files + staged)
+    clearAll();
+
+    // Reset page + processing counters + processed page tracker
+    setActivePage(1);
+    processedPagesRef.current = new Set();
+    furthestScheduledPageRef.current = 0;
+    processingTotalRef.current = 0;
+    processingCompletedRef.current = 0;
+    processingQueueRef.current = [];
+    isProcessingRef.current = false;
+    setProcessing(false);
+    setProcessingProgress(null);
+    setStreamErrors([]);
+    setSelectedForMass(new Set());
+    setDuplicateWarning(null);
+    setValidationMessage(null);
+    setUploadStatus("idle");
+    setSavingPage(false);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Cleanup orphaned files on mount
   useEffect(() => {
     const cleanupOrphanedFiles = async () => {
@@ -369,15 +399,73 @@ export default function UploadPage() {
         setUploadStatus("success");
         setTimeout(() => setUploadStatus("idle"), 3000);
 
-        // Evict saved active page items from staged memory
-        setStaged((prev) => prev.filter((item: any) => item.pageNumber !== activePage));
+        // ------ 1. Evict saved-page portion from files array ------
+        // The progress banner render is gated on `files.length > 0`; if we
+        // never shrink `files`, the bar (with stale denominator) stays visible
+        // forever even after every batch has been saved to the library.
+        const savedStart = (activePage - 1) * PAGE_SIZE;
+        const savedEnd = Math.min(savedStart + PAGE_SIZE, files.length);
+        const remainingFiles = [...files.slice(0, savedStart), ...files.slice(savedEnd)];
 
-        // Advance to next pre-buffered page immediately
-        if (activePage < totalPages) {
-          const nextPage = activePage + 1;
-          setActivePage(nextPage);
-          // Pre-fetch next upcoming pages in background buffer
-          triggerPageProcessing(files, nextPage);
+        // Because we're physically shrinking the files array, all page numbers
+        // AFTER activePage must move DOWN by one (since what was page N+1 is now
+        // page N). If we simply keep advancing activePage without compacting,
+        // the 2nd save would splice out the wrong slice of files. So instead:
+        //  - Compact files (remove the active page's slice)
+        //  - Renumber remaining staged items: pageNumber > activePage decremented by 1
+        //  - If files is now EMPTY: reset activePage → 1, wipe processedPages ref
+        //    so a brand-new upload starting from page 1 works cleanly.
+        //  - Else: keep activePage the same (the next page has now shifted INTO
+        //    activePage's position because we removed files before it), unless
+        //    activePage would now exceed new totalPages (at the final page when
+        //    saving the last non-final chunk) — clamp to new totalPages.
+        setFiles(remainingFiles);
+
+        setStaged((prev) => {
+          const afterPageRemoval = prev.filter((item: any) => item.pageNumber !== activePage);
+          const renumbered = afterPageRemoval.map((item: any) => {
+            if (item.pageNumber > activePage) {
+              return { ...item, pageNumber: item.pageNumber - 1 };
+            }
+            return item;
+          });
+          return renumbered;
+        });
+
+        // Also remove this page from the processed set so a future upload that
+        // reaches the same page number can be processed again if needed.
+        processedPagesRef.current.delete(activePage);
+
+        if (remainingFiles.length === 0) {
+          // ------ Final page saved: FULL RESET ------
+          // Wipe every page tracker so starting a new upload from scratch works
+          processedPagesRef.current = new Set();
+          furthestScheduledPageRef.current = 0;
+          processingTotalRef.current = 0;
+          processingCompletedRef.current = 0;
+          processingQueueRef.current = [];
+          isProcessingRef.current = false;
+          setProcessing(false);
+          setProcessingProgress(null);
+          setStreamErrors([]);
+          setSelectedForMass(new Set());
+          setActivePage(1);
+        } else {
+          // ------ More pages remain: keep activePage at same logical index ------
+          // Because files for activePage were spliced out, what used to be page
+          // (activePage + 1) is now page activePage, so activePage stays put.
+          // Only if activePage is now past totalPages (edge case at final page)
+          // do we clamp.
+          const newTotalPages = Math.max(1, Math.ceil(remainingFiles.length / PAGE_SIZE));
+          if (activePage > newTotalPages) {
+            setActivePage(newTotalPages);
+          } else {
+            // Kick off lookahead processing for the (now-shifted) current page
+            // and its next-page lookahead buffer (the new shifted active page
+            // may not yet have been pre-processed if the old buffer ended one
+            // page earlier).
+            triggerPageProcessing(remainingFiles, activePage);
+          }
         }
       } else {
         setUploadStatus("error");

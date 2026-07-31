@@ -123,20 +123,6 @@ export default function LibraryPage() {
     } catch { return false; }
   });
 
-  // State for "Save as you go" auto-save toggle
-  const [autoSave, setAutoSave] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem("libraryAutoSave");
-      return saved ? JSON.parse(saved) : false;
-    } catch { return false; }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("libraryAutoSave", JSON.stringify(autoSave));
-    } catch { /* ignore */ }
-  }, [autoSave]);
-
   // Auto-set distribution preset when maxThreats changes
   useEffect(() => {
     const preset = threatDistributionPresets[maxThreats];
@@ -714,7 +700,7 @@ export default function LibraryPage() {
         nonThreatDistribution,
         requireAtLeastOneNonThreat,
         existingIds,
-        autoSave,
+        autoSave: false,
       });
 
       // Clear selections and navigate immediately — generation continues in background
@@ -1115,8 +1101,6 @@ export default function LibraryPage() {
         selectedNonThreatCount={selectedNonThreatCount}
         requireAtLeastOneNonThreat={requireAtLeastOneNonThreat}
         setRequireAtLeastOneNonThreat={setRequireAtLeastOneNonThreat}
-        autoSave={autoSave}
-        setAutoSave={setAutoSave}
         isGenerating={isGenerating}
         generationProgress={generationProgress}
         onGenerate={handleGenerate}

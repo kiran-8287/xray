@@ -139,6 +139,25 @@ app.use('/data/collage_images', express.static(collageImagesRoot));
 app.use('/data/pixel_data', express.static(pixelDataRoot));
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
 
+// Helper: resolve pixel_data_path for an item, with disk-based fallback.
+// Catalog field `pixel_data_path` may be NULL for historical/upload-flow reasons
+// (e.g. standard upload createItem at ~L1007 never populated it). We fall back
+// to the convention `highenergy/<sanitizedItemId>.npz` and verify the file exists.
+async function resolvePixelDataPath(itemId, catalogPixelDataPath) {
+    if (catalogPixelDataPath) {
+        const r = safeJoin(pixelDataRoot, catalogPixelDataPath);
+        if (r.safe) {
+            try { await fs.access(r.fullPath); return catalogPixelDataPath; } catch {}
+        }
+    }
+    if (!itemId) return null;
+    const safeId = sanitizeFilename(itemId);
+    const relativePath = path.join('highenergy', `${safeId}.npz`);
+    const r = safeJoin(pixelDataRoot, relativePath);
+    if (!r.safe) return null;
+    try { await fs.access(r.fullPath); return relativePath; } catch { return null; }
+}
+
 // Multer setup for file uploads (use actual filenames, no UUID)
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {

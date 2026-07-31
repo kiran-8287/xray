@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import ValidRegionEditor from "./ValidRegionEditor";
-import { Trash2, Edit3, CheckSquare, Sparkles, Loader2, X, Plus } from "lucide-react";
+import { Trash2, Edit3, CheckSquare, Sparkles, Loader2, X, Plus, Minus } from "lucide-react";
 import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName, clearCustomSubcategoriesCache } from "../../config/categories";
 import { API_BASE_URL } from "../../config/api";
 import AddSubcategoryModal from "../common/AddSubcategoryModal";
@@ -363,6 +363,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
   // Mass tag assignment state
   const [showMassTagSelector, setShowMassTagSelector] = useState(false);
+  const [massTagMode, setMassTagMode] = useState<"add" | "remove">("add");
   const [massSelectedTags, setMassSelectedTags] = useState<Set<string>>(new Set());
   const massTagSelectorRef = useRef<HTMLDivElement>(null);
 
@@ -412,13 +413,57 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
   const handleMassApplyToAll = () => {
     if (!massCategory) return;
-    setStaged((prev: any[]) =>
-      prev.map((s: any) => ({
-        ...s,
-        category: massCategory,
-        subcategory: massSubcategory,
-      }))
-    );
+
+    // Matches Mass Tags / Mass Auto-Gen scope rules:
+    // - If items are selected via checkboxes (selectedForMass non-empty), only touch those.
+    // - Otherwise, touch every staged item.
+    let indices: number[];
+    if (selectedForMass.size > 0) {
+      indices = [...selectedForMass].filter(idx => idx >= 0 && idx < staged.length);
+    } else {
+      indices = staged.map((_, idx) => idx);
+    }
+
+    const targetIsBags = massCategory === "bags";
+
+    setStaged((prev: any[]) => {
+      const copy = [...prev];
+      for (const idx of indices) {
+        const s = copy[idx];
+        if (!s) continue;
+
+        const wasBags = s.category === "bags";
+
+        // Assemble the new category payload
+        const next: any = {
+          ...s,
+          category: massCategory,
+          subcategory: massSubcategory || s.subcategory,
+        };
+
+        // -----------------------------------------------------------------
+        // Category changed FROM "bags" → anything else:
+        //   1. Valid regions are a bags-only concept. Strip them to prevent
+        //      stale polygon overlays and unnecessary backend data.
+        //   2. Also clean up any in-flight spinner state for this idx so
+        //      the row stops showing "Generating valid region…" forever.
+        // -----------------------------------------------------------------
+        if (wasBags && !targetIsBags) {
+          if (next.valid_region_points) {
+            delete next.valid_region_points;
+          }
+          setAutoGeneratingIndices(prevSet => {
+            if (!prevSet.has(idx)) return prevSet;
+            const nextSet = new Set(prevSet);
+            nextSet.delete(idx);
+            return nextSet;
+          });
+        }
+
+        copy[idx] = next;
+      }
+      return copy;
+    });
   };
 
   function openEdit(idx: number) {
@@ -429,8 +474,32 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
   function closeEdit(save = false) {
     if (save && editingIndex != null) {
+      // Compare final draft category vs the PREVIOUS category that was in
+      // staged. If the draft moved it away from bags but somehow still has
+      // valid_region_points attached (in case handleCategoryChange was
+      // bypassed via setEditDraft direct manipulation elsewhere), strip it
+      // and clean spinner state defensively here.
+      const prev = staged[editingIndex];
+      const prevCategory = normalizeCategoryName(prev?.category || "");
+      const draftCategory = normalizeCategoryName(editDraft?.category || "");
+
+      const isBags = (name: string) => name === "bags";
+
+      let finalDraft: any = editDraft;
+      if (isBags(prevCategory) && !isBags(draftCategory)) {
+        if (editDraft?.valid_region_points) {
+          finalDraft = { ...editDraft };
+          delete finalDraft.valid_region_points;
+        }
+        setAutoGeneratingIndices(prevSet => {
+          if (!prevSet.has(editingIndex)) return prevSet;
+          const nextSet = new Set(prevSet);
+          nextSet.delete(editingIndex);
+          return nextSet;
+        });
+      }
       const copy = [...staged];
-      copy[editingIndex] = editDraft;
+      copy[editingIndex] = finalDraft;
       setStaged(copy);
     }
     setEditingIndex(null);
@@ -467,12 +536,34 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
       });
       return;
     }
+    const wasBags = normalizeCategoryName(editDraft?.category || "") === "bags";
+    const isNowBags = normalizeCategoryName(categoryValue) === "bags";
     const subcategories = getLibrarySubcategories(categoryValue);
-    setEditDraft({
+
+    const nextDraft: any = {
       ...editDraft,
       category: categoryValue,
       subcategory: subcategories[0]?.name || "General",
-    });
+    };
+
+    // Category flipped FROM "bags" → something else: bags-only fields are no
+    // longer meaningful. Drop valid_region_points (overlay + backend storage)
+    // and abort any in-flight auto-gen so the row spinner doesn't hang.
+    if (wasBags && !isNowBags) {
+      if (nextDraft.valid_region_points) {
+        delete nextDraft.valid_region_points;
+      }
+      if (editingIndex != null) {
+        setAutoGeneratingIndices(prevSet => {
+          if (!prevSet.has(editingIndex)) return prevSet;
+          const nextSet = new Set(prevSet);
+          nextSet.delete(editingIndex);
+          return nextSet;
+        });
+      }
+    }
+
+    setEditDraft(nextDraft);
   };
 
   const handleSubcategoryChange = (subcategoryValue: string) => {
@@ -535,16 +626,37 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
         throw new Error(data.error || "Failed to auto-generate valid region");
       }
       
-      // Update staged item with generated region
-      const copy = [...staged];
-      copy[idx] = {
-        ...copy[idx],
-        valid_region_points: {
-          points: data.data.points,
-          simplifiedPoints: data.data.points
+      // Re-verify category at write-back time: user may have flipped this item
+      // from bags → threats/non-threats while the Python endpoint was running.
+      // If so, drop the region points (valid regions are bags-only) and clean
+      // the in-flight spinner state immediately.
+      setStaged(prev => {
+        const copy = [...prev];
+        const current = copy[idx];
+        if (!current || current.category !== "bags") {
+          if (current && current.valid_region_points) {
+            copy[idx] = { ...current };
+            delete copy[idx].valid_region_points;
+          }
+          // Also kill the spinner here for this idx (the finally block also
+          // does it, but doing it inside setStaged avoids a 1-frame race)
+          setAutoGeneratingIndices(prevSet => {
+            if (!prevSet.has(idx)) return prevSet;
+            const nextSet = new Set(prevSet);
+            nextSet.delete(idx);
+            return nextSet;
+          });
+          return copy;
         }
-      };
-      setStaged(copy);
+        copy[idx] = {
+          ...copy[idx],
+          valid_region_points: {
+            points: data.data.points,
+            simplifiedPoints: data.data.points
+          }
+        };
+        return copy;
+      });
       
       // Show success notification
       console.log(`Auto-generated valid region with ${data.data.points.length} points for item ${idx + 1}`);
@@ -569,6 +681,45 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   };
 
   const handleMassAutoGenerateRegion = async () => {
+    // -------------------------------------------------------------------------
+    // PREPASS: Any staged item whose category is NOT "bags" but still carries
+    // valid_region_points (leftover from user who e.g. mis-categorized a tip
+    // file as "bags", auto-generated its region, then flipped it back to
+    // threats/non-threats) gets the stale field removed here AND any in-flight
+    // generating state cleaned up for those indices. This keeps the canvas
+    // overlay and the backend payloads clean at generator-start.
+    // -------------------------------------------------------------------------
+    setStaged(prev => {
+      let mutated = false;
+      let copy: any[] | null = null;
+      const staleInFlightIdx: number[] = [];
+
+      for (let i = 0; i < prev.length; i++) {
+        const s = prev[i];
+        if (!s) continue;
+        if (s.category !== "bags" && s.valid_region_points) {
+          if (!copy) { copy = [...prev]; }
+          copy[i] = { ...s };
+          delete copy[i].valid_region_points;
+          mutated = true;
+          staleInFlightIdx.push(i);
+        }
+      }
+      if (staleInFlightIdx.length > 0) {
+        setAutoGeneratingIndices(prevSet => {
+          let nextSet: Set<number> | null = null;
+          for (const idx of staleInFlightIdx) {
+            if (prevSet.has(idx)) {
+              if (!nextSet) nextSet = new Set(prevSet);
+              nextSet.delete(idx);
+            }
+          }
+          return nextSet ?? prevSet;
+        });
+      }
+      return mutated ? copy! : prev;
+    });
+
     // Determine which indices to process:
     // - If items are selected (via checkboxes), use only those
     // - Otherwise, use all bag items
@@ -708,16 +859,41 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
               const resultsToFlush = pendingResults.splice(0, pendingResults.length);
               setStaged(prev => {
                 const copy = [...prev];
+                const categoryFlippedIdx: number[] = [];
                 for (const r of resultsToFlush) {
-                  if (r.success) {
-                    copy[r.idx] = {
-                      ...copy[r.idx],
-                      valid_region_points: {
-                        points: r.points,
-                        simplifiedPoints: r.points
-                      }
-                    };
+                  const current = copy[r.idx];
+                  if (!r.success || !current) continue;
+                  // Re-verify category at write-back time: if user flipped this
+                  // item from bags → threats/non-threats mid-generation, the
+                  // valid region is no longer meaningful. Drop the in-flight
+                  // points and track the idx so we can clean up its spinner.
+                  if (current.category !== "bags") {
+                    if (current.valid_region_points) {
+                      copy[r.idx] = { ...current };
+                      delete copy[r.idx].valid_region_points;
+                    }
+                    categoryFlippedIdx.push(r.idx);
+                    continue;
                   }
+                  copy[r.idx] = {
+                    ...copy[r.idx],
+                    valid_region_points: {
+                      points: r.points,
+                      simplifiedPoints: r.points
+                    }
+                  };
+                }
+                if (categoryFlippedIdx.length > 0) {
+                  setAutoGeneratingIndices(prevSet => {
+                    let nextSet: Set<number> | null = null;
+                    for (const idx of categoryFlippedIdx) {
+                      if (prevSet.has(idx)) {
+                        if (!nextSet) nextSet = new Set(prevSet);
+                        nextSet.delete(idx);
+                      }
+                    }
+                    return nextSet ?? prevSet;
+                  });
                 }
                 return copy;
               });
@@ -768,16 +944,37 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
       const batch = pendingResults.splice(0, pendingResults.length);
       setStaged(prev => {
         const copy = [...prev];
+        const categoryFlippedIdx: number[] = [];
         for (const r of batch) {
-          if (r.success) {
-            copy[r.idx] = {
-              ...copy[r.idx],
-              valid_region_points: {
-                points: r.points,
-                simplifiedPoints: r.points
-              }
-            };
+          const current = copy[r.idx];
+          if (!r.success || !current) continue;
+          if (current.category !== "bags") {
+            if (current.valid_region_points) {
+              copy[r.idx] = { ...current };
+              delete copy[r.idx].valid_region_points;
+            }
+            categoryFlippedIdx.push(r.idx);
+            continue;
           }
+          copy[r.idx] = {
+            ...copy[r.idx],
+            valid_region_points: {
+              points: r.points,
+              simplifiedPoints: r.points
+            }
+          };
+        }
+        if (categoryFlippedIdx.length > 0) {
+          setAutoGeneratingIndices(prevSet => {
+            let nextSet: Set<number> | null = null;
+            for (const idx of categoryFlippedIdx) {
+              if (prevSet.has(idx)) {
+                if (!nextSet) nextSet = new Set(prevSet);
+                nextSet.delete(idx);
+              }
+            }
+            return nextSet ?? prevSet;
+          });
         }
         return copy;
       });
@@ -876,7 +1073,9 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
           className="px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
         >
           <CheckSquare size={14} />
-          Apply to All
+          {selectedForMass.size > 0
+            ? `Apply to Selected (${selectedForMass.size})`
+            : "Apply to All"}
         </button>
         
         <div className="flex-1" />
@@ -917,9 +1116,109 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
           
           {showMassTagSelector && (
             <div ref={massTagSelectorRef} className="absolute top-full mt-2 left-0 p-3 border border-border rounded-lg bg-white shadow-xl z-50 w-[400px]">
-              <div className="text-xs font-semibold text-ink mb-2 font-heading">Assign Tags to Bag Items</div>
-              <div className="text-[10px] text-muted mb-2">Select tags to apply to all bag items (or selected items):</div>
-              <div className="space-y-1 max-h-64 overflow-y-auto">
+              {/* Mode toggle: Add / Remove */}
+              <div className="mb-2.5 flex gap-1 p-1 rounded-lg bg-surface/60 border border-border/50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMassTagMode("add");
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold transition-all ${
+                    massTagMode === "add"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "text-muted hover:text-ink hover:bg-white/60"
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-1 justify-center">
+                    <Plus size={12} /> Add Tags
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMassTagMode("remove");
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold transition-all ${
+                    massTagMode === "remove"
+                      ? "bg-rose-600 text-white shadow-sm"
+                      : "text-muted hover:text-ink hover:bg-white/60"
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-1 justify-center">
+                    <Minus size={12} /> Remove Tags
+                  </span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between mb-1">
+                <div className={`text-xs font-semibold font-heading ${
+                  massTagMode === "add" ? "text-emerald-700" : "text-rose-700"
+                }`}>
+                  {massTagMode === "add" ? "Assign Tags to Bag Items" : "Remove Tags from Bag Items"}
+                </div>
+                {/* Scope indicator */}
+                <span className="text-[10px] font-mono text-muted">
+                  Scope: {selectedForMass.size > 0 ? `${selectedForMass.size} selected` : "all bags"}
+                </span>
+              </div>
+
+              <div className="text-[10px] text-muted mb-2">
+                {massTagMode === "add"
+                  ? "Select tags to apply to all bag items (or selected items):"
+                  : "Select tags to remove from the following bag items (only items with these tags are affected):"}
+              </div>
+
+              {/* In remove mode: show summary of which items carry the currently-selected tags */}
+              {massTagMode === "remove" && (() => {
+                // Determine effective target indices (same rules as apply)
+                let targetIndices: number[] = [];
+                if (selectedForMass.size > 0) {
+                  targetIndices = [...selectedForMass].filter(idx => staged[idx]?.category === "bags");
+                } else {
+                  targetIndices = staged
+                    .map((s, idx) => ({ s, idx }))
+                    .filter(({ s }) => s.category === "bags")
+                    .map(({ idx }) => idx);
+                }
+                const selectedTagSlugs = Array.from(massSelectedTags);
+                // Items with at least one of the selected tags present in their .tags array
+                const itemsWithAny = targetIndices.filter(idx => {
+                  const t = staged[idx]?.tags || [];
+                  return selectedTagSlugs.some(slug => t.includes(slug));
+                });
+                const selectedCount = selectedTagSlugs.length;
+                return (
+                  <div className={`mb-2 rounded-lg border p-2 ${
+                    selectedCount === 0
+                      ? "bg-gray-50/60 border-gray-200 text-gray-500"
+                      : itemsWithAny.length === 0
+                        ? "bg-amber-50 border-amber-200 text-amber-800"
+                        : "bg-rose-50/80 border-rose-200 text-rose-900"
+                  }`}>
+                    {selectedCount === 0 ? (
+                      <div className="text-[10px]">
+                        <span className="font-semibold">No tags selected.</span> Pick one or more tags above to see what will change.
+                      </div>
+                    ) : itemsWithAny.length === 0 ? (
+                      <div className="text-[10px]">
+                        <span className="font-semibold">No matching items.</span> None of the {targetIndices.length} targeted bag items carry any of the {selectedCount} selected tag{selectedCount === 1 ? "" : "s"}.
+                      </div>
+                    ) : (
+                      <div className="text-[10px] leading-relaxed">
+                        <div>
+                          <span className="font-semibold">{itemsWithAny.length}</span> of <span className="font-semibold">{targetIndices.length}</span> targeted bag item{targetIndices.length === 1 ? "" : "s"}
+                          {" "}contain at least one of the {selectedCount} selected tag{selectedCount === 1 ? "" : "s"}.
+                        </div>
+                        <div className="text-rose-800/90 mt-0.5">
+                          These {itemsWithAny.length} item{itemsWithAny.length === 1 ? "" : "s"} will be modified.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div className="space-y-1 max-h-56 overflow-y-auto">
                 {LIBRARIES.find(l => l.slug === "non-threats")?.subcategories.map((sub) => {
                   const isSelected = massSelectedTags.has(sub.slug);
                   return (
@@ -927,7 +1226,9 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       key={sub.slug}
                       className={`flex items-center gap-2 p-1.5 rounded cursor-pointer text-xs ${
                         isSelected
-                          ? "bg-emerald-50 text-emerald-700"
+                          ? massTagMode === "add"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-rose-50 text-rose-700"
                           : "hover:bg-surface"
                       }`}
                     >
@@ -943,7 +1244,11 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                           }
                           setMassSelectedTags(newSet);
                         }}
-                        className="rounded border-gray-300"
+                        className={`rounded ${
+                          massTagMode === "add"
+                            ? "border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                            : "border-gray-300 text-rose-600 focus:ring-rose-500"
+                        }`}
                       />
                       <span>{sub.name}</span>
                     </label>
@@ -954,13 +1259,12 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                 <button
                   type="button"
                   onClick={() => {
-                    // Apply selected tags to all bag items (or selected ones)
                     const tagsToApply = Array.from(massSelectedTags);
                     if (tagsToApply.length === 0) {
                       setConfirmDialog({
                         isOpen: true,
                         title: "No Tags Selected",
-                        message: "Please select at least one tag",
+                        message: "Please select at least one tag.",
                         confirmLabel: "OK",
                         confirmVariant: "primary",
                         onConfirm: () => setConfirmDialog({ isOpen: false, title: "", message: "" }),
@@ -971,10 +1275,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                     // Determine which indices to update
                     let indicesToUpdate: number[] = [];
                     if (selectedForMass.size > 0) {
-                      // Apply to selected items only
                       indicesToUpdate = [...selectedForMass].filter(idx => staged[idx]?.category === "bags");
                     } else {
-                      // Apply to all bag items
                       indicesToUpdate = staged
                         .map((s, idx) => ({ s, idx }))
                         .filter(({ s }) => s.category === "bags")
@@ -985,7 +1287,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       setConfirmDialog({
                         isOpen: true,
                         title: "No Bag Items Found",
-                        message: "No bag items found to apply tags.",
+                        message: "No bag items found in scope.",
                         confirmLabel: "OK",
                         confirmVariant: "primary",
                         onConfirm: () => setConfirmDialog({ isOpen: false, title: "", message: "" }),
@@ -993,31 +1295,90 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       return;
                     }
 
-                    // Apply tags (merge with existing tags)
-                    const copy = [...staged];
-                    indicesToUpdate.forEach(idx => {
-                      copy[idx] = {
-                        ...copy[idx],
-                        tags: [...new Set([...copy[idx].tags || [], ...tagsToApply])]
-                      };
-                    });
-                    setStaged(copy);
+                    // ---- ADD MODE ----
+                    if (massTagMode === "add") {
+                      const copy = [...staged];
+                      indicesToUpdate.forEach(idx => {
+                        copy[idx] = {
+                          ...copy[idx],
+                          tags: [...new Set([...copy[idx].tags || [], ...tagsToApply])]
+                        };
+                      });
+                      setStaged(copy);
 
-                    // Close selector and reset
-                    setShowMassTagSelector(false);
-                    setMassSelectedTags(new Set());
-                    
-                    console.log(`Applied ${tagsToApply.length} tags to ${indicesToUpdate.length} bag items`);
+                      setShowMassTagSelector(false);
+                      setMassSelectedTags(new Set());
+
+                      console.log(`Applied ${tagsToApply.length} tags to ${indicesToUpdate.length} bag items`);
+                      return;
+                    }
+
+                    // ---- REMOVE MODE ----
+                    // First, narrow indicesToUpdate to only items that actually contain any of the tags being removed
+                    // (prevents a "0 changes made" confirmation dialog and keeps the counter honest)
+                    const tagSet = new Set(tagsToApply);
+                    const actuallyAffected = indicesToUpdate.filter(idx => {
+                      const t = staged[idx]?.tags || [];
+                      return t.some(tag => tagSet.has(tag));
+                    });
+
+                    if (actuallyAffected.length === 0) {
+                      setConfirmDialog({
+                        isOpen: true,
+                        title: "Nothing to Remove",
+                        message: `None of the targeted ${indicesToUpdate.length} bag item${indicesToUpdate.length === 1 ? "" : "s"} carry any of the ${tagsToApply.length} selected tag${tagsToApply.length === 1 ? "" : "s"}.`,
+                        confirmLabel: "OK",
+                        confirmVariant: "primary",
+                        onConfirm: () => setConfirmDialog({ isOpen: false, title: "", message: "" }),
+                      });
+                      return;
+                    }
+
+                    // Confirmation dialog for destructive remove operation
+                    setConfirmDialog({
+                      isOpen: true,
+                      title: "Remove Tags?",
+                      message:
+                        `You are about to remove ${tagsToApply.length} tag${tagsToApply.length === 1 ? "" : "s"} from ${actuallyAffected.length} bag item${actuallyAffected.length === 1 ? "" : "s"}. ` +
+                        `This action cannot be undone for these item${actuallyAffected.length === 1 ? "" : "s"}.`,
+                      confirmLabel: `Remove ${tagsToApply.length} Tag${tagsToApply.length === 1 ? "" : "s"}`,
+                      cancelLabel: "Cancel",
+                      confirmVariant: "danger",
+                      onConfirm: () => {
+                        const copy = [...staged];
+                        actuallyAffected.forEach(idx => {
+                          const prev = copy[idx]?.tags || [];
+                          copy[idx] = {
+                            ...copy[idx],
+                            tags: prev.filter(t => !tagSet.has(t)),
+                          };
+                        });
+                        setStaged(copy);
+
+                        setShowMassTagSelector(false);
+                        setMassSelectedTags(new Set());
+                        setConfirmDialog({ isOpen: false, title: "", message: "" });
+
+                        console.log(`Removed ${tagsToApply.length} tags from ${actuallyAffected.length} bag items`);
+                      },
+                    });
                   }}
-                  className="flex-1 px-3 py-1.5 bg-accent text-white text-xs rounded-lg hover:bg-accent/90"
+                  className={`flex-1 px-3 py-1.5 text-white text-xs rounded-lg font-semibold transition-all ${
+                    massTagMode === "add"
+                      ? "bg-emerald-600 hover:bg-emerald-700"
+                      : "bg-rose-600 hover:bg-rose-700"
+                  }`}
                 >
-                  Apply to {selectedForMass.size > 0 ? `Selected (${selectedForMass.size})` : "All Bags"}
+                  {massTagMode === "add"
+                    ? `Apply to ${selectedForMass.size > 0 ? `Selected (${selectedForMass.size})` : "All Bags"}`
+                    : `Remove from ${selectedForMass.size > 0 ? `Selected (${selectedForMass.size})` : "All Bags"}`}
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setShowMassTagSelector(false);
                     setMassSelectedTags(new Set());
+                    setMassTagMode("add");
                   }}
                   className="px-3 py-1.5 border border-border text-xs rounded-lg hover:bg-surface"
                 >

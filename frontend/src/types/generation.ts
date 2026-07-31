@@ -6,11 +6,16 @@ export type GenerationProgress = {
   total: number;
 };
 
+export type AutoSaveMode = "annotations" | "both";
+
 export type AutoSaveStatus = {
   enabled: boolean;
-  queued: number;       // total layouts sent to backend queue
-  batchesSent: number;  // how many /api/saved-layouts/batch-bulk calls made
-  errors: number;       // count of failed batch-bulk calls
+  mode: AutoSaveMode;
+  queued: number;
+  batchesSent: number;
+  errors: number;
+  pagesCompleted: number;
+  imagesSaved: number;
 };
 
 export type GenerationState = {
