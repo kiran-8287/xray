@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Loader2, CheckCircle2, XCircle, Grid3X3, X, FolderOpen, Download, Edit3, Save, Play } from "lucide-react";
 import { IoMdPhotos } from "react-icons/io";
 import { API_BASE_URL } from "../config/api";
-import { fetchWithTimeout } from "../lib/fetchWithTimeout";
+import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
 import { GenerationService } from "../lib/generationService";
 import type { Item } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
@@ -433,14 +433,14 @@ export default function CollagePage() {
 
     try {
       if (dirHandle) {
-        const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+        const response = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             objects: selectedCombination.objects,
             name: selectedCombination.id,
           }),
-        });
+        }, LONG_REQUEST_TIMEOUT_MS, 1);
 
         if (!response.ok) {
           throw new Error("Failed to render images");
@@ -464,7 +464,7 @@ export default function CollagePage() {
           imageUrl: data.high_url,
         });
       } else {
-        const response = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+        const response = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -472,7 +472,7 @@ export default function CollagePage() {
             name: selectedCombination.id,
             outputPath: outputPath || undefined,
           }),
-        });
+        }, LONG_REQUEST_TIMEOUT_MS, 1);
 
         if (!response.ok) {
           throw new Error("Failed to render images");
@@ -651,15 +651,15 @@ export default function CollagePage() {
             objects: { bag: bagObj, threats, "non-threats": nonThreats },
             createdAt: new Date().toISOString(),
           };
-          const response = await fetch(`${API_BASE_URL}/api/saved-layouts`, {
+          const response = await fetchWithTimeout(`${API_BASE_URL}/api/saved-layouts`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: comb.id, name: annotation, filepath: null, layout_json }),
-          });
+          }, LONG_REQUEST_TIMEOUT_MS, 1);
           if (response.ok) {
             savedCount++;
             try {
-              const renderRes = await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+              const renderRes = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -667,7 +667,7 @@ export default function CollagePage() {
                   name: comb.id,
                   outputPath: dirHandle ? undefined : (outputPath || undefined),
                 }),
-              });
+              }, LONG_REQUEST_TIMEOUT_MS, 1);
               if (dirHandle && renderRes.ok) {
                 const renderData = await renderRes.json();
                 const safeName = comb.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);

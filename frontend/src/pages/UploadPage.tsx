@@ -8,6 +8,7 @@ import { API_BASE_URL } from "../config/api";
 import { LIBRARIES_UI, getLibrarySubcategories } from "../config/categories";
 import ConfirmModal from "../components/common/ConfirmModal";
 import { concurrencyController, initializeConcurrencyPools, adjustConcurrencyForLoad } from "../lib/concurrencyController";
+import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
 
 const LIBRARIES = LIBRARIES_UI;
 const PAGE_SIZE = 100; // 100 files per batch — optimal for 12-core system (saturates worker pool, ~300MB peak RAM)
@@ -242,10 +243,10 @@ export default function UploadPage() {
       batchFiles.forEach((f) => formData.append("rawFiles", f));
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/process-raw-files`, {
+        const response = await fetchWithTimeout(`${API_BASE_URL}/api/process-raw-files`, {
           method: "POST",
           body: formData,
-        });
+        }, LONG_REQUEST_TIMEOUT_MS, 1);
 
         if (!response.ok) {
           throw new Error(`Server responded with ${response.status}`);
@@ -388,11 +389,11 @@ export default function UploadPage() {
         pixelDataFilename: s.pixelDataFilename,
       }));
 
-      const res = await fetch(`${API_BASE_URL}/api/items/batch-save`, {
+      const res = await fetchWithTimeout(`${API_BASE_URL}/api/items/batch-save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items: payloadItems }),
-      });
+      }, LONG_REQUEST_TIMEOUT_MS, 1);
 
       const data = await res.json();
       if (data.ok) {

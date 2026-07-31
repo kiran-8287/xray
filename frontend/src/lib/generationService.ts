@@ -21,6 +21,7 @@ import type {
 } from "../types/generation";
 import { getTransformedPolygon } from "./geometry";
 import { API_BASE_URL } from "../config/api";
+import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "./fetchWithTimeout";
 
 type Subscriber = (state: GenerationState) => void;
 
@@ -174,20 +175,20 @@ function comboToLayout(combo: CombinatorialResult): any {
 
 async function saveOneCombo(combo: CombinatorialResult, mode: AutoSaveMode): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE_URL}/api/saved-layouts`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/api/saved-layouts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(comboToLayout(combo)),
-    });
+    }, LONG_REQUEST_TIMEOUT_MS, 1);
     if (!res.ok) return false;
 
     if (mode === "both") {
       try {
-        await fetch(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+        await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ objects: combo.objects, name: combo.id }),
-        });
+        }, LONG_REQUEST_TIMEOUT_MS, 1);
         if (state.autoSaveStatus) {
           state.autoSaveStatus.imagesSaved++;
         }
