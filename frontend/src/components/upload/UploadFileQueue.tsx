@@ -192,9 +192,9 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     return null;
   }
 
-  // Pagination state — show 50 items per page to prevent UI lag with 1000+ items
+  // Show all 100 items per batch without inner pagination
   const [page, setPage] = useState(0);
-  const PER_PAGE = 50;
+  const PER_PAGE = 100;
   const totalPages = Math.max(1, Math.ceil(staged.length / PER_PAGE));
   const safePage = Math.min(page, totalPages - 1);
   const startIdx = safePage * PER_PAGE;

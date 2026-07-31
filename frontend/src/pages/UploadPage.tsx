@@ -10,7 +10,7 @@ import ConfirmModal from "../components/common/ConfirmModal";
 import { concurrencyController, initializeConcurrencyPools, adjustConcurrencyForLoad } from "../lib/concurrencyController";
 
 const LIBRARIES = LIBRARIES_UI;
-const PAGE_SIZE = 50; // 50 files per batch for fast rendering & background buffering
+const PAGE_SIZE = 100; // 100 files per batch — optimal for 12-core system (saturates worker pool, ~300MB peak RAM)
 
 export default function UploadPage() {
   const { files, setFiles, staged, setStaged, clearAll } = useUploadContext();
@@ -413,7 +413,7 @@ export default function UploadPage() {
       <div className="border-l-4 border-accent pl-4 mb-8">
         <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Upload Images</h2>
         <p className="text-sm text-muted mt-1">
-          Auto-partitioned 50-item batch streaming with instant pre-fetch buffer
+          Auto-partitioned 100-file batch streaming with 1-batch lookahead buffer
         </p>
       </div>
 
