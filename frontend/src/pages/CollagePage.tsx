@@ -10,7 +10,19 @@ import type { CombinatorialResult, FailureLog } from "../types/customization";
 import SyntheticPreview from "../components/collage/SyntheticPreview";
 import { getRectCorners, getTransformedPolygon } from "../lib/geometry";
 
+import type { GenerationParams, GenerationProgress, GenerationState, AutoSaveStatus } from "../types/generation";
+
 const ITEMS_PER_PAGE = 50;
+
+const toastStyles = `
+  @keyframes slide-down {
+    from { transform: translate(-50%, -20px); opacity: 0; }
+    to { transform: translate(-50%, 0); opacity: 1; }
+  }
+  .animate-slide-down { animation: slide-down 0.25s ease-out; }
+`;
+
+type CollageToast = { id: string; type: "info"; message: string };
 
 export default function CollagePage() {
   const navigate = useNavigate();
@@ -30,8 +42,35 @@ export default function CollagePage() {
   // Generation state from service
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<{ generated: number; total: number } | null>(null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus | null>(null);
+
+  // State for "Save as you go" auto-save toggle
+  const [autoSave, setAutoSave] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("libraryAutoSave");
+      return saved ? JSON.parse(saved) : false;
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleAutoSave = (enabled: boolean) => {
+    setAutoSave(enabled);
+    try {
+      localStorage.setItem("libraryAutoSave", JSON.stringify(enabled));
+    } catch { /* ignore */ }
+    GenerationService.setAutoSaveEnabled(enabled);
+  };
 
   const [currentPage, setCurrentPage] = useState(0);
+  const [pageInput, setPageInput] = useState<string>("1");
+  const [toasts, setToasts] = useState<CollageToast[]>([]);
+
+  const showToast = (type: CollageToast["type"], message: string) => {
+    const id = Math.random().toString(36).slice(2, 11);
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000);
+  };
 
   const [bulkSaveState, setBulkSaveState] = useState<{
     status: "idle" | "saving" | "success" | "error";
@@ -70,6 +109,10 @@ export default function CollagePage() {
     const unsub = GenerationService.subscribe((state) => {
       setIsGenerating(state.isGenerating);
       setGenerationProgress(state.progress);
+      setAutoSaveStatus(state.autoSaveStatus);
+      if (state.autoSaveStatus) {
+        setAutoSave(state.autoSaveStatus.enabled);
+      }
       if (state.combinations.length > 0) {
         setCombinations(state.combinations);
       }
@@ -803,6 +846,87 @@ export default function CollagePage() {
     (currentPage + 1) * ITEMS_PER_PAGE
   );
 
+  // Sync page input with actual 1-based current page
+  useEffect(() => {
+    setPageInput(String(currentPage + 1));
+  }, [currentPage]);
+
+  // Clamp currentPage if totalPages shrinks (e.g., combinations reset)
+  useEffect(() => {
+    const clamped = Math.min(currentPage, Math.max(0, totalPages - 1));
+    if (clamped !== currentPage) setCurrentPage(clamped);
+  }, [totalPages, currentPage, setCurrentPage]);
+
+  const clamp1Based = (n: number) => Math.min(totalPages, Math.max(1, Math.floor(n)));
+
+  const parsePageInput = (raw: string): { value: number; clamped: boolean; invalid: boolean; rawParsed: number | null } => {
+    const trimmed = raw.trim();
+    if (trimmed === "") return { value: currentPage + 1, clamped: false, invalid: true, rawParsed: null };
+    const digitsOnly = trimmed.replace(/\D/g, "");
+    if (digitsOnly === "") return { value: currentPage + 1, clamped: false, invalid: true, rawParsed: null };
+    if (digitsOnly.length > 9) {
+      const bigParsed = parseInt(digitsOnly, 10);
+      return { value: totalPages, clamped: true, invalid: false, rawParsed: isNaN(bigParsed) ? null : bigParsed };
+    }
+    const parsed = parseInt(digitsOnly, 10);
+    if (isNaN(parsed) || !isFinite(parsed)) return { value: currentPage + 1, clamped: false, invalid: true, rawParsed: null };
+    if (parsed < 1) return { value: 1, clamped: true, invalid: false, rawParsed: parsed };
+    if (parsed > totalPages) return { value: totalPages, clamped: true, invalid: false, rawParsed: parsed };
+    if (parsed === currentPage + 1) return { value: currentPage + 1, clamped: false, invalid: false, rawParsed: parsed };
+    return { value: parsed, clamped: false, invalid: false, rawParsed: parsed };
+  };
+
+  const handlePageInputBeforeInput = (e: React.FormEvent<HTMLInputElement>) => {
+    const ev = e.nativeEvent as InputEvent;
+    if (ev.inputType.startsWith("delete") || ev.data === null) return;
+    if (!/^\d+$/.test(ev.data)) e.preventDefault();
+  };
+
+  const handlePageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPageInput(e.target.value.replace(/\D/g, ""));
+  };
+
+  const goToPageFromInput = (value1Based: number, rawParsed: number | null, clamped: boolean) => {
+    if (clamped && rawParsed !== null) {
+      if (rawParsed > totalPages) {
+        showToast("info", `No page ${rawParsed} — max is ${totalPages}. Jumping to last page.`);
+      } else if (rawParsed < 1) {
+        showToast("info", `Page numbers start at 1. Jumping to page 1.`);
+      }
+    }
+    setCurrentPage(value1Based - 1);
+  };
+
+  const handlePageInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const { value, rawParsed, clamped } = parsePageInput(pageInput);
+      goToPageFromInput(value, rawParsed, clamped);
+      setPageInput(String(value));
+    } else if (e.key === "Escape") {
+      setPageInput(String(currentPage + 1));
+      (e.target as HTMLInputElement).blur();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setCurrentPage(Math.min(totalPages - 1, currentPage + 1));
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setCurrentPage(Math.max(0, currentPage - 1));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setCurrentPage(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setCurrentPage(Math.max(0, totalPages - 1));
+    }
+  };
+
+  const handlePageInputBlur = () => {
+    const { value, rawParsed, clamped } = parsePageInput(pageInput);
+    if (value !== currentPage + 1) goToPageFromInput(value, rawParsed, clamped);
+    setPageInput(String(value));
+  };
+
   return (
     <div className="max-w-6xl mx-auto py-8 px-6 animate-fade-in text-sm">
       {/* Header Row */}
@@ -811,10 +935,21 @@ export default function CollagePage() {
           <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Collage Images</h2>
         </div>
         <div className="flex items-center gap-3">
+          {/* Save as you go auto-save toggle */}
+          <label className="flex items-center gap-2 cursor-pointer bg-blue-50/80 hover:bg-blue-100/80 border border-blue-200/80 rounded-xl px-3.5 py-2 text-blue-900 font-medium transition-colors shadow-sm">
+            <input
+              type="checkbox"
+              checked={autoSave}
+              onChange={(e) => handleToggleAutoSave(e.target.checked)}
+              className="w-4 h-4 border border-blue-300 rounded bg-white text-blue-600 focus:outline-none focus:border-blue-500 cursor-pointer"
+            />
+            <span className="text-xs whitespace-nowrap font-semibold">Save as you go</span>
+          </label>
+
           <button
             onClick={() => setShowBulkSaveModal(true)}
             disabled={bulkSaveState.status === "saving" || combinations.length === 0 || isGenerating}
-            className="px-5 py-2.5 rounded-xl font-semibold text-white bg-blue-600 shadow-btn flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-5 py-2.5 rounded-xl font-semibold text-white bg-blue-600 shadow-btn flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             title="Bulk Save All Workspaces"
           >
             {bulkSaveState.status === "saving" ? (
@@ -976,6 +1111,23 @@ export default function CollagePage() {
         </div>
       )}
 
+      {/* Auto-Save Progress Banner */}
+      {autoSaveStatus?.enabled && (
+        <div className="mb-6 p-3 rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-800 flex items-center justify-between text-xs font-medium">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span>
+              <strong className="font-semibold">Auto-Save active:</strong> {autoSaveStatus.queued.toLocaleString()} layout(s) queued to disk across {autoSaveStatus.batchesSent} batch(es)
+            </span>
+          </div>
+          {autoSaveStatus.errors > 0 && (
+            <span className="text-rose-600 font-semibold px-2 py-0.5 rounded bg-rose-100 border border-rose-200">
+              {autoSaveStatus.errors} save error(s)
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Bulk Save Status Banner */}
       {bulkSaveState.status !== "idle" && (
         <div className={`mb-6 p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all duration-300 ${
@@ -1107,17 +1259,17 @@ export default function CollagePage() {
                   >
                     <ChevronLeft size={16} className="text-muted" />
                   </button>
-                  
+
                   {Array.from({ length: totalPages }, (_, i) => i).map((page) => {
-                    const showPage = page === 0 || page === totalPages - 1 || 
+                    const showPage = page === 0 || page === totalPages - 1 ||
                       Math.abs(page - currentPage) <= 1;
                     const showEllipsis = page === currentPage - 2 || page === currentPage + 2;
-                    
+
                     if (!showPage && !showEllipsis) return null;
                     if (!showPage && showEllipsis) {
                       return <span key={page} className="text-muted text-xs px-1">...</span>;
                     }
-                    
+
                     return (
                       <button
                         key={page}
@@ -1140,6 +1292,24 @@ export default function CollagePage() {
                   >
                     <ChevronRight size={16} className="text-muted" />
                   </button>
+
+                  <div className="flex items-center gap-1.5 ml-2">
+                    <span className="hidden sm:inline text-sm text-muted whitespace-nowrap">Page</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={pageInput}
+                      onChange={handlePageInputChange}
+                      onBeforeInput={handlePageInputBeforeInput}
+                      onKeyDown={handlePageInputKeyDown}
+                      onBlur={handlePageInputBlur}
+                      className="w-14 rounded-md border border-border bg-surface px-2 py-1 text-center text-sm font-medium text-ink focus:outline-none focus:ring-2 focus:ring-accent/50"
+                      placeholder="1"
+                      title="Type page number, then Enter. ArrowUp=Next, ArrowDown=Prev, Home=First, End=Last. Esc cancels."
+                    />
+                    <span className="text-sm text-muted whitespace-nowrap">/ {totalPages}</span>
+                  </div>
                 </div>
               )}
             </>
@@ -1246,6 +1416,20 @@ export default function CollagePage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      <style>{toastStyles}</style>
+      {toasts.length > 0 && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 pointer-events-none">
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              className="flex items-center gap-2 px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 shadow-lg text-sm font-medium animate-slide-down"
+            >
+              <span>{t.message}</span>
+            </div>
+          ))}
         </div>
       )}
     </div>

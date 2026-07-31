@@ -1,0 +1,4014 @@
+{
+  "scenario": "stress-timeout-loop",
+  "timestamp": "2026-07-31T05:12:54.612Z",
+  "targetUrl": "http://localhost:8080",
+  "quickMode": true,
+  "startPhase": 1,
+  "totalDuration_ms": 13896,
+  "totalDuration_formatted": "0.2 min",
+  "phasesCompleted": 1,
+  "phaseConfigs": [
+    {
+      "name": "warmup",
+      "duration_ms": 30000,
+      "concurrency": 5
+    },
+    {
+      "name": "ramp",
+      "duration_ms": 120000,
+      "concurrency": 50
+    },
+    {
+      "name": "sustained",
+      "duration_ms": 180000,
+      "concurrency": 100
+    },
+    {
+      "name": "breaking",
+      "duration_ms": 180000,
+      "concurrency": 200
+    },
+    {
+      "name": "cooldown",
+      "duration_ms": 60000,
+      "concurrency": 10
+    }
+  ],
+  "phases": [
+    {
+      "phaseName": "warmup",
+      "duration_ms": 13875,
+      "chainsExecuted": 130,
+      "chainsSuccessful": 0,
+      "chainsFailed": 130,
+      "breakingDetected": true,
+      "breakingReason": "20 consecutive timeouts",
+      "results": [
+        {
+          "chainId": 1,
+          "duration_ms": 29,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 2,
+          "duration_ms": 31,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 9
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 3,
+          "duration_ms": 27,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 4,
+          "duration_ms": 29,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 5,
+          "duration_ms": 27,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 6,
+          "duration_ms": 28,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 7,
+          "duration_ms": 31,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 7
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 8,
+          "duration_ms": 29,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 9,
+          "duration_ms": 30,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 10,
+          "duration_ms": 30,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 11,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 12,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 13,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 14,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 8
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 15,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 16,
+          "duration_ms": 27,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 17,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 18,
+          "duration_ms": 29,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 7
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 19,
+          "duration_ms": 29,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 20,
+          "duration_ms": 30,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 8
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 21,
+          "duration_ms": 27,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 22,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 23,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 24,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 25,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 26,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 27,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 28,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 29,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 30,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 31,
+          "duration_ms": 21,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 32,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 33,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 34,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 35,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 36,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 37,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 38,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 39,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 40,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 41,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 42,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 43,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 44,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 45,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 46,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 47,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 48,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 49,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 50,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 51,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 52,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 53,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 54,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 55,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 56,
+          "duration_ms": 21,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 57,
+          "duration_ms": 18,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 58,
+          "duration_ms": 19,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 59,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 60,
+          "duration_ms": 20,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 61,
+          "duration_ms": 21,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 62,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 63,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 64,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 65,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 66,
+          "duration_ms": 18,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 67,
+          "duration_ms": 21,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 68,
+          "duration_ms": 20,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 69,
+          "duration_ms": 19,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 70,
+          "duration_ms": 21,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 71,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 72,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 73,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 74,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 75,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 76,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 77,
+          "duration_ms": 21,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 78,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 79,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 80,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 81,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 82,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 83,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 84,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 85,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 86,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 87,
+          "duration_ms": 20,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 88,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 89,
+          "duration_ms": 21,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 90,
+          "duration_ms": 20,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 91,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 92,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 3
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 93,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 94,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 95,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 96,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 97,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 98,
+          "duration_ms": 28,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 99,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 100,
+          "duration_ms": 30,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 8
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 101,
+          "duration_ms": 28,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 8
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 7
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 102,
+          "duration_ms": 29,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 8
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 8
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 103,
+          "duration_ms": 30,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 9
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 8
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 104,
+          "duration_ms": 31,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 9
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 7
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 105,
+          "duration_ms": 31,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 9
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 106,
+          "duration_ms": 20,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 107,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 108,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 109,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 110,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 8
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 111,
+          "duration_ms": 30,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 11
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 112,
+          "duration_ms": 31,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 11
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 113,
+          "duration_ms": 31,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 11
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 6
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 114,
+          "duration_ms": 33,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 10
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 10
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 115,
+          "duration_ms": 32,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 9
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 9
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 116,
+          "duration_ms": 21,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 117,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 118,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 119,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 120,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 121,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 122,
+          "duration_ms": 25,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 9
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 123,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 124,
+          "duration_ms": 24,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 125,
+          "duration_ms": 26,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 8
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 126,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": false,
+              "error": "",
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": false,
+              "error": "",
+              "ms": 8
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 1
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 3
+        },
+        {
+          "chainId": 127,
+          "duration_ms": 22,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": false,
+              "error": "",
+              "ms": 2
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": false,
+              "error": "",
+              "ms": 9
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 1
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 3
+        },
+        {
+          "chainId": 128,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": false,
+              "error": "",
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": false,
+              "error": "",
+              "ms": 8
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 1
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 3
+        },
+        {
+          "chainId": 129,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": false,
+              "error": "",
+              "ms": 8
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": false,
+              "error": "",
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 1
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 3
+            }
+          ],
+          "allOk": false,
+          "failedCount": 3
+        },
+        {
+          "chainId": 130,
+          "duration_ms": 23,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": false,
+              "error": "",
+              "ms": 8
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": false,
+              "error": "",
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 1
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 3
+        }
+      ]
+    }
+  ],
+  "breakingPoint": {
+    "detected": true,
+    "phase": "warmup",
+    "reason": "20 consecutive timeouts"
+  },
+  "monitor": {
+    "snapshots": [
+      {
+        "timestamp": 1785474765742,
+        "elapsed_ms": 5026,
+        "rss_mb": 65,
+        "heapUsed_mb": 11,
+        "heapTotal_mb": 19,
+        "external_mb": 4,
+        "freeSystemMB": 1744,
+        "cpuLoad": 13,
+        "activeRequests": 0,
+        "consecutiveTimeouts": 0
+      },
+      {
+        "timestamp": 1785474770749,
+        "elapsed_ms": 10033,
+        "rss_mb": 68,
+        "heapUsed_mb": 11,
+        "heapTotal_mb": 20,
+        "external_mb": 4,
+        "freeSystemMB": 1714,
+        "cpuLoad": 13,
+        "activeRequests": 0,
+        "consecutiveTimeouts": 0
+      }
+    ],
+    "totalResponses": 520,
+    "responseTimePercentiles": {
+      "p50": 6,
+      "p95": 10,
+      "p99": 11
+    },
+    "peakRSS_mb": 68,
+    "peakHeap_mb": 11,
+    "finalMemoryGrowth_mb": 13,
+    "peakConcurrency": 0,
+    "peakCpuLoad": 13
+  },
+  "memoryTracker": {
+    "peakRSS_mb": 70,
+    "snapshotCount": 4,
+    "leakAnalysis": {
+      "leaking": false,
+      "totalGrowth_mb": 3,
+      "growthCount": 0,
+      "snapshotCount": 4,
+      "consecutiveGrowth": false
+    }
+  },
+  "thresholds": {
+    "errorRate60s": 0.5,
+    "memoryGrowthMB": 500,
+    "responseTimeMs": 30000,
+    "consecutiveTimeouts": 15,
+    "heapUsageRatio": 0.9,
+    "freeSystemMB": 500,
+    "concurrentMax": 200
+  }
+}

@@ -12,8 +12,8 @@ import type { Point } from "../types/geometry";
 const CANVAS_W = 800;
 const CANVAS_H = 600;
 
-// Batch size for incremental generation callbacks
-const INCREMENTAL_BATCH_SIZE = 5;
+// Default batch size for incremental generation callbacks (5000 per batch)
+const DEFAULT_BATCH_SIZE = 5000;
 
 // Performance optimization: Cache for transformed valid regions
 const validRegionCache = new Map<string, Point[]>();
@@ -134,8 +134,10 @@ function nonThreatComboHash(nonThreatIds: string[], positions: { x: number; y: n
 }
 
 function pickRandomSubset<T>(arr: T[], min: number, max: number): T[] {
-  const count = min + Math.floor(Math.random() * (max - min + 1));
-  return shuffleArray(arr).slice(0, Math.min(count, arr.length));
+  if (arr.length === 0) return [];
+  const range = max - min + 1;
+  const count = Math.min(min + Math.floor(Math.random() * (range <= 0 ? 1 : range)), arr.length);
+  return pickRandomK(arr, count);
 }
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -145,6 +147,39 @@ function shuffleArray<T>(arr: T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+function pickRandomK<T>(arr: T[], k: number): T[] {
+  const n = arr.length;
+  if (k <= 0) return [];
+  if (k >= n) return shuffleArray(arr);
+  if (k === 1) {
+    return [arr[Math.floor(Math.random() * n)]];
+  }
+  // Partial Fisher-Yates: only perform first k swaps, return those k elements.
+  // O(k) instead of O(n) for small k<<n (typical: k=1..4 threats, n=1000..10000).
+  const result = new Array(k);
+  // Use a sparse swap tracking via Map when n >> k to avoid full array copy.
+  if (k * 32 < n) {
+    const swapped = new Map<number, number>();
+    for (let i = 0; i < k; i++) {
+      const j = i + Math.floor(Math.random() * (n - i));
+      const iVal = swapped.has(i) ? swapped.get(i)! : i;
+      const jVal = swapped.has(j) ? swapped.get(j)! : j;
+      result[i] = arr[jVal];
+      swapped.set(j, iVal);
+      // i entry is no longer needed (we never go back), keep map small
+      swapped.delete(i);
+    }
+  } else {
+    const a = [...arr];
+    for (let i = 0; i < k; i++) {
+      const j = i + Math.floor(Math.random() * (n - i));
+      [a[i], a[j]] = [a[j], a[i]];
+      result[i] = a[i];
+    }
+  }
+  return result;
 }
 
 // Performance optimization: Get cached valid region
@@ -583,7 +618,7 @@ function generateMultiThreatPlacements(
       }
     }
 
-    const selectedThreats = shuffleArray(threats).slice(0, selectedCount);
+    const selectedThreats = pickRandomK(threats, selectedCount);
 
     // Try to place all selected threats (NO overlap checks - overlap allowed!)
     const placedThreats: { item: Item; x: number; y: number; rotation: number }[] = [];
@@ -620,7 +655,7 @@ function generateMultiThreatPlacements(
 
     if (nonThreats.length > 0) {
       const nonThreatCount = pickNonThreatCountByDistribution(nonThreatDistribution, nonThreats.length, requireAtLeastOneNonThreat);
-      selectedNonThreats = shuffleArray(nonThreats).slice(0, nonThreatCount);
+      selectedNonThreats = pickRandomK(nonThreats, nonThreatCount);
     }
 
     if (selectedNonThreats.length > 0) {
@@ -733,7 +768,7 @@ function generateThreatPlacements(
 
     if (nonThreats.length > 0) {
       const nonThreatCount = pickNonThreatCountByDistribution(nonThreatDistribution, nonThreats.length);
-      selectedNonThreats = shuffleArray(nonThreats).slice(0, nonThreatCount);
+      selectedNonThreats = pickRandomK(nonThreats, nonThreatCount);
     }
 
     if (selectedNonThreats.length > 0) {
@@ -830,7 +865,7 @@ function generateCleanCombinations(
       selectedNonThreats = [];
     } else {
       const nonThreatCount = pickNonThreatCountByDistribution(nonThreatDistribution, nonThreats.length, requireAtLeastOneNonThreat);
-      selectedNonThreats = shuffleArray(nonThreats).slice(0, nonThreatCount);
+      selectedNonThreats = pickRandomK(nonThreats, nonThreatCount);
     }
 
     // If requireAtLeastOneNonThreat is true and no non-threats selected, skip this attempt
@@ -1245,7 +1280,7 @@ export async function generateCombinations(
       }
       
       // Try to generate one combo with this threat count
-      const selectedThreats = shuffleArray(threats).slice(0, selectedCount);
+      const selectedThreats = pickRandomK(threats, selectedCount);
       const bagObj = createBagSceneObject(entry.bag);
       
       // Place threats with position tracking
@@ -1341,7 +1376,7 @@ export async function generateCombinations(
       
       if (nonThreats.length > 0) {
         const nonThreatCount = pickNonThreatCountByDistribution(nonThreatDistribution, nonThreats.length, requireAtLeastOneNonThreat);
-        selectedNonThreats = shuffleArray(nonThreats).slice(0, nonThreatCount);
+        selectedNonThreats = pickRandomK(nonThreats, nonThreatCount);
       }
       
       if (selectedNonThreats.length > 0) {
@@ -1444,8 +1479,10 @@ export async function generateCombinationsIncremental(
   threatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 },
   nonThreatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 },
   requireAtLeastOneNonThreat: boolean = false,
-  existingIds: string[] = []
+  existingIds: string[] = [],
+  batchSize: number = DEFAULT_BATCH_SIZE
 ): Promise<GenerationResult> {
+  const effectiveBatchSize = Math.max(1, batchSize);
   const startTime = Date.now();
   
   if (bags.length === 0) {
@@ -1676,7 +1713,7 @@ export async function generateCombinationsIncremental(
         if (selectionRandom <= sw.cumulative) { selectedCount = sw.count; break; }
       }
 
-      const selectedThreats = shuffleArray(threats).slice(0, selectedCount);
+      const selectedThreats = pickRandomK(threats, selectedCount);
       const bagObj = createBagSceneObject(entry.bag);
       const placedThreats: { item: Item; x: number; y: number; rotation: number }[] = [];
       let placementFailed = false;
@@ -1739,7 +1776,7 @@ export async function generateCombinationsIncremental(
       let selectedNonThreats: Item[] = [];
       if (nonThreats.length > 0) {
         const nonThreatCount = pickNonThreatCountByDistribution(nonThreatDistribution, nonThreats.length, requireAtLeastOneNonThreat);
-        selectedNonThreats = shuffleArray(nonThreats).slice(0, nonThreatCount);
+        selectedNonThreats = pickRandomK(nonThreats, nonThreatCount);
       }
       if (selectedNonThreats.length > 0) {
         nonThreatPositions = tryPlaceNonThreats(selectedNonThreats, bagObj, threatObjs);
@@ -1768,8 +1805,8 @@ export async function generateCombinationsIncremental(
       attemptsWithoutProgress = 0;
       consecutiveFailuresByCount[selectedCount] = 0;
 
-      // Emit batch callback every INCREMENTAL_BATCH_SIZE combos
-      if (results.length - lastBatchIndex >= INCREMENTAL_BATCH_SIZE) {
+      // Emit batch callback every effectiveBatchSize combos
+      if (results.length - lastBatchIndex >= effectiveBatchSize) {
         const batch = results.slice(lastBatchIndex);
         lastBatchIndex = results.length;
         onBatch(batch, { generated: results.length, total: k });
@@ -1793,8 +1830,8 @@ export async function generateCombinationsIncremental(
         results.push(combo);
         consecutiveFailures = 0;
 
-        // Emit batch callback every INCREMENTAL_BATCH_SIZE combos
-        if (results.length - lastBatchIndex >= INCREMENTAL_BATCH_SIZE) {
+        // Emit batch callback every effectiveBatchSize combos
+        if (results.length - lastBatchIndex >= effectiveBatchSize) {
           const batch = results.slice(lastBatchIndex);
           lastBatchIndex = results.length;
           onBatch(batch, { generated: results.length, total: k });

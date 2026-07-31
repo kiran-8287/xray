@@ -1,0 +1,932 @@
+{
+  "scenario": "stress-timeout-loop",
+  "timestamp": "2026-07-31T04:53:47.045Z",
+  "targetUrl": "http://localhost:8080",
+  "quickMode": true,
+  "startPhase": 1,
+  "totalDuration_ms": 7637,
+  "totalDuration_formatted": "0.1 min",
+  "phasesCompleted": 1,
+  "phaseConfigs": [
+    {
+      "name": "warmup",
+      "duration_ms": 30000,
+      "concurrency": 5
+    },
+    {
+      "name": "ramp",
+      "duration_ms": 120000,
+      "concurrency": 50
+    },
+    {
+      "name": "sustained",
+      "duration_ms": 180000,
+      "concurrency": 100
+    },
+    {
+      "name": "breaking",
+      "duration_ms": 180000,
+      "concurrency": 200
+    },
+    {
+      "name": "cooldown",
+      "duration_ms": 60000,
+      "concurrency": 10
+    }
+  ],
+  "phases": [
+    {
+      "phaseName": "warmup",
+      "duration_ms": 7598,
+      "chainsExecuted": 10,
+      "chainsSuccessful": 0,
+      "chainsFailed": 10,
+      "breakingDetected": true,
+      "breakingReason": "15 consecutive timeouts",
+      "results": [
+        {
+          "chainId": 1,
+          "duration_ms": 4631,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 8
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 20
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 36
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 29
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 31
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0010",
+              "ok": true,
+              "ms": 32
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0005",
+              "ok": true,
+              "ms": 36
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 22
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 1845
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 1361
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 1153
+            },
+            {
+              "pattern": "render-preview",
+              "ok": true,
+              "ms": 28
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 2,
+          "duration_ms": 4653,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 9
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 21
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 43
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 34
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 32
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0010",
+              "ok": true,
+              "ms": 30
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0005",
+              "ok": true,
+              "ms": 35
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 21
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 1843
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 1397
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 1150
+            },
+            {
+              "pattern": "render-preview",
+              "ok": true,
+              "ms": 19
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 3,
+          "duration_ms": 4639,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 10
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 22
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 35
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 37
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 30
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0010",
+              "ok": true,
+              "ms": 27
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0005",
+              "ok": true,
+              "ms": 55
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 16
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 1810
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 1361
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 1170
+            },
+            {
+              "pattern": "render-preview",
+              "ok": true,
+              "ms": 34
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 4,
+          "duration_ms": 4646,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 22
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 37
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 25
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 32
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0010",
+              "ok": true,
+              "ms": 32
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0005",
+              "ok": true,
+              "ms": 30
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 7
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 1894
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 1337
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 1184
+            },
+            {
+              "pattern": "render-preview",
+              "ok": true,
+              "ms": 15
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 5,
+          "duration_ms": 4657,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 10
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 23
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 35
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 34
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 27
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0010",
+              "ok": true,
+              "ms": 31
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0005",
+              "ok": true,
+              "ms": 53
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 16
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 1824
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 1385
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 1160
+            },
+            {
+              "pattern": "render-preview",
+              "ok": true,
+              "ms": 25
+            }
+          ],
+          "allOk": false,
+          "failedCount": 1
+        },
+        {
+          "chainId": 6,
+          "duration_ms": 1928,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 8
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 18
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 15
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 20
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0010",
+              "ok": true,
+              "ms": 20
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0005",
+              "ok": true,
+              "ms": 27
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 9
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 1112
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": false,
+              "ms": 658
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": false,
+              "ms": 6
+            },
+            {
+              "pattern": "render-preview",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 4
+        },
+        {
+          "chainId": 7,
+          "duration_ms": 1927,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 4
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 25
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 21
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 20
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0010",
+              "ok": true,
+              "ms": 19
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0005",
+              "ok": true,
+              "ms": 20
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 4
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 1077
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": false,
+              "ms": 707
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": false,
+              "ms": 7
+            },
+            {
+              "pattern": "render-preview",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 4
+        },
+        {
+          "chainId": 8,
+          "duration_ms": 1927,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 7
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 18
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 22
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 21
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0010",
+              "ok": true,
+              "ms": 19
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0005",
+              "ok": true,
+              "ms": 27
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 8
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 1094
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": false,
+              "ms": 674
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": false,
+              "ms": 6
+            },
+            {
+              "pattern": "render-preview",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 4
+        },
+        {
+          "chainId": 9,
+          "duration_ms": 1927,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 5
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 6
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 19
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 17
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 19
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0010",
+              "ok": true,
+              "ms": 20
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0005",
+              "ok": true,
+              "ms": 19
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 5
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 1092
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": false,
+              "ms": 693
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": false,
+              "ms": 8
+            },
+            {
+              "pattern": "render-preview",
+              "ok": false,
+              "ms": 5
+            }
+          ],
+          "allOk": false,
+          "failedCount": 4
+        },
+        {
+          "chainId": 10,
+          "duration_ms": 1927,
+          "operations": [
+            {
+              "endpoint": "GET /api/system/info",
+              "ok": true,
+              "status": 200,
+              "ms": 8
+            },
+            {
+              "endpoint": "POST /api/system/memory-check",
+              "ok": true,
+              "status": 200,
+              "ms": 8
+            },
+            {
+              "pattern": "paginated-read",
+              "pages": 1,
+              "errors": 0
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 22
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": true,
+              "ms": 16
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": true,
+              "ms": 20
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0010",
+              "ok": true,
+              "ms": 20
+            },
+            {
+              "pattern": "get-item",
+              "itemId": "P01X010-2024101200923_copy0005",
+              "ok": true,
+              "ms": 31
+            },
+            {
+              "pattern": "integrity-check",
+              "ok": false,
+              "ms": 11
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0007",
+              "ok": true,
+              "ms": 1129
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0004",
+              "ok": false,
+              "ms": 625
+            },
+            {
+              "pattern": "auto-valid-region",
+              "itemId": "P01X010-2024101200923_copy0003",
+              "ok": false,
+              "ms": 6
+            },
+            {
+              "pattern": "render-preview",
+              "ok": false,
+              "ms": 4
+            }
+          ],
+          "allOk": false,
+          "failedCount": 4
+        }
+      ]
+    }
+  ],
+  "breakingPoint": {
+    "detected": true,
+    "phase": "warmup",
+    "reason": "15 consecutive timeouts"
+  },
+  "monitor": {
+    "snapshots": [
+      {
+        "timestamp": 1785473624458,
+        "elapsed_ms": 5050,
+        "rss_mb": 61,
+        "heapUsed_mb": 16,
+        "heapTotal_mb": 31,
+        "external_mb": 4,
+        "freeSystemMB": 680,
+        "cpuLoad": 13,
+        "activeRequests": 0,
+        "consecutiveTimeouts": 0
+      }
+    ],
+    "totalResponses": 130,
+    "responseTimePercentiles": {
+      "p50": 21,
+      "p95": 1810,
+      "p99": 1894
+    },
+    "peakRSS_mb": 61,
+    "peakHeap_mb": 16,
+    "finalMemoryGrowth_mb": 7,
+    "peakConcurrency": 0,
+    "peakCpuLoad": 13
+  },
+  "memoryTracker": {
+    "peakRSS_mb": 64,
+    "snapshotCount": 4,
+    "leakAnalysis": {
+      "leaking": false,
+      "totalGrowth_mb": 1,
+      "growthCount": 0,
+      "snapshotCount": 4,
+      "consecutiveGrowth": false
+    }
+  },
+  "thresholds": {
+    "errorRate60s": 0.5,
+    "memoryGrowthMB": 500,
+    "responseTimeMs": 30000,
+    "consecutiveTimeouts": 15,
+    "heapUsageRatio": 0.9,
+    "freeSystemMB": 500,
+    "concurrentMax": 200
+  }
+}

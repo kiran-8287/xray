@@ -143,7 +143,8 @@ export default function UploadPage() {
   };
 
   /**
-   * Continuous queue worker loop: processes all scheduled page batches sequentially in background
+   * Continuous queue worker loop: processes all scheduled page batches sequentially in background.
+   * Re-drains the queue after each task to catch tasks added while a task was running.
    */
   const startQueueWorker = async () => {
     if (isProcessingRef.current) return;
@@ -151,6 +152,7 @@ export default function UploadPage() {
     setProcessing(true);
     adjustConcurrencyForLoad(true);
 
+    // Keep looping as long as there are tasks — new tasks may be enqueued while we process
     while (processingQueueRef.current.length > 0) {
       const task = processingQueueRef.current.shift();
       if (task) {
@@ -169,16 +171,23 @@ export default function UploadPage() {
   };
 
   /**
-   * Schedule processing for target page and pre-fetch next 2 pages in background buffer
+   * Schedule processing for target page and pre-fetch next 2 pages in background buffer.
+   * Tracks the furthest page ever scheduled to ensure the 2-page buffer always looks ahead.
    */
-  function triggerPageProcessing(allFilesList: File[], targetPage: number) {
-    const pagesToSchedule = [targetPage, targetPage + 1, targetPage + 2];
+  const furthestScheduledPageRef = useRef(0);
 
-    for (const p of pagesToSchedule) {
-      if (p < 1 || p > Math.ceil(allFilesList.length / PAGE_SIZE)) continue;
-      if (processedPagesRef.current.has(p)) continue; // already processed/processing
+  function triggerPageProcessing(allFilesList: File[], targetPage: number = 1) {
+    const totalPagesNow = Math.ceil(allFilesList.length / PAGE_SIZE);
+
+    // Maintain a strict 1-page lookahead buffer (active page + next 1 page) to minimize memory & CPU usage
+    const bufferEnd = Math.min(targetPage + 1, totalPagesNow);
+
+    for (let p = targetPage; p <= bufferEnd; p++) {
+      if (p < 1 || p > totalPagesNow) continue;
+      if (processedPagesRef.current.has(p)) continue; // already processed/queued
 
       processedPagesRef.current.add(p);
+      if (p > furthestScheduledPageRef.current) furthestScheduledPageRef.current = p;
 
       const startIndex = (p - 1) * PAGE_SIZE;
       const pageFiles = allFilesList.slice(startIndex, startIndex + PAGE_SIZE);
@@ -187,9 +196,10 @@ export default function UploadPage() {
       }
     }
 
-    // Start background queue processing
+    // (Re)start background queue processing if not already running
     startQueueWorker();
   }
+
 
   /**
    * Enqueue a 50-file page batch task
@@ -285,6 +295,26 @@ export default function UploadPage() {
     const startIdx = (activePage - 1) * PAGE_SIZE;
     return staged.slice(startIdx, startIdx + PAGE_SIZE);
   }, [staged, activePage]);
+
+  // Page-aware state updater to prevent active-page edits from overwriting master staged state
+  const setStagedForActivePage = useCallback(
+    (action: React.SetStateAction<any[]>) => {
+      setStaged((prevMaster) => {
+        const currentActiveItems = prevMaster.filter((item: any) => item.pageNumber === activePage);
+        const newActiveItems = typeof action === "function" ? action(currentActiveItems) : action;
+        const otherItems = prevMaster.filter((item: any) => item.pageNumber !== activePage);
+        return [...otherItems, ...newActiveItems];
+      });
+    },
+    [activePage]
+  );
+
+  const isNextBufferReady = useMemo(() => {
+    if (activePage >= totalPages) return false;
+    const nextPageNumber = activePage + 1;
+    const nextPageItems = staged.filter((item: any) => item.pageNumber === nextPageNumber);
+    return nextPageItems.length > 0;
+  }, [staged, activePage, totalPages]);
 
   // Save current page items to library and advance to pre-buffered next page
   const handleSaveCurrentPage = async () => {
@@ -390,20 +420,28 @@ export default function UploadPage() {
       <div className="space-y-6 max-w-5xl mx-auto">
         <UploadDropZone onFilesSelected={handleFilesSelected} />
 
-        {/* Processing indicator */}
-        {processing && (
-          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex items-center justify-between shadow-card">
-            <div className="flex items-center gap-3">
-              <div className="w-5 h-5 bg-amber-500 rounded-full text-white flex items-center justify-center flex-shrink-0 animate-pulse">
-                <span className="text-xs font-bold">...</span>
+        {/* Main Processing & Save Progress Bar Banner */}
+        {files.length > 0 && (
+          <div className="bg-panel border border-border rounded-2xl p-5 shadow-card space-y-2.5 max-w-5xl mx-auto">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-3 h-3 rounded-full ${processing ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+                <span className="text-sm font-semibold text-ink font-heading">
+                  Progress: {Math.min(files.length, (activePage - 1) * PAGE_SIZE + activePageItems.length)} / {files.length} files processed
+                </span>
               </div>
-              <span className="text-sm font-medium">
-                Pre-buffering batches in background… ({processingProgress?.n ?? 0} / {processingProgress?.total ?? 0} items)
+              <span className="text-xs font-mono font-semibold text-accent">
+                {Math.round((Math.min(files.length, (activePage - 1) * PAGE_SIZE + activePageItems.length) / files.length) * 100)}%
               </span>
             </div>
-            <span className="text-xs font-mono bg-amber-200/60 text-amber-900 px-2.5 py-1 rounded-lg">
-              2-Batch Buffer Active
-            </span>
+            <div className="w-full bg-surface-hover/80 h-2.5 rounded-full overflow-hidden border border-border/50">
+              <div
+                className="bg-emerald-600 h-full transition-all duration-300 rounded-full"
+                style={{
+                  width: `${Math.min(100, Math.round((Math.min(files.length, (activePage - 1) * PAGE_SIZE + activePageItems.length) / files.length) * 100))}%`
+                }}
+              />
+            </div>
           </div>
         )}
 
@@ -438,30 +476,30 @@ export default function UploadPage() {
 
         {/* Save Batch Controls */}
         {activePageItems.length > 0 && (
-          <div className="bg-panel rounded-2xl border border-border p-6 shadow-card max-w-5xl mx-auto flex items-center justify-between">
+          <div className="bg-panel rounded-2xl border border-border p-6 shadow-card max-w-5xl mx-auto flex items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-semibold text-ink font-heading">
-                Batch Ready ({activePageItems.length} Tiles)
+                Active Batch ({activePageItems.length} Files) — Step {activePage} of {totalPages}
               </h3>
-              <p className="text-xs text-muted mt-0.5">
-                Assign categories & valid regions, then save to append directly to library storage.
+              <p className="text-xs text-muted mt-1">
+                Assign categories & valid regions, then save to store in library and load the next batch.
               </p>
             </div>
 
             <button
               onClick={handleSaveCurrentPage}
               disabled={savingPage || activePageItems.length === 0}
-              className="flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all duration-150 transform active:scale-98"
+              className="flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all duration-150 transform active:scale-98 flex-shrink-0"
             >
               {savingPage ? (
                 <>
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Saving Batch to Library...
+                  Saving Batch & Loading Next...
                 </>
               ) : (
                 <>
                   <Save size={18} />
-                  Save Batch to Library
+                  {activePage === totalPages ? "Save Final Batch to Library" : "Save Batch & Load Next Batch"}
                 </>
               )}
             </button>
@@ -481,7 +519,7 @@ export default function UploadPage() {
           <UploadFileQueue
             files={files}
             staged={activePageItems}
-            setStaged={setStaged}
+            setStaged={setStagedForActivePage}
             setFiles={setFiles}
             uploading={savingPage}
             processing={processing}

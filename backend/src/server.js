@@ -22,6 +22,7 @@ import {
     getCatalog,
     updateItem,
     deleteItem,
+    bulkDeleteItems,
     itemExists,
     getBagByItemId,
     createBag,
@@ -40,6 +41,7 @@ import {
 } from "./lib/storage.js";
 import { PipelineTimer, PIPELINE_STAGES, generateOperationId } from "./lib/instrumentation.js";
 import { initializeSystemConfig, getWorkerCount, checkMemoryAvailability } from "./lib/systemInfo.js";
+import { enqueue as enqueueDiskWrite, getDiskWriteQueueStatus, drain as drainDiskQueue } from './lib/diskWriteQueue.js';
 
 const app = express();
 app.use(cors());
@@ -95,6 +97,8 @@ const {
     tempDir,
 } = config;
 
+import { spawn } from 'node:child_process';
+
 // Ensure directories exist
 await fs.mkdir(exportsRoot, { recursive: true });
 await fs.mkdir(libraryImagesRoot, { recursive: true });
@@ -103,6 +107,31 @@ await fs.mkdir(collageHighRoot, { recursive: true });
 await fs.mkdir(collageLowRoot, { recursive: true });
 await fs.mkdir(pixelDataRoot, { recursive: true });
 await fs.mkdir(tempDir, { recursive: true });
+
+// Fallback middleware: if a requested PNG is missing in libraryImagesRoot, generate it on-the-fly from pixel_data if available
+app.get('/data/library_images/:filename', async (req, res, next) => {
+    const filename = req.params.filename;
+    const targetPngPath = path.join(libraryImagesRoot, filename);
+    try {
+        await fs.access(targetPngPath);
+        return next();
+    } catch {
+        const itemId = path.basename(filename, path.extname(filename));
+        const npzPath = path.join(pixelDataRoot, 'highenergy', `${itemId}.npz`);
+        try {
+            await fs.access(npzPath);
+            const scriptPath = path.join(__dirname, 'lib', 'generate_png.py');
+            await new Promise((resolve, reject) => {
+                const proc = spawn('python', [scriptPath, '--npz-path', npzPath, '--png-path', targetPngPath]);
+                proc.on('close', (code) => code === 0 ? resolve() : reject(new Error('PNG generation failed')));
+                proc.on('error', reject);
+            });
+            return next();
+        } catch {
+            return next();
+        }
+    }
+});
 
 // Serve static files — map frontend URL paths to actual disk locations
 app.use('/data/library_images', express.static(libraryImagesRoot));
@@ -732,6 +761,70 @@ app.post('/api/saved-layouts', requireAuth, async (req, res) => {
     }
 });
 
+// ---- Batch-bulk save endpoint (MUST be registered before /:id route) ----
+
+// POST /api/saved-layouts/batch-bulk
+// Enqueue a batch of generated layouts for sequential disk write with pacing.
+// Responds immediately with queue status (non-blocking).
+app.post('/api/saved-layouts/batch-bulk', requireAuth, async (req, res) => {
+    try {
+        const { layouts } = req.body;
+        if (!Array.isArray(layouts) || layouts.length === 0) {
+            return res.status(400).json({ ok: false, error: 'layouts array is required' });
+        }
+
+        // Validate each layout has minimum required fields
+        for (const layout of layouts) {
+            if (!layout.name || !layout.layout_json) {
+                return res.status(400).json({ ok: false, error: 'Each layout must have name and layout_json' });
+            }
+            if (!layout.layout_json.objects) {
+                return res.status(400).json({ ok: false, error: 'Each layout_json must have an objects field' });
+            }
+            // Stamp an ID and timestamp if missing
+            if (!layout.id) {
+                layout.id = `auto_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+            }
+            if (!layout.created_at) {
+                layout.created_at = new Date().toISOString();
+            }
+        }
+
+        const status = enqueueDiskWrite(layouts);
+        res.json({
+            ok: true,
+            queued: layouts.length,
+            queueDepth: status.depth,
+            totalQueued: status.totalQueued,
+        });
+    } catch (err) {
+        console.error('[batch-bulk] Enqueue error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// GET /api/saved-layouts/batch-bulk/status
+// Poll current queue depth, in-flight state, and totals.
+app.get('/api/saved-layouts/batch-bulk/status', (_req, res) => {
+    try {
+        res.json({ ok: true, status: getDiskWriteQueueStatus() });
+    } catch (err) {
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// POST /api/saved-layouts/batch-bulk/drain
+// Wait for all pending batch writes to finish before returning.
+// Used by manual bulk-save to avoid double-write conflicts.
+app.post('/api/saved-layouts/batch-bulk/drain', requireAuth, async (_req, res) => {
+    try {
+        await drainDiskQueue();
+        res.json({ ok: true, status: getDiskWriteQueueStatus() });
+    } catch (err) {
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
 app.get('/api/saved-layouts/:id', async (req, res) => {
     try {
         const layout = await getSavedLayoutById(req.params.id);
@@ -1124,6 +1217,50 @@ app.delete("/api/items/:id", requireAuth, async (req, res) => {
         res.json({ ok: true });
     } catch (err) {
         console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Bulk delete items (single request, efficient O(partitions) instead of O(N) endpoints)
+app.post("/api/items/bulk-delete", requireAuth, async (req, res) => {
+    try {
+        const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.slice(0, 50000) : [];
+        if (ids.length === 0) {
+            return res.status(400).json({ ok: false, error: "Missing 'ids' array in request body" });
+        }
+        // 1) Fetch all items once to get filepaths (single catalog scan via storage)
+        const { deleted, items: deletedItems } = await bulkDeleteItems(ids);
+        // 2) Delete files
+        let fileErrors = 0;
+        for (const item of deletedItems) {
+            if (item && item.filepath) {
+                const safeResult = safeJoin(libraryImagesRoot, item.filepath);
+                if (safeResult.safe) {
+                    try {
+                        await fs.unlink(safeResult.fullPath);
+                    } catch (err) {
+                        if (err && err.code !== 'ENOENT') {
+                            fileErrors++;
+                        }
+                    }
+                }
+            }
+            // Also clean up pixel-data files if present
+            if (item && item.id) {
+                const safeId = sanitizeFilename(item.id);
+                for (const energy of ['highenergy', 'lowenergy']) {
+                    const r = safeJoin(pixelDataRoot, energy, `${safeId}.npz`);
+                    if (r.safe) {
+                        try { await fs.unlink(r.fullPath); } catch (err) {
+                            if (err && err.code !== 'ENOENT') { /* ignore */ }
+                        }
+                    }
+                }
+            }
+        }
+        res.json({ ok: true, deletedCount: deleted.length, requestedCount: ids.length, fileErrors });
+    } catch (err) {
+        console.error("bulkDelete error:", err);
         res.status(500).json({ ok: false, error: String(err) });
     }
 });
@@ -1777,9 +1914,16 @@ app.use((req, res) => {
 const port = config.port;
 
 if (config.nodeEnv !== 'test') {
-    app.listen(port, () => {
+    const server = app.listen(port, () => {
         logger.info({ port }, 'server_started');
     });
+
+    // Increase connection handling for high-concurrency stress tests
+    server.maxConnections = 1000;
+    server.keepAliveTimeout = 120000; // 2 minutes
+    server.headersTimeout = 125000;   // Slightly above keepAliveTimeout
+    server.timeout = 300000;          // 5 minutes
+    server.requestTimeout = 300000;   // 5 minutes
 }
 
 export default app;

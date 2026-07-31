@@ -381,6 +381,70 @@ async function deleteItem(id) {
   return false;
 }
 
+/**
+ * Bulk-delete multiple items efficiently: reads each partition ONCE, removes
+ * all matching IDs, then rewrites. Also returns metadata (item records) so
+ * callers can clean up files in one pass.
+ * @param {string[]} ids
+ * @returns {Promise<{ deleted: string[]; items: any[] }>}
+ */
+async function bulkDeleteItems(ids) {
+  if (!ids || ids.length === 0) return { deleted: [], items: [] };
+  await ensureDataDir();
+  const catalog = await getCatalog();
+  const idSet = new Set(ids);
+  const deletedIds = [];
+  const deletedItems = [];
+
+  for (const catKey of ['bags', 'threats', 'non_threats']) {
+    const catMeta = catalog.categories[catKey];
+    if (!catMeta) continue;
+
+    for (const pNum of catMeta.partitions) {
+      const partPath = getPartitionFilePath(catKey, pNum);
+      const items = await readJSONFile(partPath, []);
+      if (!Array.isArray(items) || items.length === 0) continue;
+
+      let partitionChanged = false;
+      const kept = [];
+      for (const it of items) {
+        if (it && it.id && idSet.has(it.id)) {
+          deletedIds.push(it.id);
+          deletedItems.push(it);
+          idSet.delete(it.id);
+          partitionChanged = true;
+        } else {
+          kept.push(it);
+        }
+      }
+
+      if (partitionChanged) {
+        await writeJSONFileAtomic(partPath, kept);
+      }
+    }
+  }
+
+  if (deletedIds.length > 0) {
+    // Rebuild catalog counts for affected categories from partition totals (accurate)
+    for (const catKey of ['bags', 'threats', 'non_threats']) {
+      const catMeta = catalog.categories[catKey];
+      if (!catMeta) continue;
+      let count = 0;
+      for (const pNum of catMeta.partitions) {
+        const partPath = getPartitionFilePath(catKey, pNum);
+        try {
+          const part = await readJSONFile(partPath, []);
+          count += (part || []).length;
+        } catch (_) { /* ignore */ }
+      }
+      catMeta.totalCount = count;
+    }
+    await saveCatalog(catalog);
+  }
+
+  return { deleted: deletedIds, items: deletedItems };
+}
+
 // ---- Bag valid region storage ----
 
 async function getBagByItemId(itemId) {
@@ -536,6 +600,7 @@ export {
   itemExists,
   updateItem,
   deleteItem,
+  bulkDeleteItems,
   getBagByItemId,
   createBag,
   updateBag,

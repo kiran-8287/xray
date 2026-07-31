@@ -1,6 +1,6 @@
 {
   "scenario": "concurrent-ops",
-  "timestamp": "2026-07-30T14:05:33.071Z",
+  "timestamp": "2026-07-31T04:36:44.566Z",
   "targetUrl": "http://localhost:8080",
   "quickMode": false,
   "results": [
@@ -8,527 +8,76 @@
       "runNumber": 1,
       "testType": "concurrent-users",
       "parameter": 1,
-      "passed": true,
-      "error": null,
+      "passed": false,
+      "error": "All operations failed",
       "concurrentUsers": 1,
       "totalOperations": 5,
-      "successfulOperations": 3,
-      "failedOperations": 2,
-      "successRate": 60,
-      "totalDuration_ms": 30524,
-      "avgOpDuration_ms": 4,
-      "memoryGrowth_mb": 1,
-      "peakRSS_mb": 75,
+      "successfulOperations": 0,
+      "failedOperations": 5,
+      "successRate": 0,
+      "totalDuration_ms": 10,
+      "avgOpDuration_ms": 0,
+      "memoryGrowth_mb": 0,
+      "peakRSS_mb": 104,
       "opBreakdown": {
         "get-items": {
           "total": 1,
-          "ok": 1,
-          "failed": 0,
-          "totalMs": 2
+          "ok": 0,
+          "failed": 1,
+          "totalMs": 0
         },
         "get-layouts": {
           "total": 1,
-          "ok": 1,
-          "failed": 0,
-          "totalMs": 2
+          "ok": 0,
+          "failed": 1,
+          "totalMs": 0
         },
         "update-item": {
           "total": 1,
           "ok": 0,
           "failed": 1,
-          "totalMs": 2
+          "totalMs": 0
         },
         "save-layout": {
           "total": 1,
           "ok": 0,
           "failed": 1,
-          "totalMs": 3
+          "totalMs": 0
         },
         "get-subcategories": {
           "total": 1,
-          "ok": 1,
-          "failed": 0,
-          "totalMs": 3
+          "ok": 0,
+          "failed": 1,
+          "totalMs": 0
         }
-      },
-      "memPostDelta_mb": 0,
-      "memFreedStatus": "FREED (clean)"
+      }
     },
     {
       "runNumber": 2,
-      "testType": "concurrent-users",
-      "parameter": 5,
-      "passed": true,
-      "error": null,
-      "concurrentUsers": 5,
-      "totalOperations": 25,
-      "successfulOperations": 15,
-      "failedOperations": 10,
-      "successRate": 60,
-      "totalDuration_ms": 30554,
-      "avgOpDuration_ms": 8,
-      "memoryGrowth_mb": -4,
-      "peakRSS_mb": 71,
-      "opBreakdown": {
-        "get-items": {
-          "total": 5,
-          "ok": 5,
-          "failed": 0,
-          "totalMs": 29
-        },
-        "get-layouts": {
-          "total": 5,
-          "ok": 5,
-          "failed": 0,
-          "totalMs": 20
-        },
-        "update-item": {
-          "total": 5,
-          "ok": 0,
-          "failed": 5,
-          "totalMs": 25
-        },
-        "save-layout": {
-          "total": 5,
-          "ok": 0,
-          "failed": 5,
-          "totalMs": 21
-        },
-        "get-subcategories": {
-          "total": 5,
-          "ok": 5,
-          "failed": 0,
-          "totalMs": 19
-        }
-      },
-      "memPostDelta_mb": -4,
-      "memFreedStatus": "FREED (clean)"
-    },
-    {
-      "runNumber": 3,
-      "testType": "concurrent-users",
-      "parameter": 10,
-      "passed": true,
-      "error": null,
-      "concurrentUsers": 10,
-      "totalOperations": 50,
-      "successfulOperations": 30,
-      "failedOperations": 20,
-      "successRate": 60,
-      "totalDuration_ms": 30572,
-      "avgOpDuration_ms": 16,
-      "memoryGrowth_mb": 1,
-      "peakRSS_mb": 71,
-      "opBreakdown": {
-        "get-items": {
-          "total": 10,
-          "ok": 10,
-          "failed": 0,
-          "totalMs": 116
-        },
-        "get-layouts": {
-          "total": 10,
-          "ok": 10,
-          "failed": 0,
-          "totalMs": 95
-        },
-        "update-item": {
-          "total": 10,
-          "ok": 0,
-          "failed": 10,
-          "totalMs": 92
-        },
-        "save-layout": {
-          "total": 10,
-          "ok": 0,
-          "failed": 10,
-          "totalMs": 91
-        },
-        "get-subcategories": {
-          "total": 10,
-          "ok": 10,
-          "failed": 0,
-          "totalMs": 87
-        }
-      },
-      "memPostDelta_mb": 1,
-      "memFreedStatus": "FREED (clean)"
-    },
-    {
-      "runNumber": 4,
-      "testType": "concurrent-users",
-      "parameter": 25,
-      "passed": true,
-      "error": null,
-      "concurrentUsers": 25,
-      "totalOperations": 125,
-      "successfulOperations": 75,
-      "failedOperations": 50,
-      "successRate": 60,
-      "totalDuration_ms": 30611,
-      "avgOpDuration_ms": 28,
-      "memoryGrowth_mb": 2,
-      "peakRSS_mb": 71,
-      "opBreakdown": {
-        "get-items": {
-          "total": 25,
-          "ok": 25,
-          "failed": 0,
-          "totalMs": 376
-        },
-        "get-layouts": {
-          "total": 25,
-          "ok": 25,
-          "failed": 0,
-          "totalMs": 421
-        },
-        "update-item": {
-          "total": 25,
-          "ok": 0,
-          "failed": 25,
-          "totalMs": 481
-        },
-        "save-layout": {
-          "total": 25,
-          "ok": 0,
-          "failed": 25,
-          "totalMs": 435
-        },
-        "get-subcategories": {
-          "total": 25,
-          "ok": 25,
-          "failed": 0,
-          "totalMs": 382
-        }
-      },
-      "memPostDelta_mb": 2,
-      "memFreedStatus": "FREED (clean)"
-    },
-    {
-      "runNumber": 5,
-      "testType": "concurrent-users",
-      "parameter": 50,
-      "passed": true,
-      "error": null,
-      "concurrentUsers": 50,
-      "totalOperations": 250,
-      "successfulOperations": 150,
-      "failedOperations": 100,
-      "successRate": 60,
-      "totalDuration_ms": 30708,
-      "avgOpDuration_ms": 54,
-      "memoryGrowth_mb": 3,
-      "peakRSS_mb": 71,
-      "opBreakdown": {
-        "get-items": {
-          "total": 50,
-          "ok": 50,
-          "failed": 0,
-          "totalMs": 1490
-        },
-        "get-layouts": {
-          "total": 50,
-          "ok": 50,
-          "failed": 0,
-          "totalMs": 1321
-        },
-        "update-item": {
-          "total": 50,
-          "ok": 0,
-          "failed": 50,
-          "totalMs": 1452
-        },
-        "save-layout": {
-          "total": 50,
-          "ok": 0,
-          "failed": 50,
-          "totalMs": 2243
-        },
-        "get-subcategories": {
-          "total": 50,
-          "ok": 50,
-          "failed": 0,
-          "totalMs": 1620
-        }
-      },
-      "memPostDelta_mb": 3,
-      "memFreedStatus": "FREED (clean)"
-    },
-    {
-      "runNumber": 6,
-      "testType": "concurrent-users",
-      "parameter": 100,
-      "passed": true,
-      "error": null,
-      "concurrentUsers": 100,
-      "totalOperations": 500,
-      "successfulOperations": 300,
-      "failedOperations": 200,
-      "successRate": 60,
-      "totalDuration_ms": 30922,
-      "avgOpDuration_ms": 108,
-      "memoryGrowth_mb": 2,
-      "peakRSS_mb": 77,
-      "opBreakdown": {
-        "get-items": {
-          "total": 100,
-          "ok": 100,
-          "failed": 0,
-          "totalMs": 7968
-        },
-        "get-layouts": {
-          "total": 100,
-          "ok": 100,
-          "failed": 0,
-          "totalMs": 6358
-        },
-        "update-item": {
-          "total": 100,
-          "ok": 0,
-          "failed": 100,
-          "totalMs": 6762
-        },
-        "save-layout": {
-          "total": 100,
-          "ok": 0,
-          "failed": 100,
-          "totalMs": 6619
-        },
-        "get-subcategories": {
-          "total": 100,
-          "ok": 100,
-          "failed": 0,
-          "totalMs": 4811
-        }
-      },
-      "memPostDelta_mb": 2,
-      "memFreedStatus": "FREED (clean)"
-    },
-    {
-      "runNumber": 7,
-      "testType": "concurrent-users",
-      "parameter": 200,
-      "passed": true,
-      "error": null,
-      "concurrentUsers": 200,
-      "totalOperations": 1000,
-      "successfulOperations": 600,
-      "failedOperations": 400,
-      "successRate": 60,
-      "totalDuration_ms": 31358,
-      "avgOpDuration_ms": 233,
-      "memoryGrowth_mb": 1,
-      "peakRSS_mb": 96,
-      "opBreakdown": {
-        "get-items": {
-          "total": 200,
-          "ok": 200,
-          "failed": 0,
-          "totalMs": 36036
-        },
-        "get-layouts": {
-          "total": 200,
-          "ok": 200,
-          "failed": 0,
-          "totalMs": 30945
-        },
-        "update-item": {
-          "total": 200,
-          "ok": 0,
-          "failed": 200,
-          "totalMs": 30233
-        },
-        "save-layout": {
-          "total": 200,
-          "ok": 0,
-          "failed": 200,
-          "totalMs": 22343
-        },
-        "get-subcategories": {
-          "total": 200,
-          "ok": 200,
-          "failed": 0,
-          "totalMs": 20133
-        }
-      },
-      "memPostDelta_mb": 2,
-      "memFreedStatus": "FREED (clean)"
-    },
-    {
-      "runNumber": 8,
-      "testType": "concurrent-users",
-      "parameter": 500,
-      "passed": true,
-      "error": null,
-      "concurrentUsers": 500,
-      "totalOperations": 2500,
-      "successfulOperations": 1281,
-      "failedOperations": 1219,
-      "successRate": 51,
-      "totalDuration_ms": 32544,
-      "avgOpDuration_ms": 596,
-      "memoryGrowth_mb": 0,
-      "peakRSS_mb": 135,
-      "opBreakdown": {
-        "get-items": {
-          "total": 500,
-          "ok": 500,
-          "failed": 0,
-          "totalMs": 172710
-        },
-        "get-layouts": {
-          "total": 500,
-          "ok": 500,
-          "failed": 0,
-          "totalMs": 160322
-        },
-        "update-item": {
-          "total": 500,
-          "ok": 0,
-          "failed": 500,
-          "totalMs": 184666
-        },
-        "save-layout": {
-          "total": 500,
-          "ok": 0,
-          "failed": 500,
-          "totalMs": 175140
-        },
-        "get-subcategories": {
-          "total": 500,
-          "ok": 281,
-          "failed": 219,
-          "totalMs": 71204
-        }
-      },
-      "memPostDelta_mb": 1,
-      "memFreedStatus": "FREED (clean)"
-    },
-    {
-      "runNumber": 9,
       "testType": "multi-threaded-apis",
       "parameter": 5,
-      "passed": true,
-      "error": null,
+      "passed": false,
+      "error": "All API calls failed",
       "threads": 5,
       "apisPerThread": 3,
       "totalCalls": 15,
-      "successCalls": 15,
-      "failCalls": 0,
-      "successRate": 100,
-      "totalDuration_ms": 18,
-      "avgCallDuration_ms": 1,
-      "memoryGrowth_mb": 1,
-      "peakRSS_mb": 135
-    },
-    {
-      "runNumber": 10,
-      "testType": "multi-threaded-apis",
-      "parameter": 10,
-      "passed": true,
-      "error": null,
-      "threads": 10,
-      "apisPerThread": 3,
-      "totalCalls": 30,
-      "successCalls": 30,
-      "failCalls": 0,
-      "successRate": 100,
-      "totalDuration_ms": 34,
-      "avgCallDuration_ms": 1,
-      "memoryGrowth_mb": 1,
-      "peakRSS_mb": 135
-    },
-    {
-      "runNumber": 11,
-      "testType": "multi-threaded-apis",
-      "parameter": 25,
-      "passed": true,
-      "error": null,
-      "threads": 25,
-      "apisPerThread": 3,
-      "totalCalls": 75,
-      "successCalls": 75,
-      "failCalls": 0,
-      "successRate": 100,
-      "totalDuration_ms": 73,
-      "avgCallDuration_ms": 1,
-      "memoryGrowth_mb": 3,
-      "peakRSS_mb": 135
-    },
-    {
-      "runNumber": 12,
-      "testType": "multi-threaded-apis",
-      "parameter": 50,
-      "passed": true,
-      "error": null,
-      "threads": 50,
-      "apisPerThread": 3,
-      "totalCalls": 150,
-      "successCalls": 150,
-      "failCalls": 0,
-      "successRate": 100,
-      "totalDuration_ms": 121,
-      "avgCallDuration_ms": 1,
-      "memoryGrowth_mb": 5,
-      "peakRSS_mb": 135
-    },
-    {
-      "runNumber": 13,
-      "testType": "multi-threaded-apis",
-      "parameter": 100,
-      "passed": true,
-      "error": null,
-      "threads": 100,
-      "apisPerThread": 3,
-      "totalCalls": 300,
-      "successCalls": 300,
-      "failCalls": 0,
-      "successRate": 100,
-      "totalDuration_ms": 225,
-      "avgCallDuration_ms": 1,
-      "memoryGrowth_mb": 10,
-      "peakRSS_mb": 136
-    },
-    {
-      "runNumber": 14,
-      "testType": "multi-threaded-apis",
-      "parameter": 200,
-      "passed": true,
-      "error": null,
-      "threads": 200,
-      "apisPerThread": 3,
-      "totalCalls": 600,
-      "successCalls": 600,
-      "failCalls": 0,
-      "successRate": 100,
-      "totalDuration_ms": 468,
-      "avgCallDuration_ms": 1,
+      "successCalls": 0,
+      "failCalls": 15,
+      "successRate": 0,
+      "totalDuration_ms": 15,
+      "avgCallDuration_ms": 0,
       "memoryGrowth_mb": 0,
-      "peakRSS_mb": 139
-    },
-    {
-      "runNumber": 15,
-      "testType": "multi-threaded-apis",
-      "parameter": 500,
-      "passed": true,
-      "error": null,
-      "threads": 500,
-      "apisPerThread": 3,
-      "totalCalls": 1500,
-      "successCalls": 1500,
-      "failCalls": 0,
-      "successRate": 100,
-      "totalDuration_ms": 1083,
-      "avgCallDuration_ms": 1,
-      "memoryGrowth_mb": -4,
-      "peakRSS_mb": 166
+      "peakRSS_mb": 104
     }
   ],
   "summary": {
-    "totalRuns": 15,
-    "passed": 15,
-    "failed": 0,
-    "peakMemoryMB": 166,
-    "breakingPoint": null
+    "totalRuns": 2,
+    "passed": 0,
+    "failed": 2,
+    "peakMemoryMB": 104,
+    "breakingPoint": {
+      "runNumber": 1,
+      "error": "All operations failed"
+    }
   }
 }

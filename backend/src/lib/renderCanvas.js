@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
+import config from './config.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const libraryImagesRoot = "B:\\library_images";
-const pixelDataRoot = "B:\\pixel_data";
+const libraryImagesRoot = config.libraryImagesRoot;
+const pixelDataRoot = config.pixelDataRoot;
 const READ_NPZ_SCRIPT = path.join(__dirname, 'read_npz.py');
 
 async function loadPixelData(filepath) {

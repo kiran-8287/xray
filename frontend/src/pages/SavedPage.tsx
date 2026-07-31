@@ -431,6 +431,8 @@ export default function SavedPage() {
   // Pagination state
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<PaginationInfo | null>(null);
+  // Mirrored text input for page-jump — kept in sync with `page` via useEffect
+  const [pageInput, setPageInput] = useState<string>("1");
   const pageSize = 50;
 
   // Load layouts with filters
@@ -471,6 +473,23 @@ export default function SavedPage() {
     setPage(1);
     loadLayouts(1);
   }, [selectedBagSubcategories, selectedThreatSubcategories, selectedTags, filterLogic, loadLayouts]);
+
+  // Keep the typed page-number input in sync whenever the real page number changes
+  // (e.g. Prev/Next buttons, filter resets that go back to page 1, deleting a layout that
+  // triggers a pagination.totalPages recalc that could put page out of range, etc.)
+  useEffect(() => {
+    setPageInput(String(page));
+  }, [page]);
+
+  // When pagination arrives (or its totalPages shrinks due to delete/filter),
+  // clamp `page` back into range if needed, and notify user via a light toast.
+  useEffect(() => {
+    if (!pagination) return;
+    const clamped = Math.min(Math.max(1, page), Math.max(1, pagination.totalPages));
+    if (clamped !== page) {
+      setPage(clamped);
+    }
+  }, [pagination, page]);
 
   // Load on page change
   useEffect(() => {
@@ -534,6 +553,79 @@ export default function SavedPage() {
     if (lower === "bag" || lower === "bags") return { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" };
     if (lower === "threat" || lower === "threats") return { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200" };
     return { bg: "bg-gray-50", text: "text-gray-600", border: "border-gray-200" };
+  };
+
+  // -------- Pagination jump-input (robust edge-case handling) --------
+  const maxPageForInput = Math.max(1, pagination?.totalPages ?? 1);
+
+  const clampPage = (n: number) => Math.min(maxPageForInput, Math.max(1, Math.floor(n)));
+
+  const parsePageInput = (raw: string): { value: number; clamped: boolean; invalid: boolean; rawParsed: number | null } => {
+    const trimmed = raw.trim();
+    if (trimmed === "") return { value: page, clamped: false, invalid: true, rawParsed: null };
+    const digitsOnly = trimmed.replace(/\D/g, "");
+    if (digitsOnly === "") return { value: page, clamped: false, invalid: true, rawParsed: null };
+    if (digitsOnly.length > 9) {
+      const bigParsed = parseInt(digitsOnly, 10);
+      return { value: maxPageForInput, clamped: true, invalid: false, rawParsed: isNaN(bigParsed) ? null : bigParsed };
+    }
+    const parsed = parseInt(digitsOnly, 10);
+    if (isNaN(parsed) || !isFinite(parsed)) return { value: page, clamped: false, invalid: true, rawParsed: null };
+    if (parsed < 1) return { value: 1, clamped: true, invalid: false, rawParsed: parsed };
+    if (parsed > maxPageForInput) return { value: maxPageForInput, clamped: true, invalid: false, rawParsed: parsed };
+    if (parsed === page) return { value: page, clamped: false, invalid: false, rawParsed: parsed };
+    return { value: parsed, clamped: false, invalid: false, rawParsed: parsed };
+  };
+
+  const handlePageInputBeforeInput = (e: React.FormEvent<HTMLInputElement>) => {
+    const ev = e.nativeEvent as InputEvent;
+    if (ev.inputType.startsWith("delete") || ev.data === null) return;
+    if (!/^\d+$/.test(ev.data)) e.preventDefault();
+  };
+
+  const handlePageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPageInput(e.target.value.replace(/\D/g, ""));
+  };
+
+  const goToPageFromInput = (value: number, rawParsed: number | null, clamped: boolean) => {
+    if (clamped && rawParsed !== null) {
+      if (rawParsed > maxPageForInput) {
+        showToast("info", `No page ${rawParsed} — max is ${maxPageForInput}. Jumping to last page.`);
+      } else if (rawParsed < 1) {
+        showToast("info", `Page numbers start at 1. Jumping to page 1.`);
+      }
+    }
+    setPage(value);
+  };
+
+  const handlePageInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const { value, rawParsed, clamped } = parsePageInput(pageInput);
+      goToPageFromInput(value, rawParsed, clamped);
+      setPageInput(String(value));
+    } else if (e.key === "Escape") {
+      setPageInput(String(page));
+      (e.target as HTMLInputElement).blur();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setPage(clampPage(page + 1));
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setPage(clampPage(page - 1));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setPage(1);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setPage(maxPageForInput);
+    }
+  };
+
+  const handlePageInputBlur = () => {
+    const { value, rawParsed, clamped } = parsePageInput(pageInput);
+    if (value !== page) goToPageFromInput(value, rawParsed, clamped);
+    setPageInput(String(value));
   };
 
   const handleClearFilters = () => {
@@ -849,22 +941,38 @@ export default function SavedPage() {
           {pagination && (
             <div className="mt-4 flex items-center justify-between gap-3">
               <p className="text-sm text-muted">
-                Showing {((pagination.page - 1) * pagination.limit) + 1}-{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
+                Showing {pagination.total === 0 ? 0 : ((pagination.page - 1) * pagination.limit) + 1}-{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
               </p>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={pagination.page <= 1}
+                  disabled={pagination.page <= 1 || pagination.totalPages <= 1}
                   className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Prev
                 </button>
-                <span className="text-sm text-muted">
-                  Page {pagination.page} / {pagination.totalPages}
-                </span>
+                {/* Direct page-number input */}
+                <div className="flex items-center gap-1.5">
+                  <span className="hidden sm:inline text-sm text-muted whitespace-nowrap">Page</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={pageInput}
+                    onChange={handlePageInputChange}
+                    onBeforeInput={handlePageInputBeforeInput}
+                    onKeyDown={handlePageInputKeyDown}
+                    onBlur={handlePageInputBlur}
+                    className="w-14 rounded-md border border-border bg-surface px-2 py-1 text-center text-sm font-medium text-ink focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-40"
+                    placeholder="1"
+                    title="Type page number, then Enter. Arrow keys, Home, End also work. Esc cancels."
+                    disabled={pagination.totalPages <= 1}
+                  />
+                  <span className="text-sm text-muted whitespace-nowrap">/ {pagination.totalPages}</span>
+                </div>
                 <button
                   onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
-                  disabled={pagination.page >= pagination.totalPages}
+                  disabled={pagination.page >= pagination.totalPages || pagination.totalPages <= 1}
                   className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-ink disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Next

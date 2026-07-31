@@ -1,6 +1,6 @@
 {
   "scenario": "upload-stress",
-  "timestamp": "2026-07-30T13:56:43.360Z",
+  "timestamp": "2026-07-31T04:35:02.080Z",
   "targetUrl": "http://localhost:8080",
   "quickMode": false,
   "results": [
@@ -9,28 +9,495 @@
       "config": "5 files x 2 concurrent",
       "files": 5,
       "concurrency": 2,
-      "passed": false,
-      "error": "Upload timeout after 60000ms",
-      "peakRSS_mb": 57,
-      "memoryGrowth_mb": -1,
-      "uploadDuration_ms": 0,
-      "bulkOpsDuration_ms": 0,
-      "totalDuration_ms": 60035,
+      "passed": true,
+      "error": null,
+      "peakRSS_mb": 61,
+      "memoryGrowth_mb": 0,
+      "uploadDuration_ms": 193,
+      "bulkOpsDuration_ms": 103,
+      "totalDuration_ms": 214,
       "processedCount": 0,
-      "failedCount": 0,
-      "bulkOpsResults": [],
+      "failedCount": 5,
+      "bulkOpsResults": [
+        {
+          "operation": "assign-category",
+          "id": "uploaded_0",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 71
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_1",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 7
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_2",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 7
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_3",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 6
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_4",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 6
+        },
+        {
+          "operation": "auto-valid-region-batch",
+          "count": 5,
+          "status": 200,
+          "ok": true,
+          "duration_ms": 6
+        }
+      ],
       "memoryBefore": 8,
-      "memoryAfter": 7
+      "memoryAfter": 8
+    },
+    {
+      "runNumber": 2,
+      "config": "10 files x 5 concurrent",
+      "files": 10,
+      "concurrency": 5,
+      "passed": true,
+      "error": null,
+      "peakRSS_mb": 62,
+      "memoryGrowth_mb": 1,
+      "uploadDuration_ms": 226,
+      "bulkOpsDuration_ms": 37,
+      "totalDuration_ms": 227,
+      "processedCount": 0,
+      "failedCount": 10,
+      "bulkOpsResults": [
+        {
+          "operation": "assign-category",
+          "id": "uploaded_0",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 12
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_1",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 5
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_2",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 5
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_3",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 5
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_4",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 7
+        },
+        {
+          "operation": "auto-valid-region-batch",
+          "count": 10,
+          "status": 200,
+          "ok": true,
+          "duration_ms": 3
+        }
+      ],
+      "memoryBefore": 8,
+      "memoryAfter": 9
+    },
+    {
+      "runNumber": 3,
+      "config": "20 files x 10 concurrent",
+      "files": 20,
+      "concurrency": 10,
+      "passed": true,
+      "error": null,
+      "peakRSS_mb": 51,
+      "memoryGrowth_mb": 0,
+      "uploadDuration_ms": 367,
+      "bulkOpsDuration_ms": 41,
+      "totalDuration_ms": 368,
+      "processedCount": 0,
+      "failedCount": 20,
+      "bulkOpsResults": [
+        {
+          "operation": "assign-category",
+          "id": "uploaded_0",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 21
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_1",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 4
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_2",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 4
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_3",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 4
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_4",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 4
+        },
+        {
+          "operation": "auto-valid-region-batch",
+          "count": 10,
+          "status": 200,
+          "ok": true,
+          "duration_ms": 4
+        }
+      ],
+      "memoryBefore": 9,
+      "memoryAfter": 9
+    },
+    {
+      "runNumber": 4,
+      "config": "50 files x 20 concurrent",
+      "files": 50,
+      "concurrency": 20,
+      "passed": true,
+      "error": null,
+      "peakRSS_mb": 52,
+      "memoryGrowth_mb": 0,
+      "uploadDuration_ms": 1052,
+      "bulkOpsDuration_ms": 60,
+      "totalDuration_ms": 1053,
+      "processedCount": 0,
+      "failedCount": 50,
+      "bulkOpsResults": [
+        {
+          "operation": "assign-category",
+          "id": "uploaded_0",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 39
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_1",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 4
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_2",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 5
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_3",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 5
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_4",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 4
+        },
+        {
+          "operation": "auto-valid-region-batch",
+          "count": 10,
+          "status": 200,
+          "ok": true,
+          "duration_ms": 3
+        }
+      ],
+      "memoryBefore": 9,
+      "memoryAfter": 9
+    },
+    {
+      "runNumber": 5,
+      "config": "100 files x 50 concurrent",
+      "files": 100,
+      "concurrency": 50,
+      "passed": true,
+      "error": null,
+      "peakRSS_mb": 49,
+      "memoryGrowth_mb": 0,
+      "uploadDuration_ms": 2992,
+      "bulkOpsDuration_ms": 131,
+      "totalDuration_ms": 2993,
+      "processedCount": 0,
+      "failedCount": 100,
+      "bulkOpsResults": [
+        {
+          "operation": "assign-category",
+          "id": "uploaded_0",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 108
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_1",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 4
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_2",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 4
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_3",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 5
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_4",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 6
+        },
+        {
+          "operation": "auto-valid-region-batch",
+          "count": 10,
+          "status": 200,
+          "ok": true,
+          "duration_ms": 4
+        }
+      ],
+      "memoryBefore": 8,
+      "memoryAfter": 8
+    },
+    {
+      "runNumber": 6,
+      "config": "200 files x 100 concurrent",
+      "files": 200,
+      "concurrency": 100,
+      "passed": true,
+      "error": null,
+      "peakRSS_mb": 50,
+      "memoryGrowth_mb": 0,
+      "uploadDuration_ms": 5370,
+      "bulkOpsDuration_ms": 406,
+      "totalDuration_ms": 5371,
+      "processedCount": 0,
+      "failedCount": 200,
+      "bulkOpsResults": [
+        {
+          "operation": "assign-category",
+          "id": "uploaded_0",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 376
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_1",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 5
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_2",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 7
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_3",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 6
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_4",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 7
+        },
+        {
+          "operation": "auto-valid-region-batch",
+          "count": 10,
+          "status": 200,
+          "ok": true,
+          "duration_ms": 5
+        }
+      ],
+      "memoryBefore": 8,
+      "memoryAfter": 8
+    },
+    {
+      "runNumber": 7,
+      "config": "500 files x 200 concurrent",
+      "files": 500,
+      "concurrency": 200,
+      "passed": true,
+      "error": null,
+      "peakRSS_mb": 51,
+      "memoryGrowth_mb": 0,
+      "uploadDuration_ms": 11078,
+      "bulkOpsDuration_ms": 430,
+      "totalDuration_ms": 11080,
+      "processedCount": 0,
+      "failedCount": 500,
+      "bulkOpsResults": [
+        {
+          "operation": "assign-category",
+          "id": "uploaded_0",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 403
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_1",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 6
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_2",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 6
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_3",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 5
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_4",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 6
+        },
+        {
+          "operation": "auto-valid-region-batch",
+          "count": 10,
+          "status": 200,
+          "ok": true,
+          "duration_ms": 4
+        }
+      ],
+      "memoryBefore": 8,
+      "memoryAfter": 8
+    },
+    {
+      "runNumber": 8,
+      "config": "1000 files x 500 concurrent",
+      "files": 1000,
+      "concurrency": 500,
+      "passed": true,
+      "error": null,
+      "peakRSS_mb": 51,
+      "memoryGrowth_mb": 0,
+      "uploadDuration_ms": 29304,
+      "bulkOpsDuration_ms": 755,
+      "totalDuration_ms": 29308,
+      "processedCount": 0,
+      "failedCount": 1000,
+      "bulkOpsResults": [
+        {
+          "operation": "assign-category",
+          "id": "uploaded_0",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 717
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_1",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 9
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_2",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 11
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_3",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 10
+        },
+        {
+          "operation": "assign-category",
+          "id": "uploaded_4",
+          "status": 404,
+          "ok": false,
+          "duration_ms": 5
+        },
+        {
+          "operation": "auto-valid-region-batch",
+          "count": 10,
+          "status": 200,
+          "ok": true,
+          "duration_ms": 3
+        }
+      ],
+      "memoryBefore": 8,
+      "memoryAfter": 8
     }
   ],
   "summary": {
-    "totalRuns": 1,
-    "passed": 0,
-    "failed": 1,
-    "peakMemoryMB": 57,
-    "breakingPoint": {
-      "runNumber": 1,
-      "error": "Upload timeout after 60000ms"
-    }
+    "totalRuns": 8,
+    "passed": 8,
+    "failed": 0,
+    "peakMemoryMB": 62,
+    "breakingPoint": null
   }
 }

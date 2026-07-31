@@ -256,10 +256,23 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   // Paginated removeIndex - called by JSX with page-local indices
   const removeIndex = (pageIdx: number) => {
     const copy = [...staged];
-    copy.splice(globalIdx(pageIdx), 1);
+    const targetIdx = globalIdx(pageIdx);
+    const removedItem = copy[targetIdx];
+    copy.splice(targetIdx, 1);
     setStaged(copy);
+
     const filesCopy = [...files];
-    filesCopy.splice(globalIdx(pageIdx), 1);
+    if (removedItem && (removedItem.file || removedItem.itemId)) {
+      const targetName = removedItem.file?.name || removedItem.itemId;
+      const idxInFiles = filesCopy.findIndex(
+        (f) => f.name === targetName || f === removedItem.file
+      );
+      if (idxInFiles !== -1) {
+        filesCopy.splice(idxInFiles, 1);
+      }
+    } else if (targetIdx < filesCopy.length) {
+      filesCopy.splice(targetIdx, 1);
+    }
     setFiles(filesCopy);
   };
   

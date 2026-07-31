@@ -1,10 +1,15 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { Folder, Check, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { BsFillLuggageFill } from 'react-icons/bs';
 import { GiPistolGun } from 'react-icons/gi';
 import { LuFolderCheck } from 'react-icons/lu';
 import type { Item } from '../../types/library';
 import { getCategoryConfig } from '../../config/categories';
+
+type SidebarSelectionStats = {
+  byCategory: Record<string, { selected: number; total: number }>;
+  bySubcategory: Record<string, Record<string, { selected: number; total: number }>>;
+};
 
 interface Props {
   categorizedItems: Record<string, Record<string, Item[]>>;
@@ -19,6 +24,7 @@ interface Props {
   onDeleteCategory: (category: string) => void;
   onDeleteSubcategory: (category: string, subcategory: string) => void;
   isGenerating?: boolean;
+  sidebarSelectionStats: SidebarSelectionStats;
 }
 
 export default function SimpleLibrarySidebar({
@@ -34,6 +40,7 @@ export default function SimpleLibrarySidebar({
   onDeleteCategory,
   onDeleteSubcategory,
   isGenerating = false,
+  sidebarSelectionStats,
 }: Props) {
   const categories = ['bags', 'threats', 'non-threats'];
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
@@ -63,8 +70,10 @@ export default function SimpleLibrarySidebar({
           const subcats = categorizedItems[catKey] || {};
           const itemsInCat = Object.values(subcats).flat();
           const isCatActive = activeCategory === catKey;
-          const selectedCount = itemsInCat.filter((item) => selectedItems.has(item.id)).length;
-          const allSelected = itemsInCat.length > 0 && itemsInCat.every(item => selectedItems.has(item.id));
+          const catStats = sidebarSelectionStats.byCategory[catKey] || { selected: 0, total: itemsInCat.length };
+          const selectedCount = catStats.selected;
+          const totalInCat = catStats.total || itemsInCat.length;
+          const allSelected = totalInCat > 0 && selectedCount === totalInCat;
           const someSelected = selectedCount > 0 && !allSelected;
           const isCollapsed = collapsedCategories.has(catKey);
 
@@ -136,8 +145,11 @@ export default function SimpleLibrarySidebar({
                   </button>
                   {Object.keys(subcats).map((subKey) => {
                     const subItems = subcats[subKey] || [];
-                    const isSubAllSelected = subItems.length > 0 && subItems.every((item) => selectedItems.has(item.id));
-                    const isSubSomeSelected = subItems.some((item) => selectedItems.has(item.id)) && !isSubAllSelected;
+                    const subStats = sidebarSelectionStats.bySubcategory[catKey]?.[subKey] || { selected: 0, total: subItems.length };
+                    const subSelected = subStats.selected;
+                    const subTotal = subStats.total || subItems.length;
+                    const isSubAllSelected = subTotal > 0 && subSelected === subTotal;
+                    const isSubSomeSelected = subSelected > 0 && !isSubAllSelected;
 
                     return (
                       <div key={subKey} className="flex items-center gap-2 group/sub">

@@ -1,0 +1,2 @@
+phase,chainsExecuted,chainsSuccessful,chainsFailed,breakingDetected,duration_ms
+warmup,10,0,10,true,7598

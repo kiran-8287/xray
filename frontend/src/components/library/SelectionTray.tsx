@@ -18,6 +18,8 @@ interface SelectionTrayProps {
   selectedNonThreatCount: number;
   requireAtLeastOneNonThreat: boolean;
   setRequireAtLeastOneNonThreat: (value: boolean) => void;
+  autoSave?: boolean;
+  setAutoSave?: (value: boolean) => void;
   isGenerating: boolean;
   generationProgress: string;
   onGenerate: () => void;
@@ -58,6 +60,8 @@ export default function SelectionTray({
   selectedNonThreatCount,
   requireAtLeastOneNonThreat,
   setRequireAtLeastOneNonThreat,
+  autoSave = false,
+  setAutoSave,
   isGenerating,
   generationProgress,
   onGenerate,
@@ -206,6 +210,19 @@ export default function SelectionTray({
               <span className="text-[11px] text-muted whitespace-nowrap">Include at least one non-threat</span>
             </label>
           </>
+        )}
+
+        {/* Save as you go auto-save toggle */}
+        {setAutoSave && (
+          <label className="flex items-center gap-1.5 cursor-pointer bg-blue-50/80 border border-blue-200/80 rounded-xl px-2.5 py-1.5 text-blue-900 font-medium">
+            <input
+              type="checkbox"
+              checked={autoSave || false}
+              onChange={(e) => setAutoSave(e.target.checked)}
+              className="w-3.5 h-3.5 border border-blue-300 rounded bg-white text-blue-600 focus:outline-none focus:border-blue-500"
+            />
+            <span className="text-xs whitespace-nowrap font-semibold">Save as you go</span>
+          </label>
         )}
 
         {generationProgress && (

@@ -13,6 +13,8 @@ export interface IncrementalWorkerRequest {
   nonThreatDistribution: Record<number, number>;
   requireAtLeastOneNonThreat: boolean;
   existingIds: string[];
+  /** Number of combos per emitted batch (default: 5000) */
+  batchSize?: number;
 }
 
 export interface IncrementalWorkerResponse {
@@ -53,7 +55,8 @@ self.onmessage = async (event: MessageEvent<IncrementalWorkerRequest>) => {
       data.threatDistribution,
       data.nonThreatDistribution,
       data.requireAtLeastOneNonThreat,
-      data.existingIds
+      data.existingIds,
+      data.batchSize ?? 5000
     );
 
     // Send final complete message
@@ -71,4 +74,4 @@ self.onmessage = async (event: MessageEvent<IncrementalWorkerRequest>) => {
   }
 };
 
-export {};
+export {};

@@ -156,7 +156,155 @@ ls perf/reports/stress-*.csv
 
 ---
 
-## 🧪 3. Run Test Suite
+## ⏱️ 3. Run 1-Hour Stress Timeout Loop
+
+The stress timeout loop harness executes **recursive long-running API calls** over a 1-hour window to monitor memory, cache, buffer sizes, and detect breaking points.
+
+### Prerequisites
+- Backend server must be running on `http://localhost:8080` (or set `TARGET_URL` env var)
+- Node.js 18+ installed
+
+### Run the Full 1-Hour Test
+
+```bash
+# From the project root
+node perf/stress_timeout_loop.mjs
+```
+
+### Quick Mode (10-minute version)
+
+```bash
+node perf/stress_timeout_loop.mjs --quick
+```
+
+### Custom Target URL
+
+```bash
+node perf/stress_timeout_loop.mjs --target http://localhost:3000
+```
+
+### Start from a Specific Phase
+
+```bash
+# Skip warmup, start from ramp phase
+node perf/stress_timeout_loop.mjs --phase 2
+
+# Start from breaking point phase
+node perf/stress_timeout_loop.mjs --phase 4
+```
+
+### Dry Run (Preview Plan Without Executing)
+
+```bash
+node perf/stress_timeout_loop.mjs --dry-run
+```
+
+### What It Does
+
+The script executes 5 phases of escalating load:
+
+| Phase | Duration (Full) | Duration (Quick) | Concurrency | Description |
+|-------|----------------|------------------|-------------|-------------|
+| 1. Warmup | 5 min | 30s | 5 | Light GETs to warm up the system |
+| 2. Ramp | 15 min | 2 min | 50 | Mixed GET/POST, gradually increasing |
+| 3. Sustained | 20 min | 3 min | 100 | Heavy write operations at peak load |
+| 4. Breaking Point | 15 min | 3 min | 200 | Aggressive escalation until failure |
+| 5. Cooldown | 5 min | 1 min | 10 | Monitor recovery after stress |
+
+### API Call Patterns
+
+Each "operation chain" simulates a real user workflow by calling multiple APIs in sequence:
+
+1. **System queries** (GET `/api/system/info`, POST `/api/system/memory-check`)
+2. **Paginated read** (recursive GET `/api/items/categorized` — fetches all pages)
+3. **Deep item fetch** (GET `/api/items/:id` with bag enrichment)
+4. **Integrity check** (GET `/api/saved-layouts/integrity` — heavy read/aggregation)
+5. **Auto-valid-region** (POST `/api/auto-valid-region` — CPU-bound pixel processing)
+6. **Render preview** (POST `/api/render-preview` — rendering pipeline)
+
+### Breaking Point Detection
+
+The script continuously monitors 7 conditions and stops early if any are triggered:
+
+| Condition | Threshold | What It Detects |
+|-----------|-----------|-----------------|
+| Error rate (60s window) | >50% | System returning errors |
+| Memory growth (RSS) | >500MB | Memory leak or bloat |
+| p95 response time | >30s | Severe latency degradation |
+| Consecutive timeouts | >3 | Connection pool exhaustion |
+| Heap usage ratio | >90% | GC pressure, near OOM |
+| Free system memory | <500MB | System-wide memory pressure |
+| Concurrent requests | >200 | Request queue backup |
+
+### Background Monitoring
+
+Every 5 seconds, the script collects:
+- **Memory**: RSS, heapUsed, heapTotal, external (from `process.memoryUsage()`)
+- **System**: free memory (from `os.freemem()`), CPU load (from `os.cpus()`)
+- **Request metrics**: active request count, consecutive timeouts
+- **Response times**: p50/p95/p99 percentiles over the last 100 responses
+
+### View Reports
+
+```bash
+# Latest report
+cat perf/reports/stress-timeout-loop-latest.json
+
+# All reports
+ls perf/reports/stress-timeout-loop-*.json
+
+# CSV reports (open in Excel)
+ls perf/reports/stress-timeout-loop-*.csv
+```
+
+### Sample Report Structure
+
+```json
+{
+  "scenario": "stress-timeout-loop",
+  "timestamp": "2026-07-31T10:00:00.000Z",
+  "targetUrl": "http://localhost:8080",
+  "totalDuration_ms": 3600000,
+  "totalDuration_formatted": "60.0 min",
+  "phasesCompleted": 5,
+  "phases": [
+    {
+      "phaseName": "warmup",
+      "duration_ms": 300000,
+      "chainsExecuted": 150,
+      "chainsSuccessful": 148,
+      "chainsFailed": 2,
+      "breakingDetected": false
+    }
+  ],
+  "breakingPoint": {
+    "detected": true,
+    "phase": "breaking",
+    "reason": "Error rate 65% exceeds threshold 50%"
+  },
+  "monitor": {
+    "peakRSS_mb": 1024,
+    "peakHeap_mb": 512,
+    "finalMemoryGrowth_mb": 320,
+    "peakConcurrency": 200,
+    "peakCpuLoad": 85,
+    "responseTimePercentiles": {
+      "p50": 1200,
+      "p95": 8500,
+      "p99": 25000
+    }
+  },
+  "thresholds": {
+    "errorRate60s": 0.5,
+    "memoryGrowthMB": 500,
+    "responseTimeMs": 30000
+  }
+}
+```
+
+---
+
+## 🧪 4. Run Test Suite
 
 ### Run All Backend Tests
 
@@ -191,7 +339,7 @@ npx jest --coverage
 
 ---
 
-## 📈 4. View Instrumentation Logs
+## 📈 5. View Instrumentation Logs
 
 The instrumentation system logs detailed timing and memory metrics for every pipeline stage.
 
@@ -271,7 +419,7 @@ cd backend && npm run dev | pino-pretty
 
 ---
 
-## 🔍 5. Monitor Real-Time Metrics
+## 🔍 6. Monitor Real-Time Metrics
 
 ### Prometheus Metrics Endpoint
 
@@ -296,7 +444,7 @@ curl http://localhost:8080/metrics | grep upload_file_processing_seconds
 
 ---
 
-## 🚀 6. Quick Start - Complete Workflow
+## 🚀 7. Quick Start - Complete Workflow
 
 ### Step 1: Start the Backend
 ```bash
@@ -337,7 +485,7 @@ cat backend/data/system-config.json
 
 ---
 
-## 📝 7. Example: Complete Stress Test Run
+## 📝 8. Example: Complete Stress Test Run
 
 ```bash
 # Terminal 1: Start server
