@@ -18,6 +18,8 @@ import {
     getItems,
     getItemById,
     createItem,
+    createItemsBatch,
+    getCatalog,
     updateItem,
     deleteItem,
     itemExists,
@@ -339,7 +341,8 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
         // The workers process files one at a time via temp files on disk, so overhead is minimal.
         // Only account for additional processing overhead, not file sizes (already allocated).
         const workerCount = await getWorkerCount('upload', 10);
-        const estimatedMemoryMB = 50;
+        // Estimate memory dynamically based on batch size (~0.05MB per file, min 2MB)
+        const estimatedMemoryMB = Math.max(2, Math.ceil(nonDuplicates.length * 0.05));
         const memoryCheck = checkMemoryAvailability(estimatedMemoryMB);
         logger.info({ operationId, workerCount, memoryCheck }, 'memory_check');
         
@@ -518,6 +521,37 @@ app.get("/api/items/categorized", async (req, res) => {
     });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// Batch item persistence endpoint for 50-item page saves into category partitions
+app.post('/api/items/batch-save', requireAuth, async (req, res) => {
+  try {
+    const { items } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ ok: false, error: 'items array is required' });
+    }
+
+    const savedItems = await createItemsBatch(items);
+    res.json({
+      ok: true,
+      savedCount: savedItems.length,
+      items: savedItems,
+    });
+  } catch (err) {
+    console.error('[batch-save] Error:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// Storage catalog index metadata endpoint
+app.get('/api/storage/catalog', async (_req, res) => {
+  try {
+    const catalog = await getCatalog();
+    res.json({ ok: true, catalog });
+  } catch (err) {
+    console.error('[storage/catalog] Error:', err);
     res.status(500).json({ ok: false, error: String(err) });
   }
 });

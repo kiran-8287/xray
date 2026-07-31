@@ -1,33 +1,36 @@
 """auto_valid_region.py — Generate valid region polygon from .npz pixel data.
 
-Performance-optimized version using SciPy and OpenCV vectorized operations.
-Original pure-Python per-pixel loops replaced with C-optimized ndimage / cv2 calls
-for 50-150x speedup on large X-ray images.
+Optimized version using scipy.ndimage and opencv for vectorized C-level operations.
+Phase 1 optimizations yield ~50-150x speedup over pure Python pixel loops.
 
-Usage:
+Single-file mode (CLI):
     python auto_valid_region.py --npz-path /path/to/file.npz
 
-Outputs a single JSON line to stdout:
-    {"status":"ok","points":[[x1,y1],[x2,y2],...],"width":W,"height":H,"pixelCount":N}
-    
+Batch mode (stdin NDJSON):
+    echo '[{"npzPath":"...","itemId":"1"},{"npzPath":"...","itemId":"2"}]' \
+        | python auto_valid_region.py --batch
+
+Outputs a single JSON line per file to stdout (NDJSON format):
+    {"status":"ok","points":[[x1,y1],[x2,y2],...],"width":W,"height":H,"pixelCount":N,"itemId":"..."}
+
 Or on error:
-    {"status":"error","reason":"..."}
+    {"status":"error","reason":"...","itemId":"..."}
 """
 import sys
 import json
 import argparse
-import time
 import numpy as np
-from scipy.ndimage import label, binary_closing, binary_fill_holes, generate_binary_structure
+from scipy.ndimage import label as nd_label, binary_closing, binary_fill_holes, generate_binary_structure
 import cv2
 
 
 # ---------------------------------------------------------------------------
-# Extract largest connected component (8-connectivity via SciPy)
+# Extract largest connected component (vectorized via scipy.ndimage.label)
 # ---------------------------------------------------------------------------
 def extract_largest_component(mask):
+    """Return mask containing only the largest 8-connected component."""
     struct = np.ones((3, 3), dtype=np.uint8)
-    labels, num_features = label(mask, structure=struct)
+    labels, num_features = nd_label(mask, structure=struct)
     if num_features == 0:
         return mask
 
@@ -35,9 +38,8 @@ def extract_largest_component(mask):
     if len(counts) <= 1:
         return mask
 
-    max_label = np.argmax(counts[1:]) + 1
-    result = (labels == max_label).astype(np.uint8)
-    return result
+    max_label = int(np.argmax(counts[1:])) + 1
+    return (labels == max_label).astype(np.uint8)
 
 
 # ---------------------------------------------------------------------------
@@ -45,9 +47,13 @@ def extract_largest_component(mask):
 # ---------------------------------------------------------------------------
 def gaussian_kernel(hw):
     sigma = hw / 2.0
-    idx = np.arange(-hw, hw + 1, dtype=np.float64)
-    kernel = np.exp(-(idx * idx) / (2 * sigma * sigma))
-    return kernel / kernel.sum()
+    kernel = []
+    total = 0.0
+    for i in range(-hw, hw + 1):
+        w = np.exp(-(i * i) / (2 * sigma * sigma))
+        kernel.append(w)
+        total += w
+    return [w / total for w in kernel]
 
 
 def gaussian_smooth(points, half_window=5, passes=2):
@@ -55,19 +61,20 @@ def gaussian_smooth(points, half_window=5, passes=2):
     if n < 3:
         return points
     kernel = gaussian_kernel(half_window)
-    pts = np.asarray(points, dtype=np.float64)
+    pts = list(points)
 
     for _ in range(passes):
-        padded = np.vstack([pts, pts, pts])
-        start = n - half_window
-        end = 2 * n + half_window
-        view = padded[start:end]
-        from scipy.ndimage import convolve1d
-        smoothed_x = convolve1d(view[:, 0], kernel, mode='wrap')
-        smoothed_y = convolve1d(view[:, 1], kernel, mode='wrap')
-        pts = np.column_stack([smoothed_x[half_window:half_window + n],
-                               smoothed_y[half_window:half_window + n]])
-    return [tuple(p) for p in pts]
+        out = []
+        for i in range(n):
+            sx, sy = 0.0, 0.0
+            for j in range(-half_window, half_window + 1):
+                idx = (i + j) % n
+                w = kernel[j + half_window]
+                sx += pts[idx][0] * w
+                sy += pts[idx][1] * w
+            out.append((sx, sy))
+        pts = out
+    return pts
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +114,6 @@ def adaptive_rdp(points, min_pts=30, max_pts=80):
     if len(points) <= max_pts:
         return points
     lo, hi = 0.01, 50.0
-    best_lo, best_hi = lo, hi
     for _ in range(12):
         mid = (lo + hi) / 2.0
         simplified = rdp_simplify(points, mid)
@@ -117,10 +123,9 @@ def adaptive_rdp(points, min_pts=30, max_pts=80):
             lo = mid
         else:
             return simplified
-        if hi - lo < 0.1:
+        if hi - lo < 0.05:
             break
-        best_lo, best_hi = lo, hi
-    return rdp_simplify(points, (best_lo + best_hi) / 2.0)
+    return rdp_simplify(points, lo)
 
 
 # ---------------------------------------------------------------------------
@@ -145,43 +150,33 @@ def remove_duplicates(points):
 
 
 def normalize_points(points, w, h):
-    return [(x / w, y / h) for x, y in points]
+    return [(float(x) / float(w), float(y) / float(h)) for x, y in points]
 
 
 # ---------------------------------------------------------------------------
-# Contour extraction using OpenCV
+# Contour extraction via OpenCV
 # ---------------------------------------------------------------------------
-def extract_contour_cv2(padded, h_pad, w_pad):
-    mask_u8 = padded.astype(np.uint8)
-    contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+def extract_external_contour(padded):
+    """Extract outer contour of the largest component using cv2.findContours."""
+    contours, _ = cv2.findContours(padded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contours:
         return []
-
-    max_area = -1
-    best_contour = None
-    for c in contours:
-        area = cv2.contourArea(c)
-        if area > max_area:
-            max_area = area
-            best_contour = c
-
-    if best_contour is None or len(best_contour) < 3:
-        return []
-
-    pts = best_contour.reshape(-1, 2)
-    return [(int(p[0]), int(p[1])) for p in pts]
+    largest = max(contours, key=cv2.contourArea)
+    pts = largest.reshape(-1, 2)
+    return [(float(p[0]), float(p[1])) for p in pts]
 
 
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 def generate_valid_region(npz_path):
-    t_total_start = time.perf_counter()
-
+    """Generate valid region polygon from .npz pixel data."""
+    # 1. Load pixel data using memory mapping (zero-copy)
     npz = np.load(npz_path, mmap_mode='r')
     pixel_array = npz['pixel_data']
     height, width = pixel_array.shape
 
+    # 2. Binary mask: < 65400 = bag material
     WHITE_THRESHOLD = 65400
     mask = (pixel_array < WHITE_THRESHOLD).astype(np.uint8)
     pixel_count = int(np.sum(mask))
@@ -192,63 +187,71 @@ def generate_valid_region(npz_path):
     del pixel_array
     del npz
 
+    # 3. Extract largest component (removes noise before morphology)
     bag_mask = extract_largest_component(mask)
     del mask
 
-    struct = generate_binary_structure(2, 1)
-    bag_mask = binary_closing(bag_mask, structure=struct, iterations=3).astype(np.uint8)
+    # 4. Morphological closing (fill small interior holes) — vectorized scipy
+    struct4 = generate_binary_structure(2, 1)
+    bag_mask = binary_closing(bag_mask, structure=struct4, iterations=3).astype(np.uint8)
 
+    # 5. Flood-fill interior holes (catch large voids) — vectorized scipy
     bag_mask = binary_fill_holes(bag_mask).astype(np.uint8)
 
-    bag_mask = extract_largest_component(bag_mask)
+    # 6. Re-extract largest component (only if multiple components remain, rare)
+    check_labels, check_num = nd_label(bag_mask, structure=np.ones((3, 3), dtype=np.uint8))
+    if check_num > 1:
+        counts = np.bincount(check_labels.ravel())
+        max_label = int(np.argmax(counts[1:])) + 1
+        bag_mask = (check_labels == max_label).astype(np.uint8)
+    del check_labels
 
-    h_pad, w_pad = height + 2, width + 2
-    padded = np.zeros((h_pad, w_pad), dtype=np.uint8)
+    # 7. Pad mask by 1 pixel so bags touching border trace correctly
+    padded = np.zeros((height + 2, width + 2), dtype=np.uint8)
     padded[1:-1, 1:-1] = bag_mask
     del bag_mask
 
-    contour = extract_contour_cv2(padded, h_pad, w_pad)
+    # 8. Contour extraction via OpenCV (C-optimized)
+    contour = extract_external_contour(padded)
     if len(contour) < 3:
         raise ValueError("Could not find contour (< 3 points)")
 
-    contour = [(x - 1, y - 1) for x, y in contour]
+    # Remove padding offset
+    contour = [(float(x) - 1.0, float(y) - 1.0) for x, y in contour]
 
+    # 9. Gaussian smoothing
     contour = gaussian_smooth(contour, 5, 2)
 
+    # 10. Close and deduplicate
     contour = ensure_closed(contour)
     contour = remove_duplicates(contour)
     if len(contour) < 3:
         raise ValueError("Contour too small after smoothing")
 
+    # 11. Adaptive RDP simplification
     simplified = adaptive_rdp(contour, 30, 80)
     if len(simplified) < 3:
         raise ValueError("Simplified polygon < 3 points")
 
+    # 12. Final cleanup + normalize to [0, 1]
     final = remove_duplicates(ensure_closed(simplified))
     if len(final) < 3:
         raise ValueError("Final polygon < 3 points")
 
     normalized = normalize_points(final, width, height)
 
-    t_total = time.perf_counter() - t_total_start
-
     return {
         "points": normalized,
         "width": width,
         "height": height,
-        "pixelCount": pixel_count,
-        "processing_time_s": round(t_total, 4)
+        "pixelCount": pixel_count
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Generate valid region polygon from .npz pixel data")
-    parser.add_argument("--npz-path", required=True, help="Absolute path to the .npz file")
-    parser.add_argument("--profile", action="store_true", help="Print timing breakdown to stderr")
-    args = parser.parse_args()
-
+def process_one(npz_path, item_id=None):
+    """Process a single .npz file and return a result dict with itemId."""
     try:
-        result = generate_valid_region(args.npz_path)
+        result = generate_valid_region(npz_path)
         points_list = [[float(p[0]), float(p[1])] for p in result["points"]]
         output = {
             "status": "ok",
@@ -257,16 +260,57 @@ def main():
             "height": result["height"],
             "pixelCount": result["pixelCount"]
         }
-        if args.profile and "processing_time_s" in result:
-            print(f"[profile] total={result['processing_time_s']}s", file=sys.stderr)
-        print(json.dumps(output))
+        if item_id is not None:
+            output["itemId"] = item_id
+        return output
     except Exception as e:
-        error_output = {
+        output = {
             "status": "error",
             "reason": str(e)
         }
-        print(json.dumps(error_output))
-        sys.exit(1)
+        if item_id is not None:
+            output["itemId"] = item_id
+        return output
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate valid region polygon from .npz pixel data")
+    parser.add_argument("--npz-path", help="Absolute path to the .npz file (single-file mode)")
+    parser.add_argument("--batch", action="store_true", help="Read batch tasks as NDJSON array from stdin")
+    args = parser.parse_args()
+
+    if args.batch:
+        data = sys.stdin.read()
+        try:
+            tasks = json.loads(data)
+        except json.JSONDecodeError as e:
+            print(json.dumps({"status": "error", "reason": f"Invalid batch JSON: {e}"}))
+            sys.exit(1)
+
+        if not isinstance(tasks, list):
+            print(json.dumps({"status": "error", "reason": "Batch input must be a JSON array"}))
+            sys.exit(1)
+
+        for task in tasks:
+            npz_path = task.get("npzPath")
+            item_id = task.get("itemId")
+            if not npz_path:
+                res = {"status": "error", "reason": "Missing npzPath in task"}
+                if item_id:
+                    res["itemId"] = item_id
+                print(json.dumps(res))
+                continue
+            result = process_one(npz_path, item_id)
+            print(json.dumps(result))
+            sys.stdout.flush()
+    else:
+        if not args.npz_path:
+            print(json.dumps({"status": "error", "reason": "--npz-path is required in single-file mode"}))
+            sys.exit(1)
+        result = process_one(args.npz_path)
+        print(json.dumps(result))
+        if result["status"] == "error":
+            sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,14 @@
+runNumber,testType,name,method,path,passed,error,status,expectedErrorCode,hasOkFalse,duration_ms,memoryGrowth_mb,peakRSS_mb,concurrentRequests,succeeded,failed,totalDuration_ms,avgDuration_ms
+1,api-timeout,POST /api/saved-layouts empty body,POST,/api/saved-layouts,true,"null",400,400,true,1,0,67,,,,,
+2,api-timeout,POST /api/saved-layouts missing layout_json,POST,/api/saved-layouts,true,"null",400,400,true,1,0,67,,,,,
+3,api-timeout,POST /api/saved-layouts invalid objects,POST,/api/saved-layouts,true,"null",400,400,true,2,0,67,,,,,
+4,api-timeout,GET /api/items/nonexistent,GET,/api/items/nonexistent-id-12345,true,"null",404,404,true,3,0,67,,,,,
+5,api-timeout,PUT /api/items/nonexistent,PUT,/api/items/nonexistent-id-12345,true,"null",404,404,true,3,0,67,,,,,
+6,api-timeout,DELETE /api/items/nonexistent,DELETE,/api/items/nonexistent-id-12345,false,Timeout after 30000ms: DELETE /api/items/nonexistent-id-12345,0,404,"null",91053,0,67,,,,,
+7,api-timeout,POST /api/custom-subcategories missing fields,POST,/api/custom-subcategories,true,"null",400,400,true,2,0,67,,,,,
+8,api-timeout,POST /api/auto-valid-region missing fields,POST,/api/auto-valid-region,true,"null",400,400,true,2,0,67,,,,,
+9,api-timeout,POST /api/auto-valid-region-batch empty array,POST,/api/auto-valid-region-batch,true,"null",400,400,true,2,0,67,,,,,
+10,api-timeout,POST /api/render-preview missing objects,POST,/api/render-preview,true,"null",400,400,true,2,0,67,,,,,
+11,api-timeout,GET /api/unknown-endpoint (404 test),GET,/api/this-does-not-exist-at-all,true,"null",404,404,true,2,0,67,,,,,
+12,api-timeout,POST /api/unknown-endpoint (404 test),POST,/api/this-also-does-not-exist,true,"null",404,404,true,2,0,67,,,,,
+13,rapid-fire,100 concurrent GET /api/items/categorized,GET,/api/items/categorized,true,"null",,,,,-1,71,100,100,0,60,1

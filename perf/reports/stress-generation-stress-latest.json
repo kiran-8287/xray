@@ -1,0 +1,63 @@
+{
+  "scenario": "generation-stress",
+  "timestamp": "2026-07-30T13:57:54.459Z",
+  "targetUrl": "http://localhost:8080",
+  "quickMode": false,
+  "results": [
+    {
+      "runNumber": 1,
+      "testType": "k-combinations",
+      "parameter": 5,
+      "passed": true,
+      "error": null,
+      "kValue": 5,
+      "attempted": 4,
+      "saved": 1,
+      "failed": 3,
+      "duration_ms": 30049,
+      "avgTimePerLayout_ms": 30049,
+      "peakRSS_mb": 58,
+      "memoryGrowth_mb": 0
+    },
+    {
+      "runNumber": 2,
+      "testType": "k-combinations",
+      "parameter": 10,
+      "passed": false,
+      "error": "No layouts saved",
+      "kValue": 10,
+      "attempted": 3,
+      "saved": 0,
+      "failed": 3,
+      "duration_ms": 30013,
+      "avgTimePerLayout_ms": 0,
+      "peakRSS_mb": 58,
+      "memoryGrowth_mb": 0
+    },
+    {
+      "runNumber": 3,
+      "testType": "objects-per-combo",
+      "parameter": 5,
+      "passed": false,
+      "error": "Timeout after 10000ms: save layout with 5 objects",
+      "objectCount": 5,
+      "bagCount": 1,
+      "threatCount": 5,
+      "nonThreatCount": 3,
+      "saved": false,
+      "duration_ms": 10014,
+      "peakRSS_mb": 59,
+      "memoryGrowth_mb": 0
+    }
+  ],
+  "summary": {
+    "totalRuns": 3,
+    "passed": 1,
+    "failed": 2,
+    "peakMemoryMB": 59,
+    "breakingPoint": {
+      "runNumber": 2,
+      "error": "No layouts saved"
+    }
+  }
+}

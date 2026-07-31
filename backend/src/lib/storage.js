@@ -1,9 +1,13 @@
 /**
- * JSON file-based storage layer with atomic writes.
+ * JSON file-based storage layer with atomic writes and category partitioning.
  * 
- * Uses a write-ahead approach: writes to a temp file, then renames atomically.
- * This prevents partial writes and corruption from crashes/interruptions.
- * Includes a simple in-process write lock to prevent concurrent write races.
+ * Segregates items into category-specific partitioned JSON files:
+ * - data/bags_1.json, data/bags_2.json ... (Cap: 5000 items per JSON file)
+ * - data/threats_1.json, data/threats_2.json ...
+ * - data/non_threats_1.json, data/non_threats_2.json ...
+ * - data/catalog.json (Catalog index tracking partition counts)
+ * 
+ * Uses a write-ahead atomic approach (write to temp, then rename).
  */
 
 import fs from 'node:fs/promises';
@@ -16,88 +20,88 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DATA_DIR = config.dataDir;
-const ITEMS_FILE = path.join(DATA_DIR, 'items.json');
+const LEGACY_ITEMS_FILE = path.join(DATA_DIR, 'items.json');
+const CATALOG_FILE = path.join(DATA_DIR, 'catalog.json');
 const SAVED_LAYOUTS_FILE = path.join(DATA_DIR, 'savedLayouts.json');
 const CUSTOM_SUBCATEGORIES_FILE = path.join(DATA_DIR, 'customSubcategories.json');
 
-// ---- Atomic write helpers ----
+const DEFAULT_PARTITION_CAP = 5000;
 
-/**
- * In-process write locks to prevent concurrent write races.
- * Maps filePath -> Promise (serializes writes to the same file).
- */
+// ---- Atomic write helpers & Locks ----
+
+// Self-clearing mutex per file path.
+// Each entry is a Promise that resolves when the current holder finishes.
+// The Map entry is deleted once no waiter remains, preventing unbounded chain buildup.
 const writeLocks = new Map();
 
-/**
- * Acquire a write lock for a given file path.
- * Returns a function to release the lock.
- * 
- * @param {string} filePath
- * @returns {Promise<() => void>}
- */
-async function acquireLock(filePath) {
+function acquireLock(filePath) {
+  // Get the promise for the current tail of the queue (or resolve immediately)
+  const previous = writeLocks.get(filePath) ?? Promise.resolve();
+
   let release;
-  const wait = new Promise((resolve) => {
-    release = resolve;
+  // This promise will resolve when the CURRENT caller's critical section ends.
+  const ownLock = new Promise((res) => { release = res; });
+
+  // Cache the caught version so we can compare the same object reference later
+  const tail = ownLock.catch(() => {});
+  writeLocks.set(filePath, tail);
+
+  // Return a promise that resolves (with the release fn) once the previous holder is done.
+  return previous.then(() => {
+    return () => {
+      release();
+      // Clean up Map entry if we're still the tail (no newer waiter registered)
+      if (writeLocks.get(filePath) === tail) {
+        writeLocks.delete(filePath);
+      }
+    };
   });
-
-  const existing = writeLocks.get(filePath);
-  if (existing) {
-    // Queue behind the existing lock
-    const nextLock = existing.then(() => wait);
-    writeLocks.set(filePath, nextLock);
-    await nextLock;
-  } else {
-    writeLocks.set(filePath, wait);
-  }
-
-  return release;
 }
 
-/**
- * Atomically write data to a JSON file.
- * Writes to a temp file first, then renames to the target path.
- * This prevents partial writes from crashes mid-write.
- * 
- * @param {string} filePath - The target file path
- * @param {any} data - The data to serialize as JSON
- */
 async function writeJSONFileAtomic(filePath, data) {
-  const release = await acquireLock(filePath);
+  // Acquire lock with a 15-second timeout to prevent permanent hangs
+  let release;
+  const lockPromise = acquireLock(filePath);
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`[storage] Lock timeout for ${filePath}`)), 15000)
+  );
+
   try {
-    // Generate a unique temp file name in the same directory (same filesystem = atomic rename)
+    release = await Promise.race([lockPromise, timeoutPromise]);
+  } catch (err) {
+    console.error(err.message);
+    // Force-clear the stale lock so future writes can proceed
+    writeLocks.delete(filePath);
+    throw err;
+  }
+
+  try {
     const dir = path.dirname(filePath);
     const ext = path.extname(filePath);
     const base = path.basename(filePath, ext);
     const tmpPath = path.join(dir, `${base}_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}.tmp`);
 
-    // Write to temp file
     const jsonStr = JSON.stringify(data, null, 2);
     await fs.writeFile(tmpPath, jsonStr, 'utf8');
-
-    // Atomic rename (atomically replaces destination on most OS filesystems)
     await fs.rename(tmpPath, filePath);
   } finally {
-    release();
+    if (release) release();
   }
 }
 
-/**
- * Read a JSON file, returning a default value if it doesn't exist.
- * 
- * @param {string} filePath
- * @param {any} defaultValue
- * @returns {Promise<any>}
- */
 async function readJSONFile(filePath, defaultValue = []) {
   try {
-    const data = await fs.readFile(filePath, 'utf8');
-    return JSON.parse(data);
+    const raw = await fs.readFile(filePath, 'utf8');
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      // File exists but is empty — treat as default
+      return defaultValue;
+    }
+    return JSON.parse(trimmed);
   } catch (err) {
     if (err.code === 'ENOENT') {
       return defaultValue;
     }
-    // If JSON is corrupted, return default (but log a warning)
     if (err instanceof SyntaxError) {
       console.warn(`[storage] Corrupted JSON file: ${filePath}. Returning default.`);
       return defaultValue;
@@ -106,19 +110,125 @@ async function readJSONFile(filePath, defaultValue = []) {
   }
 }
 
+// Category normalization helper
+function normalizeCategoryKey(cat) {
+  if (!cat) return 'non_threats';
+  const c = String(cat).toLowerCase().trim();
+  if (c === 'bags' || c === 'bag') return 'bags';
+  if (c === 'threats' || c === 'threat' || c === 'threads') return 'threats';
+  return 'non_threats';
+}
+
+function getPartitionFilePath(categoryKey, partitionNum) {
+  return path.join(DATA_DIR, `${categoryKey}_${partitionNum}.json`);
+}
+
+// ---- Catalog & Partition Initialization & Legacy Migration ----
+
+async function getCatalog() {
+  const defaultCatalog = {
+    categories: {
+      bags: { activePartition: 1, partitionCap: DEFAULT_PARTITION_CAP, totalCount: 0, partitions: [1] },
+      threats: { activePartition: 1, partitionCap: DEFAULT_PARTITION_CAP, totalCount: 0, partitions: [1] },
+      non_threats: { activePartition: 1, partitionCap: DEFAULT_PARTITION_CAP, totalCount: 0, partitions: [1] }
+    }
+  };
+  return await readJSONFile(CATALOG_FILE, defaultCatalog);
+}
+
+async function saveCatalog(catalog) {
+  await writeJSONFileAtomic(CATALOG_FILE, catalog);
+}
+
 async function ensureDataDir() {
   try {
     await fs.access(DATA_DIR);
   } catch {
     await fs.mkdir(DATA_DIR, { recursive: true });
   }
+
+  // Check if catalog exists
+  try {
+    await fs.access(CATALOG_FILE);
+  } catch {
+    // Check if legacy items.json exists and needs migration
+    let legacyItems = [];
+    try {
+      const data = await fs.readFile(LEGACY_ITEMS_FILE, 'utf8');
+      legacyItems = JSON.parse(data);
+    } catch {}
+
+    const catalog = {
+      categories: {
+        bags: { activePartition: 1, partitionCap: DEFAULT_PARTITION_CAP, totalCount: 0, partitions: [1] },
+        threats: { activePartition: 1, partitionCap: DEFAULT_PARTITION_CAP, totalCount: 0, partitions: [1] },
+        non_threats: { activePartition: 1, partitionCap: DEFAULT_PARTITION_CAP, totalCount: 0, partitions: [1] }
+      }
+    };
+
+    if (Array.isArray(legacyItems) && legacyItems.length > 0) {
+      console.log(`[storage] Migrating ${legacyItems.length} legacy items into partitioned JSON storage...`);
+      // Partition legacy items by category
+      const byCat = { bags: [], threats: [], non_threats: [] };
+      for (const item of legacyItems) {
+        const catKey = normalizeCategoryKey(item.category);
+        byCat[catKey].push(item);
+      }
+
+      for (const [catKey, items] of Object.entries(byCat)) {
+        if (items.length === 0) continue;
+        let pNum = 1;
+        let count = 0;
+        for (let i = 0; i < items.length; i += DEFAULT_PARTITION_CAP) {
+          const chunk = items.slice(i, i + DEFAULT_PARTITION_CAP);
+          await writeJSONFileAtomic(getPartitionFilePath(catKey, pNum), chunk);
+          count += chunk.length;
+          if (i + DEFAULT_PARTITION_CAP < items.length) {
+            pNum++;
+            catalog.categories[catKey].partitions.push(pNum);
+          }
+        }
+        catalog.categories[catKey].activePartition = pNum;
+        catalog.categories[catKey].totalCount = count;
+      }
+    }
+
+    await saveCatalog(catalog);
+  }
 }
 
-// ---- Items storage ----
+// ---- Items Partitioned Storage Core ----
 
-async function getItems() {
+async function getItemsForCategory(categoryKey) {
   await ensureDataDir();
-  return await readJSONFile(ITEMS_FILE, []);
+  const catalog = await getCatalog();
+  const catConfig = catalog.categories[categoryKey] || { partitions: [1] };
+  const allCategoryItems = [];
+
+  for (const pNum of catConfig.partitions) {
+    const partPath = getPartitionFilePath(categoryKey, pNum);
+    const partItems = await readJSONFile(partPath, []);
+    allCategoryItems.push(...partItems);
+  }
+
+  return allCategoryItems;
+}
+
+async function getItems(categoryFilter = null) {
+  await ensureDataDir();
+  if (categoryFilter) {
+    const catKey = normalizeCategoryKey(categoryFilter);
+    return await getItemsForCategory(catKey);
+  }
+
+  // Load from all category partitions
+  const [bags, threats, nonThreats] = await Promise.all([
+    getItemsForCategory('bags'),
+    getItemsForCategory('threats'),
+    getItemsForCategory('non_threats')
+  ]);
+
+  return [...bags, ...threats, ...nonThreats];
 }
 
 async function getItemById(id) {
@@ -126,12 +236,12 @@ async function getItemById(id) {
   return items.find(item => item.id === id);
 }
 
-async function getItemsPaginated(page = 1, limit = 100) {
+async function getItemsPaginated(page = 1, limit = 100, category = null) {
   await ensureDataDir();
-  const allItems = await getItems();
+  const allItems = await getItems(category);
   const totalItems = allItems.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / limit));
-  const safePage = Math.min(page, totalPages);
+  const safePage = Math.min(Math.max(1, page), totalPages);
   const startIndex = (safePage - 1) * limit;
   const endIndex = startIndex + limit;
 
@@ -148,45 +258,134 @@ async function getItemsPaginated(page = 1, limit = 100) {
   };
 }
 
-async function createItem(itemData) {
+/**
+ * Batch insert items directly into appropriate category partitions.
+ * Enforces the 5000 items capacity limit per partition file.
+ */
+async function createItemsBatch(itemsArray) {
+  if (!Array.isArray(itemsArray) || itemsArray.length === 0) return [];
   await ensureDataDir();
-  const items = await getItems();
-  const newItem = {
-    id: itemData.id,
-    created_at: new Date().toISOString(),
-    ...itemData,
-  };
-  items.push(newItem);
-  await writeJSONFileAtomic(ITEMS_FILE, items);
-  return newItem;
+
+  const catalog = await getCatalog();
+  const createdItems = [];
+
+  // Group items by category
+  const grouped = { bags: [], threats: [], non_threats: [] };
+  for (const rawItem of itemsArray) {
+    const catKey = normalizeCategoryKey(rawItem.category);
+    const item = {
+      id: rawItem.id || `item_${catKey}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      created_at: rawItem.created_at || new Date().toISOString(),
+      ...rawItem,
+    };
+    grouped[catKey].push(item);
+    createdItems.push(item);
+  }
+
+  // Process each category partition write
+  for (const [catKey, newItems] of Object.entries(grouped)) {
+    if (newItems.length === 0) continue;
+
+    const catMeta = catalog.categories[catKey] || {
+      activePartition: 1,
+      partitionCap: DEFAULT_PARTITION_CAP,
+      totalCount: 0,
+      partitions: [1]
+    };
+
+    let pNum = catMeta.activePartition;
+    let currentPartPath = getPartitionFilePath(catKey, pNum);
+    let currentPartItems = await readJSONFile(currentPartPath, []);
+
+    for (const newItem of newItems) {
+      if (currentPartItems.length >= catMeta.partitionCap) {
+        // Save full partition
+        await writeJSONFileAtomic(currentPartPath, currentPartItems);
+        // Spin up next partition file
+        pNum++;
+        if (!catMeta.partitions.includes(pNum)) {
+          catMeta.partitions.push(pNum);
+        }
+        currentPartPath = getPartitionFilePath(catKey, pNum);
+        currentPartItems = [];
+      }
+      currentPartItems.push(newItem);
+      catMeta.totalCount++;
+    }
+
+    // Save remaining items to current active partition file
+    await writeJSONFileAtomic(currentPartPath, currentPartItems);
+    catMeta.activePartition = pNum;
+    catalog.categories[catKey] = catMeta;
+  }
+
+  await saveCatalog(catalog);
+  return createdItems;
+}
+
+async function createItem(itemData) {
+  const result = await createItemsBatch([itemData]);
+  return result[0];
 }
 
 async function itemExists(id) {
-  const items = await getItems();
-  return items.some(item => item.id === id);
+  const item = await getItemById(id);
+  return Boolean(item);
 }
 
 async function updateItem(id, itemData) {
-  const items = await getItems();
-  const index = items.findIndex(item => item.id === id);
-  if (index === -1) return null;
+  await ensureDataDir();
+  const catalog = await getCatalog();
 
-  items[index] = { ...items[index], ...itemData };
-  await writeJSONFileAtomic(ITEMS_FILE, items);
-  return items[index];
+  for (const catKey of ['bags', 'threats', 'non_threats']) {
+    const catMeta = catalog.categories[catKey];
+    if (!catMeta) continue;
+
+    for (const pNum of catMeta.partitions) {
+      const partPath = getPartitionFilePath(catKey, pNum);
+      const items = await readJSONFile(partPath, []);
+      const index = items.findIndex(item => item.id === id);
+      if (index !== -1) {
+        items[index] = { ...items[index], ...itemData };
+        await writeJSONFileAtomic(partPath, items);
+        return items[index];
+      }
+    }
+  }
+
+  return null;
 }
 
 async function deleteItem(id) {
-  const items = await getItems();
-  const filteredItems = items.filter(item => item.id !== id);
-  await writeJSONFileAtomic(ITEMS_FILE, filteredItems);
+  await ensureDataDir();
+  const catalog = await getCatalog();
+
+  for (const catKey of ['bags', 'threats', 'non_threats']) {
+    const catMeta = catalog.categories[catKey];
+    if (!catMeta) continue;
+
+    for (const pNum of catMeta.partitions) {
+      const partPath = getPartitionFilePath(catKey, pNum);
+      const items = await readJSONFile(partPath, []);
+      const index = items.findIndex(item => item.id === id);
+      if (index !== -1) {
+        items.splice(index, 1);
+        await writeJSONFileAtomic(partPath, items);
+        catMeta.totalCount = Math.max(0, catMeta.totalCount - 1);
+        await saveCatalog(catalog);
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
-// ---- Bag valid region storage (merged into items) ----
+// ---- Bag valid region storage ----
 
 async function getBagByItemId(itemId) {
   const item = await getItemById(itemId);
-  if (!item || item.category !== 'bags') return null;
+  if (!item || normalizeCategoryKey(item.category) !== 'bags') return null;
   return {
     item_id: item.id,
     valid_region_points: item.valid_region_points,
@@ -211,7 +410,7 @@ async function updateBag(itemId, bagData) {
   };
 }
 
-// ---- Threat metadata storage (merged into items) ----
+// ---- Threat metadata storage ----
 
 async function createThreat(threatData) {
   const item = await getItemById(threatData.item_id);
@@ -227,7 +426,7 @@ async function createThreat(threatData) {
   };
 }
 
-// ---- Non-threat subcategory storage (merged into items) ----
+// ---- Non-threat subcategory storage ----
 
 async function createNonThreatItem(nonThreatData) {
   const item = await getItemById(nonThreatData.item_id);
@@ -295,7 +494,6 @@ async function getCustomSubcategories() {
 async function addCustomSubcategory(category, name) {
   await ensureDataDir();
   const customSubs = await getCustomSubcategories();
-
   const slug = name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 
   const categorySubs = customSubs[category] || [];
@@ -334,6 +532,7 @@ export {
   getItems,
   getItemById,
   createItem,
+  createItemsBatch,
   itemExists,
   updateItem,
   deleteItem,
@@ -351,4 +550,5 @@ export {
   addCustomSubcategory,
   removeCustomSubcategory,
   getItemsPaginated,
+  getCatalog,
 };

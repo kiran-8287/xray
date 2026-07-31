@@ -324,6 +324,30 @@ export default function LibraryPage() {
     });
   };
 
+  const selectAllCurrentPage = () => {
+    setSelectedItems((prev) => {
+      const next = new Set(prev);
+      paginatedItems.forEach((item) => next.add(item.id));
+      return next;
+    });
+  };
+
+  const deselectAllCurrentPage = () => {
+    setSelectedItems((prev) => {
+      const next = new Set(prev);
+      paginatedItems.forEach((item) => next.delete(item.id));
+      return next;
+    });
+  };
+
+  const pageSelectedCount = useMemo(() => {
+    let count = 0;
+    for (const item of paginatedItems) {
+      if (selectedItems.has(item.id)) count++;
+    }
+    return count;
+  }, [paginatedItems, selectedItems]);
+
   const selectAllCategory = (categoryKey: string) => {
     const items = Object.values(categorizedItems[categoryKey] || {}).flat();
     setSelectedItems((prev) => {
@@ -974,6 +998,10 @@ export default function LibraryPage() {
                   onPageChange={handlePageChange}
                   itemsPerPage={ITEMS_PER_PAGE}
                   totalItems={displayedItems.length}
+                  pageItemsCount={paginatedItems.length}
+                  pageSelectedCount={pageSelectedCount}
+                  onSelectAllPage={selectAllCurrentPage}
+                  onDeselectAllPage={deselectAllCurrentPage}
                 />
               </>
             )}

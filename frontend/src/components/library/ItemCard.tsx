@@ -5,7 +5,8 @@ import { getCategoryConfig } from "../../config/categories";
 import { API_BASE_URL } from "../../config/api";
 import ImageWithPlaceholder from "../common/ImageWithPlaceholder";
 
-function formatDisplayName(name: string) {
+function formatDisplayName(name: string | null | undefined) {
+  if (!name) return "";
   return name.replace(/\.[^.]+$/i, "");
 }
 

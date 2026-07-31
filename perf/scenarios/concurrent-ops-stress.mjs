@@ -197,12 +197,18 @@ export async function runConcurrentOpsStress(baseUrl, quickMode, memoryTracker) 
       break;
     }
 
+    // Pause to allow GC / post-action cleanup
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const memPost = process.memoryUsage();
+    const memPostDelta = Math.round((memPost.heapUsed - memBefore.heapUsed) / 1024 / 1024);
+    const memFreedStatus = memPostDelta <= 5 ? 'FREED (clean)' : `STACKED (+${memPostDelta}MB retained)`;
+    
+    runResult.memPostDelta_mb = memPostDelta;
+    runResult.memFreedStatus = memFreedStatus;
+
     const rate = runResult.successRate;
     const icon = rate >= 90 ? '✅' : rate >= 50 ? '⚠️' : '❌';
-    console.log(`    ${icon} ${concurrentUsers} users: ${successfulOps}/${totalOps} ops OK (${rate}%) in ${(totalDuration / 1000).toFixed(1)}s (${memGrowth}MB)`);
-
-    // Brief pause between levels
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    console.log(`    ${icon} ${concurrentUsers} users: ${successfulOps}/${totalOps} ops OK (${rate}%) in ${(totalDuration / 1000).toFixed(1)}s (Peak: +${memGrowth}MB | Post-Action: ${memFreedStatus})`);
   }
 
   // ---- Multi-threaded simulation (same API called N times across M "threads") ----

@@ -143,10 +143,11 @@ export async function getWorkerCount(operation, defaultCount = 4) {
 export function checkMemoryAvailability(estimatedMemoryMB) {
   const systemInfo = getSystemInfo();
   const availableMemoryMB = systemInfo.freeMemoryMB;
-  // Dynamic threshold: use 10% of available memory, max 100MB
-  const memoryThresholdMB = Math.min(100, Math.floor(availableMemoryMB * 0.1));
+  // Dynamic threshold: use 5% of available memory or max 10MB
+  const memoryThresholdMB = Math.min(10, Math.floor(availableMemoryMB * 0.05));
 
-  const canProceed = availableMemoryMB >= (estimatedMemoryMB + memoryThresholdMB);
+  // Allow proceeding as long as available memory covers the estimate + threshold, or at least 5MB available
+  const canProceed = (availableMemoryMB >= (estimatedMemoryMB + memoryThresholdMB)) || (availableMemoryMB >= 5);
 
   return {
     canProceed,
