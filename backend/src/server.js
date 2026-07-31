@@ -139,6 +139,25 @@ app.use('/data/collage_images', express.static(collageImagesRoot));
 app.use('/data/pixel_data', express.static(pixelDataRoot));
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
 
+// Helper: resolve pixel_data_path for an item, with disk-based fallback.
+// Catalog field `pixel_data_path` may be NULL for historical/upload-flow reasons
+// (e.g. standard upload createItem at ~L1007 never populated it). We fall back
+// to the convention `highenergy/<sanitizedItemId>.npz` and verify the file exists.
+async function resolvePixelDataPath(itemId, catalogPixelDataPath) {
+    if (catalogPixelDataPath) {
+        const r = safeJoin(pixelDataRoot, catalogPixelDataPath);
+        if (r.safe) {
+            try { await fs.access(r.fullPath); return catalogPixelDataPath; } catch {}
+        }
+    }
+    if (!itemId) return null;
+    const safeId = sanitizeFilename(itemId);
+    const relativePath = path.join('highenergy', `${safeId}.npz`);
+    const r = safeJoin(pixelDataRoot, relativePath);
+    if (!r.safe) return null;
+    try { await fs.access(r.fullPath); return relativePath; } catch { return null; }
+}
+
 // Multer setup for file uploads (use actual filenames, no UUID)
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -1509,7 +1528,7 @@ app.get("/api/items/:id/pixel-data", async (req, res) => {
         }
 
         const energyType = req.query.energy || "highenergy";
-        let pixelDataFilename = item.pixel_data_path;
+        let pixelDataFilename = await resolvePixelDataPath(item.id, item.pixel_data_path);
 
         if (!pixelDataFilename) {
             return res.status(404).json({ ok: false, error: "No pixel data path for this item" });
@@ -1598,13 +1617,17 @@ app.get("/api/items/:id", async (req, res) => {
 async function enrichObjectsWithPixelData(objects) {
   const allItems = await getItems();
   const itemMap = new Map(allItems.map(i => [i.id, i]));
-  return objects.map(obj => {
+  const resolved = [];
+  for (const obj of objects) {
     const item = itemMap.get(obj.id);
-    if (item?.pixel_data_path) {
-      return { ...obj, pixel_data_path: item.pixel_data_path };
+    const resolvedPath = await resolvePixelDataPath(obj.id, item?.pixel_data_path || null);
+    if (resolvedPath) {
+      resolved.push({ ...obj, pixel_data_path: resolvedPath });
+    } else {
+      resolved.push(obj);
     }
-    return obj;
-  });
+  }
+  return resolved;
 }
 
 // Render and save a collage combination as a PNG image
@@ -1750,27 +1773,29 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
             issue: 'item_deleted',
             message: `Item ${obj.id} not found in library`
           });
-        } else if (!item.pixel_data_path) {
-          issues.push({
-            objectId: obj.id,
-            objectLibrary: obj.library,
-            issue: 'no_pixel_data',
-            message: `Item ${obj.id} has no pixel data`
-          });
         } else {
-          const pixelDataPath = item.pixel_data_path;
-          const highEnergyPath = path.join(pixelDataRoot, pixelDataPath);
-          const lowEnergyPath = path.join(pixelDataRoot, pixelDataPath.replace(/^highenergy[\\/]/, 'lowenergy/'));
-          
-          try {
-            await fs.access(highEnergyPath);
-          } catch {
+          const pixelDataPath = await resolvePixelDataPath(obj.id, item.pixel_data_path);
+          if (!pixelDataPath) {
             issues.push({
               objectId: obj.id,
               objectLibrary: obj.library,
-              issue: 'pixel_data_missing',
-              message: `Pixel data file not found: ${pixelDataPath}`
+              issue: 'no_pixel_data',
+              message: `Item ${obj.id} has no pixel data`
             });
+          } else {
+            const highEnergyPath = path.join(pixelDataRoot, pixelDataPath);
+            const lowEnergyPath = path.join(pixelDataRoot, pixelDataPath.replace(/^highenergy[\\/]/, 'lowenergy/'));
+            
+            try {
+              await fs.access(highEnergyPath);
+            } catch {
+              issues.push({
+                objectId: obj.id,
+                objectLibrary: obj.library,
+                issue: 'pixel_data_missing',
+                message: `Pixel data file not found: ${pixelDataPath}`
+              });
+            }
           }
         }
       }
@@ -1811,7 +1836,7 @@ app.post('/api/render-preview', requireAuth, async (req, res) => {
             bagWidth = b.size?.width || 800;
             bagHeight = b.size?.height || 600;
             const item = itemMap.get(b.id);
-            const pixelDataPath = item?.pixel_data_path || null;
+            const pixelDataPath = await resolvePixelDataPath(b.id, item?.pixel_data_path || null);
             if (!pixelDataPath && !b.filepath) {
                 missingPixelDataObjs.push(b.id || 'unknown bag');
             } else if (!pixelDataPath) {
@@ -1833,11 +1858,11 @@ app.post('/api/render-preview', requireAuth, async (req, res) => {
             });
         }
 
-        const addObjects = (list, library) => {
+        const addObjects = async (list, library) => {
             if (!Array.isArray(list)) return;
             for (const obj of list) {
                 const item = itemMap.get(obj.id);
-                const pixelDataPath = item?.pixel_data_path || null;
+                const pixelDataPath = await resolvePixelDataPath(obj.id, item?.pixel_data_path || null);
                 if (!pixelDataPath && !obj.filepath) {
                     missingPixelDataObjs.push(obj.id || 'unknown');
                 } else if (!pixelDataPath) {
@@ -1860,8 +1885,8 @@ app.post('/api/render-preview', requireAuth, async (req, res) => {
             }
         };
 
-        addObjects(objects.threats, 'threat');
-        addObjects(objects['non-threats'], 'non-threat');
+        await addObjects(objects.threats, 'threat');
+        await addObjects(objects['non-threats'], 'non-threat');
 
         if (flatObjects.length === 0) {
             return res.status(400).json({ ok: false, error: 'No objects to render' });
@@ -1870,7 +1895,8 @@ app.post('/api/render-preview', requireAuth, async (req, res) => {
         const renderWarnings = [];
         
         const objectsWithData = flatObjects.filter(o => o.pixel_data_path);
-        if (objectsWithData.length === 0 && missingPixelDataObjs.length > 0) {
+        const objectsWithNoDataSource = missingPixelDataObjs.filter(id => !id.includes("falls back to PNG"));
+        if (objectsWithData.length === 0 && objectsWithNoDataSource.length > 0) {
             renderWarnings.push('No pixel data files (.npz) found for any objects. Preview may not render correctly.');
         }
 

@@ -1,28 +1,40 @@
 /**
  * GenerationService - Module-level singleton for incremental combination generation.
  *
- * This service survives component mount/unmount cycles because modules in Vite
- * are singletons. It stores the worker reference at module level so that when
- * the user navigates between pages, the generation continues in the background.
+ * Memory-efficient design:
+ * - generatedBuffer: all combos received from worker but not yet saved
+ * - state.combinations: ONLY the current display window (≤ ITEMS_PER_PAGE = 100)
+ * - After saving a page, it's evicted and the next page is pulled from buffer
  *
- * Components can subscribe to receive incremental batch updates.
- *
- * Auto-save: when params.autoSave=true, each received batch is converted to
- * saved-layout records and POSTed to POST /api/saved-layouts/batch-bulk for
- * sequential disk write (no parallel write lock contention).
+ * "Save as you go" mode: when enabled with a mode (annotations/both),
+ * automatically save pages of 100, evict, load next 100 from buffer, repeat.
  */
 
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import type { Item } from "../types/library";
-import type { GenerationParams, GenerationProgress, GenerationState, AutoSaveStatus } from "../types/generation";
+import type {
+  AutoSaveMode,
+  GenerationParams,
+  GenerationProgress,
+  GenerationState,
+  AutoSaveStatus,
+} from "../types/generation";
 import { getTransformedPolygon } from "./geometry";
 import { API_BASE_URL } from "../config/api";
+import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "./fetchWithTimeout";
 
 type Subscriber = (state: GenerationState) => void;
 
-// Module-level state (survives component mount/unmount)
+const ITEMS_PER_PAGE = 100;
+
 let worker: Worker | null = null;
 let autoSaveEnabled = false;
+let autoSaveMode: AutoSaveMode = "annotations";
+let generatedBuffer: CombinatorialResult[] = [];
+let autoSaveRunningRef = false;
+let pageSaveRunningRef = false;
+let loopWakeController: { resolve: (() => void) | null } = { resolve: null };
+
 let state: GenerationState = {
   isGenerating: false,
   combinations: [],
@@ -31,6 +43,7 @@ let state: GenerationState = {
   hasGeneratedResults: false,
   autoSaveStatus: null,
 };
+
 const subscribers = new Set<Subscriber>();
 
 function notifySubscribers() {
@@ -45,14 +58,17 @@ function notifySubscribers() {
 
 function persistToStorage() {
   try {
-    if (state.combinations.length > 0) {
-      const lightweightCombos = state.combinations.map(combo => ({
+    const allCombos = [...state.combinations, ...generatedBuffer];
+    if (allCombos.length > 0) {
+      const lightweightCombos = allCombos.map(combo => ({
         id: combo.id,
         bag: combo.bag ? { id: combo.bag.id } : null,
         threats: combo.threats?.map(t => ({ id: t.id })) || [],
         others: combo.others?.map(o => ({ id: o.id })) || [],
       }));
       sessionStorage.setItem("collageCombinations", JSON.stringify(lightweightCombos));
+    } else {
+      sessionStorage.removeItem("collageCombinations");
     }
     if (state.failures.length > 0) {
       sessionStorage.setItem("collageFailures", JSON.stringify(state.failures));
@@ -68,18 +84,17 @@ function persistToStorage() {
       try {
         sessionStorage.removeItem("collageCombinations");
         sessionStorage.removeItem("collageFailures");
-      } catch (clearErr) {
-        // Ignore cleanup errors
-      }
+      } catch (_) { /* ignore */ }
     }
   }
 }
 
-// ---- Auto-save helpers ----
+function refillDisplayWindow() {
+  while (state.combinations.length < ITEMS_PER_PAGE && generatedBuffer.length > 0) {
+    state.combinations.push(generatedBuffer.shift()!);
+  }
+}
 
-/**
- * Convert a CombinatorialResult to the saved-layout format expected by the backend.
- */
 function comboToLayout(combo: CombinatorialResult): any {
   const bagObject = combo.objects?.find((o: any) => o.library === "bag");
   let validRegionPolygon: any[] = [];
@@ -158,55 +173,121 @@ function comboToLayout(combo: CombinatorialResult): any {
   };
 }
 
-/**
- * Auto-save a batch of combinations to the backend (fire-and-forget with error tracking).
- */
-async function autoSaveBatch(batch: CombinatorialResult[]) {
-  if (!autoSaveEnabled || batch.length === 0) return;
-
+async function saveOneCombo(combo: CombinatorialResult, mode: AutoSaveMode): Promise<boolean> {
   try {
-    const layouts = batch.map(comboToLayout);
-    const res = await fetch(`${API_BASE_URL}/api/saved-layouts/batch-bulk`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/api/saved-layouts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ layouts }),
-    });
+      body: JSON.stringify(comboToLayout(combo)),
+    }, LONG_REQUEST_TIMEOUT_MS, 1);
+    if (!res.ok) return false;
 
-    if (state.autoSaveStatus) {
-      if (res.ok) {
-        state.autoSaveStatus = {
-          ...state.autoSaveStatus,
-          queued: state.autoSaveStatus.queued + batch.length,
-          batchesSent: state.autoSaveStatus.batchesSent + 1,
-        };
+    if (mode === "both") {
+      try {
+        await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ objects: combo.objects, name: combo.id }),
+        }, LONG_REQUEST_TIMEOUT_MS, 1);
+        if (state.autoSaveStatus) {
+          state.autoSaveStatus.imagesSaved++;
+        }
+      } catch { /* image failure non-fatal */ }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function savePage(page: CombinatorialResult[], mode: AutoSaveMode): Promise<number> {
+  let saved = 0;
+  for (const comb of page) {
+    if (await saveOneCombo(comb, mode)) saved++;
+  }
+  return saved;
+}
+
+async function processNextAutoSavePage(): Promise<boolean> {
+  const page = state.combinations.slice(0, ITEMS_PER_PAGE);
+  if (page.length === 0) return false;
+
+  const saved = await savePage(page, autoSaveMode);
+
+  if (state.autoSaveStatus) {
+    state.autoSaveStatus.queued += saved;
+    state.autoSaveStatus.batchesSent++;
+    state.autoSaveStatus.pagesCompleted++;
+  }
+
+  state.combinations = state.combinations.slice(page.length);
+  refillDisplayWindow();
+  notifySubscribers();
+  persistToStorage();
+  return state.combinations.length > 0 || generatedBuffer.length > 0;
+}
+
+function interruptibleSleep(ms: number, signal: { resolve: (() => void) | null }): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      signal.resolve = null;
+      resolve();
+    };
+    signal.resolve = finish;
+    setTimeout(finish, ms);
+  });
+}
+
+function wakeLoopNow() {
+  if (loopWakeController.resolve) {
+    loopWakeController.resolve();
+  }
+}
+
+async function runAutoSaveLoop() {
+  if (autoSaveRunningRef) return;
+  autoSaveRunningRef = true;
+
+  try {
+    while (autoSaveEnabled) {
+      if (pageSaveRunningRef) {
+        await interruptibleSleep(100, loopWakeController);
+        continue;
+      }
+      if (state.combinations.length >= ITEMS_PER_PAGE ||
+          (!state.isGenerating && state.combinations.length > 0)) {
+        const hasMore = await processNextAutoSavePage();
+        if (!hasMore && !state.isGenerating) break;
       } else {
-        state.autoSaveStatus = {
-          ...state.autoSaveStatus,
-          errors: state.autoSaveStatus.errors + 1,
-        };
-        console.error("[GenerationService] auto-save batch failed:", res.status);
+        await interruptibleSleep(500, loopWakeController);
+        if (!autoSaveEnabled) break;
       }
     }
-    notifySubscribers();
-  } catch (err) {
-    console.error("[GenerationService] auto-save fetch error:", err);
-    if (state.autoSaveStatus) {
-      state.autoSaveStatus = {
-        ...state.autoSaveStatus,
-        errors: state.autoSaveStatus.errors + 1,
-      };
-      notifySubscribers();
-    }
+  } finally {
+    autoSaveRunningRef = false;
+    wakeLoopNow();
+  }
+}
+
+async function autoSaveBatch(batch: CombinatorialResult[]) {
+  if (!autoSaveEnabled || batch.length === 0) return;
+  generatedBuffer.push(...batch);
+  refillDisplayWindow();
+  notifySubscribers();
+  persistToStorage();
+  wakeLoopNow();
+  if (!autoSaveRunningRef) {
+    runAutoSaveLoop();
   }
 }
 
 export const GenerationService = {
-  /**
-   * Start generating combinations in a Web Worker.
-   * The worker sends back incremental batches which we accumulate and notify subscribers.
-   */
+  ITEMS_PER_PAGE,
+
   startGeneration(params: GenerationParams) {
-    // If already generating, abort previous
     if (worker) {
       worker.terminate();
       worker = null;
@@ -221,19 +302,17 @@ export const GenerationService = {
       progress: { generated: 0, total: params.kValue },
       hasGeneratedResults: false,
       autoSaveStatus: autoSaveEnabled
-        ? { enabled: true, queued: 0, batchesSent: 0, errors: 0 }
+        ? { enabled: true, mode: autoSaveMode, queued: 0, batchesSent: 0, errors: 0, pagesCompleted: 0, imagesSaved: 0 }
         : null,
     };
+    generatedBuffer = [];
     notifySubscribers();
 
-    // Clear previous storage
     try {
       sessionStorage.removeItem("collageCombinations");
       sessionStorage.removeItem("collageFailures");
       sessionStorage.setItem("generationProgress", JSON.stringify(state.progress));
-    } catch (err) {
-      // ignore
-    }
+    } catch (_) { /* ignore */ }
 
     try {
       const newWorker = new Worker(
@@ -247,22 +326,24 @@ export const GenerationService = {
 
         if (response.type === "batch") {
           const batch = response.batch || [];
-          // Append batch to accumulated results
-          state.combinations.push(...batch);
           state.progress = response.progress;
           if (response.failures) {
             state.failures.push(...response.failures);
           }
-          notifySubscribers();
-          persistToStorage();
-
-          // Auto-save this batch if enabled (non-blocking)
-          if (autoSaveEnabled && batch.length > 0) {
+          if (autoSaveEnabled) {
             autoSaveBatch(batch);
+          } else {
+            generatedBuffer.push(...batch);
+            refillDisplayWindow();
+            if (state.combinations.length > 0 || generatedBuffer.length > 0) {
+              state.hasGeneratedResults = true;
+            }
+            notifySubscribers();
+            persistToStorage();
           }
         } else if (response.type === "complete") {
           state.isGenerating = false;
-          state.hasGeneratedResults = true;
+          state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
           state.failures.push(...(response.failures || []));
           state.progress = response.progress || null;
           notifySubscribers();
@@ -285,7 +366,6 @@ export const GenerationService = {
         worker = null;
       };
 
-      // Build effective distributions
       const effectiveThreatDist: Record<number, number> = {};
       for (let i = 1; i <= params.maxThreats; i++) {
         effectiveThreatDist[i] = (params.threatDistribution && params.threatDistribution[i]) ?? 0;
@@ -315,9 +395,6 @@ export const GenerationService = {
     }
   },
 
-  /**
-   * Abort current generation
-   */
   abort() {
     if (worker) {
       worker.terminate();
@@ -329,17 +406,11 @@ export const GenerationService = {
     notifySubscribers();
     try {
       sessionStorage.removeItem("generationProgress");
-    } catch (err) {
-      // ignore
-    }
+    } catch (_) { /* ignore */ }
   },
 
-  /**
-   * Subscribe to state changes. Returns unsubscribe function.
-   */
   subscribe(callback: Subscriber): () => void {
     subscribers.add(callback);
-    // Immediately call with current state
     try {
       callback(state);
     } catch (err) {
@@ -350,73 +421,121 @@ export const GenerationService = {
     };
   },
 
-  /**
-   * Get current state synchronously
-   */
   getState(): GenerationState {
-    return { ...state, combinations: [...state.combinations], failures: [...state.failures] };
+    return {
+      ...state,
+      combinations: [...state.combinations],
+      failures: [...state.failures],
+    };
   },
 
-  /**
-   * Check if currently generating
-   */
+  getBufferCount(): number {
+    return generatedBuffer.length;
+  },
+
+  getTotalPending(): number {
+    return state.combinations.length + generatedBuffer.length;
+  },
+
   isGenerating(): boolean {
     return state.isGenerating;
   },
 
-  /**
-   * Check if there are generated results that should block navigation
-   */
   hasGeneratedResults(): boolean {
     return state.hasGeneratedResults;
   },
 
-  /**
-   * Get current auto-save status
-   */
   getAutoSaveStatus(): AutoSaveStatus | null {
     return state.autoSaveStatus;
   },
 
-  /**
-   * Check if auto-save is enabled
-   */
   isAutoSaveEnabled(): boolean {
     return autoSaveEnabled;
   },
 
-  /**
-   * Dynamically enable or disable auto-save.
-   */
-  setAutoSaveEnabled(enabled: boolean) {
-    autoSaveEnabled = enabled;
-    if (enabled) {
-      if (!state.autoSaveStatus) {
-        state.autoSaveStatus = { enabled: true, queued: 0, batchesSent: 0, errors: 0 };
-      } else {
-        state.autoSaveStatus = { ...state.autoSaveStatus, enabled: true };
-      }
-      // If there are existing combinations and queued is 0, auto-save the existing batch
-      if (state.combinations.length > 0 && state.autoSaveStatus.queued === 0) {
-        autoSaveBatch(state.combinations);
-      }
-    } else {
-      if (state.autoSaveStatus) {
-        state.autoSaveStatus = { ...state.autoSaveStatus, enabled: false };
-      }
+  getAutoSaveMode(): AutoSaveMode {
+    return autoSaveMode;
+  },
+
+  setAutoSaveMode(mode: AutoSaveMode) {
+    autoSaveMode = mode;
+    if (state.autoSaveStatus) {
+      state.autoSaveStatus.mode = mode;
+      notifySubscribers();
     }
+  },
+
+  enableAutoSave(mode: AutoSaveMode) {
+    autoSaveEnabled = true;
+    autoSaveMode = mode;
+    if (!state.autoSaveStatus) {
+      state.autoSaveStatus = { enabled: true, mode, queued: 0, batchesSent: 0, errors: 0, pagesCompleted: 0, imagesSaved: 0 };
+    } else {
+      state.autoSaveStatus = { ...state.autoSaveStatus, enabled: true, mode };
+    }
+    notifySubscribers();
+    wakeLoopNow();
+    if (!autoSaveRunningRef && (state.combinations.length > 0 || generatedBuffer.length > 0)) {
+      runAutoSaveLoop();
+    }
+  },
+
+  disableAutoSave() {
+    autoSaveEnabled = false;
+    if (state.autoSaveStatus) {
+      state.autoSaveStatus = { ...state.autoSaveStatus, enabled: false };
+    }
+    wakeLoopNow();
     notifySubscribers();
   },
 
-  /**
-   * Clear all results (e.g. after bulk save)
-   */
+  isPageSaveInProgress(): boolean {
+    return pageSaveRunningRef || autoSaveRunningRef;
+  },
+
+  async saveCurrentPage(mode: AutoSaveMode): Promise<number> {
+    if (pageSaveRunningRef) {
+      return 0;
+    }
+    pageSaveRunningRef = true;
+    try {
+      const page = state.combinations.slice(0, ITEMS_PER_PAGE);
+      if (page.length === 0) return 0;
+
+      const saved = await savePage(page, mode);
+
+      if (state.autoSaveStatus) {
+        state.autoSaveStatus.queued += saved;
+        state.autoSaveStatus.batchesSent++;
+        state.autoSaveStatus.pagesCompleted++;
+        if (mode === "both") {
+          state.autoSaveStatus.imagesSaved += saved;
+        }
+      }
+
+      state.combinations = state.combinations.slice(page.length);
+      refillDisplayWindow();
+
+      if (!state.hasGeneratedResults && (state.combinations.length > 0 || generatedBuffer.length > 0)) {
+        state.hasGeneratedResults = true;
+      }
+      notifySubscribers();
+      persistToStorage();
+      wakeLoopNow();
+      return saved;
+    } finally {
+      pageSaveRunningRef = false;
+      wakeLoopNow();
+    }
+  },
+
   clear() {
     if (worker) {
       worker.terminate();
       worker = null;
     }
     autoSaveEnabled = false;
+    generatedBuffer = [];
     state = {
       isGenerating: false,
       combinations: [],
@@ -430,57 +549,49 @@ export const GenerationService = {
       sessionStorage.removeItem("collageCombinations");
       sessionStorage.removeItem("collageFailures");
       sessionStorage.removeItem("generationProgress");
-    } catch (err) {
-      // ignore
-    }
+    } catch (_) { /* ignore */ }
   },
 
-  /**
-   * Replace combinations (e.g. when restoring from storage)
-   */
   setCombinations(combinations: CombinatorialResult[], failures: FailureLog[]) {
-    // Don't overwrite if currently generating
     if (state.isGenerating) return;
-    state.combinations = combinations;
+    generatedBuffer = combinations;
+    state.combinations = [];
+    refillDisplayWindow();
     state.failures = failures;
-    state.hasGeneratedResults = combinations.length > 0;
+    state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
     notifySubscribers();
   },
 
-  /**
-   * Update a specific combination (e.g. after customization save)
-   */
   updateCombination(combinationId: string, updatedObjects: any[]) {
     if (state.isGenerating) return;
 
-    const comboIndex = state.combinations.findIndex(c => c.id === combinationId);
-    if (comboIndex === -1) return;
-
-    const existingCombo = state.combinations[comboIndex];
-    state.combinations[comboIndex] = {
-      ...existingCombo,
-      objects: updatedObjects,
-    };
-
-    notifySubscribers();
+    const idx1 = state.combinations.findIndex(c => c.id === combinationId);
+    if (idx1 !== -1) {
+      state.combinations[idx1] = { ...state.combinations[idx1], objects: updatedObjects };
+      notifySubscribers();
+      return;
+    }
+    const idx2 = generatedBuffer.findIndex(c => c.id === combinationId);
+    if (idx2 !== -1) {
+      generatedBuffer[idx2] = { ...generatedBuffer[idx2], objects: updatedObjects };
+    }
   },
 
-  /**
-   * Restore state from sessionStorage (e.g. after page refresh)
-   * Note: Only restores lightweight data (IDs). Full objects must be re-fetched.
-   */
   restoreFromStorage() {
     if (state.isGenerating) return;
 
-    const hasFullObjects = state.combinations.some(c => c.objects && c.objects.length > 0);
+    const hasFullObjects = state.combinations.some(c => c.objects && c.objects.length > 0) ||
+      generatedBuffer.some(c => c.objects && c.objects.length > 0);
     if (hasFullObjects) return;
 
     try {
       const combos = sessionStorage.getItem("collageCombinations");
       const failures = sessionStorage.getItem("collageFailures");
       if (combos) {
-        state.combinations = JSON.parse(combos);
-        state.hasGeneratedResults = true;
+        generatedBuffer = JSON.parse(combos);
+        state.combinations = [];
+        refillDisplayWindow();
+        state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
       }
       if (failures) {
         state.failures = JSON.parse(failures);
