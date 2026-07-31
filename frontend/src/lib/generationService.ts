@@ -1,27 +1,35 @@
 /**
  * GenerationService - Module-level singleton for incremental combination generation.
- * 
+ *
  * This service survives component mount/unmount cycles because modules in Vite
  * are singletons. It stores the worker reference at module level so that when
  * the user navigates between pages, the generation continues in the background.
- * 
+ *
  * Components can subscribe to receive incremental batch updates.
+ *
+ * Auto-save: when params.autoSave=true, each received batch is converted to
+ * saved-layout records and POSTed to POST /api/saved-layouts/batch-bulk for
+ * sequential disk write (no parallel write lock contention).
  */
 
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import type { Item } from "../types/library";
-import type { GenerationParams, GenerationProgress, GenerationState } from "../types/generation";
+import type { GenerationParams, GenerationProgress, GenerationState, AutoSaveStatus } from "../types/generation";
+import { getTransformedPolygon } from "./geometry";
+import { API_BASE_URL } from "../config/api";
 
 type Subscriber = (state: GenerationState) => void;
 
 // Module-level state (survives component mount/unmount)
 let worker: Worker | null = null;
+let autoSaveEnabled = false;
 let state: GenerationState = {
   isGenerating: false,
   combinations: [],
   failures: [],
   progress: null,
   hasGeneratedResults: false,
+  autoSaveStatus: null,
 };
 const subscribers = new Set<Subscriber>();
 
@@ -37,7 +45,6 @@ function notifySubscribers() {
 
 function persistToStorage() {
   try {
-    // Store only essential data (IDs and minimal info) to avoid quota limits
     if (state.combinations.length > 0) {
       const lightweightCombos = state.combinations.map(combo => ({
         id: combo.id,
@@ -57,7 +64,6 @@ function persistToStorage() {
     }
   } catch (err) {
     console.warn("[GenerationService] storage persist failed:", err);
-    // Clear storage if quota exceeded to prevent repeated errors
     if (err instanceof Error && err.name === 'QuotaExceededError') {
       try {
         sessionStorage.removeItem("collageCombinations");
@@ -65,6 +71,131 @@ function persistToStorage() {
       } catch (clearErr) {
         // Ignore cleanup errors
       }
+    }
+  }
+}
+
+// ---- Auto-save helpers ----
+
+/**
+ * Convert a CombinatorialResult to the saved-layout format expected by the backend.
+ */
+function comboToLayout(combo: CombinatorialResult): any {
+  const bagObject = combo.objects?.find((o: any) => o.library === "bag");
+  let validRegionPolygon: any[] = [];
+
+  if (bagObject?.polygonOutline) {
+    try {
+      validRegionPolygon = getTransformedPolygon(
+        { x: bagObject.transform.x, y: bagObject.transform.y },
+        { width: bagObject.transform.width, height: bagObject.transform.height },
+        bagObject.transform.rotation,
+        bagObject.polygonOutline
+      );
+    } catch { /* ignore */ }
+  }
+
+  const threatNames = combo.threats?.map(t => t.name) || [];
+  const otherNames = combo.others?.map(o => o.name) || [];
+  const allNames = [...threatNames, ...otherNames];
+  const name = `${combo.bag?.name || "bag"}${allNames.length > 0 ? ` containing ${allNames.join(", ")}` : ""}`;
+
+  const bagObj = bagObject ? {
+    id: bagObject.id,
+    subcategory: bagObject.subcategory?.toLowerCase().replace(/\s+/g, '-'),
+    filepath: bagObject.filepath,
+    center: { x: bagObject.transform.x, y: bagObject.transform.y },
+    size: { width: bagObject.transform.width, height: bagObject.transform.height },
+    originalPixelValue: bagObject.originalPixelValue,
+    currentPixelValue: bagObject.currentPixelValue,
+    oldPixelValue: bagObject.oldPixelValue,
+    polygonOutline: bagObject.polygonOutline,
+    validRegionPolygon,
+    layer: bagObject.layer,
+    tags: bagObject.tags || [],
+  } : null;
+
+  const threats = (combo.objects || [])
+    .filter((o: any) => o.library === "threat")
+    .map((obj: any) => ({
+      id: obj.id,
+      subcategory: obj.subcategory?.toLowerCase().replace(/\s+/g, '-'),
+      filepath: obj.filepath,
+      center: { x: obj.transform.x, y: obj.transform.y },
+      size: { width: obj.transform.width, height: obj.transform.height },
+      rotation: obj.transform.rotation,
+      originalPixelValue: obj.originalPixelValue,
+      currentPixelValue: obj.currentPixelValue,
+      oldPixelValue: obj.oldPixelValue,
+      layer: obj.layer,
+    }));
+
+  const nonThreats = (combo.objects || [])
+    .filter((o: any) => o.library !== "bag" && o.library !== "threat")
+    .map((obj: any) => ({
+      id: obj.id,
+      subcategory: obj.subcategory?.toLowerCase().replace(/\s+/g, '-'),
+      filepath: obj.filepath,
+      center: { x: obj.transform.x, y: obj.transform.y },
+      size: { width: obj.transform.width, height: obj.transform.height },
+      rotation: obj.transform.rotation,
+      originalPixelValue: obj.originalPixelValue,
+      currentPixelValue: obj.currentPixelValue,
+      oldPixelValue: obj.oldPixelValue,
+      layer: obj.layer,
+    }));
+
+  return {
+    id: combo.id,
+    name,
+    filepath: null,
+    layout_json: {
+      threat_count: threats.length,
+      non_threat_count: nonThreats.length,
+      objects: { bag: bagObj, threats, "non-threats": nonThreats },
+      createdAt: new Date().toISOString(),
+    },
+  };
+}
+
+/**
+ * Auto-save a batch of combinations to the backend (fire-and-forget with error tracking).
+ */
+async function autoSaveBatch(batch: CombinatorialResult[]) {
+  if (!autoSaveEnabled || batch.length === 0) return;
+
+  try {
+    const layouts = batch.map(comboToLayout);
+    const res = await fetch(`${API_BASE_URL}/api/saved-layouts/batch-bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ layouts }),
+    });
+
+    if (state.autoSaveStatus) {
+      if (res.ok) {
+        state.autoSaveStatus = {
+          ...state.autoSaveStatus,
+          queued: state.autoSaveStatus.queued + batch.length,
+          batchesSent: state.autoSaveStatus.batchesSent + 1,
+        };
+      } else {
+        state.autoSaveStatus = {
+          ...state.autoSaveStatus,
+          errors: state.autoSaveStatus.errors + 1,
+        };
+        console.error("[GenerationService] auto-save batch failed:", res.status);
+      }
+    }
+    notifySubscribers();
+  } catch (err) {
+    console.error("[GenerationService] auto-save fetch error:", err);
+    if (state.autoSaveStatus) {
+      state.autoSaveStatus = {
+        ...state.autoSaveStatus,
+        errors: state.autoSaveStatus.errors + 1,
+      };
+      notifySubscribers();
     }
   }
 }
@@ -81,12 +212,17 @@ export const GenerationService = {
       worker = null;
     }
 
+    autoSaveEnabled = params.autoSave === true;
+
     state = {
       isGenerating: true,
       combinations: [],
       failures: [],
       progress: { generated: 0, total: params.kValue },
       hasGeneratedResults: false,
+      autoSaveStatus: autoSaveEnabled
+        ? { enabled: true, queued: 0, batchesSent: 0, errors: 0 }
+        : null,
     };
     notifySubscribers();
 
@@ -110,14 +246,20 @@ export const GenerationService = {
         const response = event.data;
 
         if (response.type === "batch") {
+          const batch = response.batch || [];
           // Append batch to accumulated results
-          state.combinations.push(...(response.batch || []));
+          state.combinations.push(...batch);
           state.progress = response.progress;
           if (response.failures) {
             state.failures.push(...response.failures);
           }
           notifySubscribers();
           persistToStorage();
+
+          // Auto-save this batch if enabled (non-blocking)
+          if (autoSaveEnabled && batch.length > 0) {
+            autoSaveBatch(batch);
+          }
         } else if (response.type === "complete") {
           state.isGenerating = false;
           state.hasGeneratedResults = true;
@@ -163,6 +305,7 @@ export const GenerationService = {
         nonThreatDistribution: effectiveNonThreatDist,
         requireAtLeastOneNonThreat: params.requireAtLeastOneNonThreat || false,
         existingIds: params.existingIds || [],
+        batchSize: params.batchSize ?? 5000,
       });
     } catch (err) {
       console.error("[GenerationService] failed to start worker:", err);
@@ -182,6 +325,7 @@ export const GenerationService = {
     }
     state.isGenerating = false;
     state.progress = null;
+    autoSaveEnabled = false;
     notifySubscribers();
     try {
       sessionStorage.removeItem("generationProgress");
@@ -228,6 +372,43 @@ export const GenerationService = {
   },
 
   /**
+   * Get current auto-save status
+   */
+  getAutoSaveStatus(): AutoSaveStatus | null {
+    return state.autoSaveStatus;
+  },
+
+  /**
+   * Check if auto-save is enabled
+   */
+  isAutoSaveEnabled(): boolean {
+    return autoSaveEnabled;
+  },
+
+  /**
+   * Dynamically enable or disable auto-save.
+   */
+  setAutoSaveEnabled(enabled: boolean) {
+    autoSaveEnabled = enabled;
+    if (enabled) {
+      if (!state.autoSaveStatus) {
+        state.autoSaveStatus = { enabled: true, queued: 0, batchesSent: 0, errors: 0 };
+      } else {
+        state.autoSaveStatus = { ...state.autoSaveStatus, enabled: true };
+      }
+      // If there are existing combinations and queued is 0, auto-save the existing batch
+      if (state.combinations.length > 0 && state.autoSaveStatus.queued === 0) {
+        autoSaveBatch(state.combinations);
+      }
+    } else {
+      if (state.autoSaveStatus) {
+        state.autoSaveStatus = { ...state.autoSaveStatus, enabled: false };
+      }
+    }
+    notifySubscribers();
+  },
+
+  /**
    * Clear all results (e.g. after bulk save)
    */
   clear() {
@@ -235,12 +416,14 @@ export const GenerationService = {
       worker.terminate();
       worker = null;
     }
+    autoSaveEnabled = false;
     state = {
       isGenerating: false,
       combinations: [],
       failures: [],
       progress: null,
       hasGeneratedResults: false,
+      autoSaveStatus: null,
     };
     notifySubscribers();
     try {
@@ -269,42 +452,33 @@ export const GenerationService = {
    */
   updateCombination(combinationId: string, updatedObjects: any[]) {
     if (state.isGenerating) return;
-    
+
     const comboIndex = state.combinations.findIndex(c => c.id === combinationId);
     if (comboIndex === -1) return;
-    
-    // Update the combination with new objects while maintaining the structure
+
     const existingCombo = state.combinations[comboIndex];
     state.combinations[comboIndex] = {
       ...existingCombo,
       objects: updatedObjects,
     };
-    
+
     notifySubscribers();
-    
-    // Don't call persistToStorage() here - it would overwrite sessionStorage
-    // with lightweight data, losing the full objects. The sessionStorage
-    // is only for page refresh recovery, not for preserving edits.
   },
 
   /**
    * Restore state from sessionStorage (e.g. after page refresh)
    * Note: Only restores lightweight data (IDs). Full objects must be re-fetched.
-   * Will NOT overwrite in-memory state that already has objects (e.g. after customization save).
    */
   restoreFromStorage() {
     if (state.isGenerating) return;
-    
-    // Check if in-memory state already has combinations with objects
-    // If so, don't overwrite with lightweight storage data
+
     const hasFullObjects = state.combinations.some(c => c.objects && c.objects.length > 0);
     if (hasFullObjects) return;
-    
+
     try {
       const combos = sessionStorage.getItem("collageCombinations");
       const failures = sessionStorage.getItem("collageFailures");
       if (combos) {
-        // Restore as lightweight combos - full data needs to be re-fetched from backend
         state.combinations = JSON.parse(combos);
         state.hasGeneratedResults = true;
       }

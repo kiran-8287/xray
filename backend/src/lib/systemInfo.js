@@ -6,8 +6,12 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import config from './config.js';
 
-const CONFIG_FILE = path.join(process.cwd(), 'backend', 'data', 'system-config.json');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CONFIG_FILE = path.join(config.dataDir, 'system-config.json');
 
 /**
  * Get system information
@@ -139,10 +143,12 @@ export async function getWorkerCount(operation, defaultCount = 4) {
 export function checkMemoryAvailability(estimatedMemoryMB) {
   const systemInfo = getSystemInfo();
   const availableMemoryMB = systemInfo.freeMemoryMB;
-  const memoryThresholdMB = 500; // Minimum 500MB free
-  
-  const canProceed = availableMemoryMB >= (estimatedMemoryMB + memoryThresholdMB);
-  
+  // Dynamic threshold: use 5% of available memory or max 10MB
+  const memoryThresholdMB = Math.min(10, Math.floor(availableMemoryMB * 0.05));
+
+  // Allow proceeding as long as available memory covers the estimate + threshold, or at least 5MB available
+  const canProceed = (availableMemoryMB >= (estimatedMemoryMB + memoryThresholdMB)) || (availableMemoryMB >= 5);
+
   return {
     canProceed,
     availableMemoryMB,
@@ -153,7 +159,7 @@ export function checkMemoryAvailability(estimatedMemoryMB) {
     memoryUsagePercent: systemInfo.memoryUsagePercent,
     recommendation: canProceed 
       ? null 
-      : `Not enough memory. Need ${estimatedMemoryMB + memoryThresholdMB}MB but only ${availableMemoryMB}MB available. Consider reducing batch size.`
+      : `Not enough memory. Need ${Math.round(estimatedMemoryMB + memoryThresholdMB)}MB but only ${availableMemoryMB}MB available. Consider reducing batch size.`
   };
 }
 

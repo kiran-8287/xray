@@ -14,90 +14,73 @@ from PIL import Image
 
 def ReadDump(filename, raw=False, FlippedAndRotated=False, DenoiseRequired=False):
     """read dump file and return arrays of high, low, R, high_raw, low_raw"""
+    with open(filename, "rb") as f:
+        gate = f.readline().decode("ascii", errors="ignore").strip()
+        dims = f.readline().decode("ascii", errors="ignore").split()
+        cols = int(dims[0]) // 2
+        rows = int(dims[1])
+        line = f.readline()
 
-    #     filename = 'P00X001-2020120200189.dump.pgm'
-    f = open(filename, "rb")  # opening a binary file
+        check_denoise = False
+        while True:
+            if line and line.decode("ascii", errors="ignore")[0] == "#":
+                line = f.readline()
+                if not line:
+                    break
+                decoded_line = line.decode("ascii", errors="ignore")
+                if "denoised" in decoded_line:
+                    check_denoise = "denoised=0" not in decoded_line
+            else:
+                break
 
-    gate = f.readline().decode("ascii").strip()
-    dims = f.readline().decode("ascii").split()
-    cols = int(dims[0]) // 2
-    rows = int(dims[1])
-    line = f.readline()
+        n_pixels = rows * cols
+        high_low_bytes = f.read(n_pixels * 4)
+        if len(high_low_bytes) < n_pixels * 4:
+            raise ValueError(f"Truncated dump file: expected {n_pixels * 4} bytes, got {len(high_low_bytes)}")
 
-    check_denoise = False
-    while True:
+        # Fast vectorized read directly into uint16 (2 bytes per pixel)
+        raw_arr = np.frombuffer(high_low_bytes, dtype="<u2").reshape((rows, cols, 2))
+        high = raw_arr[:, :, 0]
+        low = raw_arr[:, :, 1]
 
-        if line.decode("ascii")[0] == "#":
-
+        # Read optional raw section
+        high_raw = high
+        low_raw = low
+        while True:
             line = f.readline()
-
             if not line:
                 break
-            decoded_line = line.decode("ascii", errors="ignore")
-            if "denoised" in decoded_line:
-                if "denoised=0" in decoded_line:
-                    check_denoise = False
-                # print("High and low are  not denoised")
-                else:
-                    check_denoise = True
-                    # print("High and low are denoised")
+            if line.decode("ascii", errors="ignore").strip() == "#Raw Data Dump":
+                raw_bytes = f.read(n_pixels * 4)
+                if len(raw_bytes) == n_pixels * 4:
+                    raw_arr2 = np.frombuffer(raw_bytes, dtype="<u2").reshape((rows, cols, 2))
+                    high_raw = raw_arr2[:, :, 0]
+                    low_raw = raw_arr2[:, :, 1]
+                break
+
+        if raw:
+            return high, low, high_raw, low_raw
+
+        # Fast vectorized R calculation using float32
+        with np.errstate(divide='ignore', invalid='ignore'):
+            high_f = high.astype(np.float32)
+            low_f = low.astype(np.float32)
+            mask = (low < 60000) & (low != 0) & (high != 0)
+            R = np.zeros((rows, cols), dtype=np.float32)
+            R[mask] = np.log(high_f[mask] / 65535.0) / np.log(low_f[mask] / 65535.0)
+            R[low >= 60000] = np.inf
+
+        if FlippedAndRotated:
+            import sys as _sys
+            print("The Image is flipped and Rotated", file=_sys.stderr)
+            return np.fliplr(np.transpose(high)), np.fliplr(np.transpose(low)), np.fliplr(np.transpose(R))
         else:
-            break
-
-    high = np.empty([rows, cols])
-    low = np.empty([rows, cols])
-
-    for i in range(rows):
-        for j in range(cols):
-            value = f.read(2)
-            high[i, j] = struct.unpack("H", value)[0]
-            value = f.read(2)
-            low[i, j] = struct.unpack("H", value)[0]
-
-    while True:
-        line = f.readline()
-        if line.decode("ascii").strip() == "#Raw Data Dump":
-
-            break
-
-    high_raw = np.empty([rows, cols])
-    low_raw = np.empty([rows, cols])
-
-    for i in range(rows):
-        for j in range(cols):
-            value = f.read(2)
-            high_raw[i, j] = struct.unpack("H", value)[0]
-            value = f.read(2)
-            low_raw[i, j] = struct.unpack("H", value)[0]
-
-    R = np.empty([rows, cols])
-    for i in range(rows):
-        for j in range(cols):
-            if low[i, j] < 60000 and low[i, j] != 0 and high[i, j] != 0:
-                R[i, j] = np.log(high[i, j] / 65535) / np.log(low[i, j] / 65535)
-            elif low[i, j] == 0:
-                R[i, j] = 0
-            elif high[i, j] == 0:
-                R[i, j] = 0
-            elif low[i, j] >= 60000:
-                R[i, j] = np.inf
-
-    if raw == True:
-        return high, low, high_raw, low_raw
-
-    elif FlippedAndRotated == True:
-        import sys as _sys
-        print("The Image is flipped and Rotated", file=_sys.stderr)
-        return np.fliplr(np.transpose(high)), np.fliplr(np.transpose(low)), np.fliplr(np.transpose(R))
-    else:
-        import sys as _sys
-        print("The Image is Not flipped and Rotated", file=_sys.stderr)
-
-        return high, low, R
+            return high, low, R
 
 def to_uint16(array):
-    """Convert a float64 array (values 0-65535) to uint16 for 16-bit PNG save."""
-    # Clip to valid uint16 range and convert
+    """Convert an array to uint16 for 16-bit PNG save safely without unnecessary memory allocations."""
+    if isinstance(array, np.ndarray) and array.dtype == np.uint16:
+        return array
     return np.clip(np.round(array), 0, 65535).astype(np.uint16)
 
 

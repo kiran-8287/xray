@@ -192,9 +192,9 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     return null;
   }
 
-  // Pagination state — show 50 items per page to prevent UI lag with 1000+ items
+  // Show all 100 items per batch without inner pagination
   const [page, setPage] = useState(0);
-  const PER_PAGE = 50;
+  const PER_PAGE = 100;
   const totalPages = Math.max(1, Math.ceil(staged.length / PER_PAGE));
   const safePage = Math.min(page, totalPages - 1);
   const startIdx = safePage * PER_PAGE;
@@ -256,10 +256,23 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   // Paginated removeIndex - called by JSX with page-local indices
   const removeIndex = (pageIdx: number) => {
     const copy = [...staged];
-    copy.splice(globalIdx(pageIdx), 1);
+    const targetIdx = globalIdx(pageIdx);
+    const removedItem = copy[targetIdx];
+    copy.splice(targetIdx, 1);
     setStaged(copy);
+
     const filesCopy = [...files];
-    filesCopy.splice(globalIdx(pageIdx), 1);
+    if (removedItem && (removedItem.file || removedItem.itemId)) {
+      const targetName = removedItem.file?.name || removedItem.itemId;
+      const idxInFiles = filesCopy.findIndex(
+        (f) => f.name === targetName || f === removedItem.file
+      );
+      if (idxInFiles !== -1) {
+        filesCopy.splice(idxInFiles, 1);
+      }
+    } else if (targetIdx < filesCopy.length) {
+      filesCopy.splice(targetIdx, 1);
+    }
     setFiles(filesCopy);
   };
   

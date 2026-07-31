@@ -1,15 +1,15 @@
 """process_raw_file.py — Process .dump.pgm and .tip files via Python readers.
 
 Single-file mode (CLI):
-    python process_raw_file.py \
-        --file-path /path/to/file.dump.pgm \
-        --file-type dump \
-        --item-id P01X010-2024101200923 \
-        --library-images-dir /path/to/library_images \
+    python process_raw_file.py \\
+        --file-path /path/to/file.dump.pgm \\
+        --file-type dump \\
+        --item-id P01X010-2024101200923 \\
+        --library-images-dir /path/to/library_images \\
         --pixel-data-dir /path/to/pixel_data
 
 Batch mode (stdin JSON):
-    echo '[{"filePath":"...","fileType":"dump","itemId":"...","libraryImagesDir":"...","pixelDataDir":"..."},...]' \
+    echo '[{"filePath":"...","fileType":"dump","itemId":"...","libraryImagesDir":"...","pixelDataDir":"..."},...]' \\
         | python process_raw_file.py --batch
 
 Outputs a JSON result line per file to stdout (NDJSON format).
@@ -17,6 +17,7 @@ Outputs a JSON result line per file to stdout (NDJSON format).
 import sys
 import json
 import os
+import gc
 import argparse
 from pathlib import Path
 import numpy as np
@@ -38,56 +39,71 @@ def resolve_scripts_dir():
     scripts_dir = script_dir.parent.parent / "scripts"
     return scripts_dir
 
+def ensure_uint16(arr):
+    """Ensure array is uint16; convert only if needed to avoid double allocation."""
+    if isinstance(arr, np.ndarray) and arr.dtype == np.uint16:
+        return arr
+    return np.clip(arr, 0, 65535).astype(np.uint16)
+
 def process_single_file(file_path, file_type, item_id, library_images_dir, pixel_data_dir):
     """Process a single raw file and return result dict."""
     scripts_dir = resolve_scripts_dir()
-    
+
     if file_type == "dump":
         dumpread_path = scripts_dir / "dumpread.py"
         if not dumpread_path.exists():
             raise FileNotFoundError(f"dumpread.py not found at {dumpread_path}")
         dumpread = import_from_path("dumpread", str(dumpread_path))
+
+        # ReadDump now returns uint16 arrays directly (no float64 allocation)
         high, low, R = dumpread.ReadDump(file_path, raw=False)
-        pixel_array = high  # 2D float64, shape (rows, cols)
-        img = dumpread.to_uint16(pixel_array)
-        rows, cols = pixel_array.shape
+        rows, cols = high.shape
+
+        # Ensure uint16 — to_uint16 is a no-op if already correct dtype
+        high_u16 = ensure_uint16(high)
+        low_u16  = ensure_uint16(low)
+
+        # Free float arrays as early as possible
+        del high, low, R
+        gc.collect()
+
+        img = high_u16  # preview PNG from high-energy channel
     else:  # file_type == "tip"
         tipread_path = scripts_dir / "tipread.py"
         if not tipread_path.exists():
             raise FileNotFoundError(f"tipread.py not found at {tipread_path}")
         tipread = import_from_path("tipread", str(tipread_path))
         low_raw, high_raw = tipread.read_tip(file_path)
-        img = np.rot90(high_raw, k=3)
-        rows, cols = img.shape
+
+        high_u16 = ensure_uint16(np.rot90(high_raw, k=3))
+        low_u16  = ensure_uint16(np.rot90(low_raw, k=3))
+        rows, cols = high_u16.shape
+
+        del high_raw, low_raw
+        gc.collect()
+
+        img = high_u16
 
     # Write 16-bit grayscale PNG
     os.makedirs(library_images_dir, exist_ok=True)
     png_path = os.path.join(library_images_dir, f"{item_id}.png")
     Image.fromarray(img).save(png_path)
 
-    # Write pixel data as .npz
+    # Write pixel data as .npz (always uint16 — cuts file size in half vs float64)
     highenergy_dir = os.path.join(pixel_data_dir, "highenergy")
-    lowenergy_dir = os.path.join(pixel_data_dir, "lowenergy")
+    lowenergy_dir  = os.path.join(pixel_data_dir, "lowenergy")
     os.makedirs(highenergy_dir, exist_ok=True)
-    os.makedirs(lowenergy_dir, exist_ok=True)
+    os.makedirs(lowenergy_dir,  exist_ok=True)
 
-    if file_type == "dump":
-        high_pixel_data = dumpread.to_uint16(high)
-        high_pixel_path = os.path.join(highenergy_dir, f"{item_id}.npz")
-        np.savez_compressed(high_pixel_path, pixel_data=high_pixel_data)
-        
-        low_pixel_data = dumpread.to_uint16(low)
-        low_pixel_path = os.path.join(lowenergy_dir, f"{item_id}.npz")
-        np.savez_compressed(low_pixel_path, pixel_data=low_pixel_data)
-    else:
-        high_rotated = np.rot90(high_raw, k=3)
-        low_rotated = np.rot90(low_raw, k=3)
-        
-        high_pixel_path = os.path.join(highenergy_dir, f"{item_id}.npz")
-        np.savez_compressed(high_pixel_path, pixel_data=high_rotated)
-        
-        low_pixel_path = os.path.join(lowenergy_dir, f"{item_id}.npz")
-        np.savez_compressed(low_pixel_path, pixel_data=low_rotated)
+    high_pixel_path = os.path.join(highenergy_dir, f"{item_id}.npz")
+    np.savez_compressed(high_pixel_path, pixel_data=high_u16)
+
+    low_pixel_path = os.path.join(lowenergy_dir, f"{item_id}.npz")
+    np.savez_compressed(low_pixel_path, pixel_data=low_u16)
+
+    # Explicitly free large arrays before next file
+    del high_u16, low_u16
+    gc.collect()
 
     pixel_filename = f"highenergy/{item_id}.npz"
     return {
@@ -131,7 +147,7 @@ def main():
             item_id = task.get("itemId", "unknown")
             library_images_dir = task.get("libraryImagesDir", "")
             pixel_data_dir = task.get("pixelDataDir", "")
-            
+
             try:
                 result = process_single_file(file_path, file_type, item_id, library_images_dir, pixel_data_dir)
                 print(json.dumps(result), flush=True)
@@ -142,7 +158,7 @@ def main():
                     "reason": str(e),
                 }
                 print(json.dumps(error_result), flush=True)
-        
+
         sys.exit(0)
     else:
         # Single-file mode (legacy CLI)

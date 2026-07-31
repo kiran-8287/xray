@@ -23,6 +23,10 @@ type NotificationType = "info" | "success" | "warning" | "error";
 type Notification = { id: number; type: NotificationType; message: string };
 type ConfirmDialog = { message: string; onConfirm: () => void; onCancel: () => void } | null;
 
+// Guardrails for large selections
+const SELECT_PERSIST_THRESHOLD = 50000;   // skip localStorage persist above (ID JSON > ~4MB)
+const SELECT_GENERATE_SOFT_CAP = 5000;    // confirm dialog before generating with > this many
+
 export default function LibraryPage() {
   const navigate = useNavigate();
   const [categorizedItems, setCategorizedItems] = useState<CategorizedItems>({});
@@ -119,6 +123,20 @@ export default function LibraryPage() {
     } catch { return false; }
   });
 
+  // State for "Save as you go" auto-save toggle
+  const [autoSave, setAutoSave] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("libraryAutoSave");
+      return saved ? JSON.parse(saved) : false;
+    } catch { return false; }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("libraryAutoSave", JSON.stringify(autoSave));
+    } catch { /* ignore */ }
+  }, [autoSave]);
+
   // Auto-set distribution preset when maxThreats changes
   useEffect(() => {
     const preset = threatDistributionPresets[maxThreats];
@@ -209,11 +227,18 @@ export default function LibraryPage() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("selectedItemIds", JSON.stringify(Array.from(selectedItems)));
+      if (selectedItems.size <= SELECT_PERSIST_THRESHOLD) {
+        localStorage.setItem("selectedItemIds", JSON.stringify(Array.from(selectedItems)));
+      } else {
+        localStorage.removeItem("selectedItemIds");
+        if (typeof console !== "undefined") {
+          console.warn(`[LibraryPage] Skipping selection persistence: ${selectedItems.size} IDs selected exceeds threshold of ${SELECT_PERSIST_THRESHOLD} to avoid localStorage quota. Selections will not survive page refresh.`);
+        }
+      }
     } catch (e) {
       // localStorage may be full or unavailable - silently skip
     }
-  }, [selectedItems]);
+  }, [selectedItems, SELECT_PERSIST_THRESHOLD]);
 
   const fetchCategorizedItems = async () => {
     try {
@@ -324,6 +349,30 @@ export default function LibraryPage() {
     });
   };
 
+  const selectAllCurrentPage = () => {
+    setSelectedItems((prev) => {
+      const next = new Set(prev);
+      paginatedItems.forEach((item) => next.add(item.id));
+      return next;
+    });
+  };
+
+  const deselectAllCurrentPage = () => {
+    setSelectedItems((prev) => {
+      const next = new Set(prev);
+      paginatedItems.forEach((item) => next.delete(item.id));
+      return next;
+    });
+  };
+
+  const pageSelectedCount = useMemo(() => {
+    let count = 0;
+    for (const item of paginatedItems) {
+      if (selectedItems.has(item.id)) count++;
+    }
+    return count;
+  }, [paginatedItems, selectedItems]);
+
   const selectAllCategory = (categoryKey: string) => {
     const items = Object.values(categorizedItems[categoryKey] || {}).flat();
     setSelectedItems((prev) => {
@@ -340,6 +389,35 @@ export default function LibraryPage() {
       items.forEach((item) => next.add(item.id));
       return next;
     });
+  };
+
+  // Bulk-delete helper: single request for any number of items.
+  // Falls back to per-item DELETE only if bulk endpoint fails unexpectedly.
+  const bulkDeleteLibraryItems = async (itemsToDelete: Item[]): Promise<number> => {
+    if (itemsToDelete.length === 0) return 0;
+    const ids = itemsToDelete.map((i) => i.id);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/items/bulk-delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        return data.deletedCount ?? ids.length;
+      }
+      throw new Error(data.error || "Bulk delete failed");
+    } catch (bulkErr) {
+      console.warn("bulkDelete failed, falling back to per-item delete:", bulkErr);
+      const chunkSize = 25;
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        await Promise.all(
+          chunk.map((id) => fetch(`${API_BASE_URL}/api/items/${id}`, { method: "DELETE" }))
+        );
+      }
+      return ids.length;
+    }
   };
 
   const deleteCategory = async (categoryKey: string) => {
@@ -366,9 +444,7 @@ export default function LibraryPage() {
     if (!confirmed) return;
 
     try {
-      await Promise.all(
-        itemsToProcess.map((item) => fetch(`${API_BASE_URL}/api/items/${item.id}`, { method: "DELETE" }))
-      );
+      await bulkDeleteLibraryItems(itemsToProcess);
       await fetchCategorizedItems();
       setSelectedItems((prev) => {
         const next = new Set(prev);
@@ -406,9 +482,7 @@ export default function LibraryPage() {
     if (!confirmed) return;
 
     try {
-      await Promise.all(
-        itemsToProcess.map((item) => fetch(`${API_BASE_URL}/api/items/${item.id}`, { method: "DELETE" }))
-      );
+      await bulkDeleteLibraryItems(itemsToProcess);
       await fetchCategorizedItems();
       setSelectedItems((prev) => {
         const next = new Set(prev);
@@ -453,13 +527,15 @@ export default function LibraryPage() {
     if (!confirmed) return;
 
     try {
-      const itemIds = Array.from(selectedItems);
-      await Promise.all(
-        itemIds.map((id) => fetch(`${API_BASE_URL}/api/items/${id}`, { method: "DELETE" }))
-      );
+      const itemsToDelete: Item[] = [];
+      for (const id of selectedItems) {
+        const it = itemByIdMap.get(id);
+        if (it) itemsToDelete.push(it);
+      }
+      const deleted = await bulkDeleteLibraryItems(itemsToDelete);
       await fetchCategorizedItems();
       setSelectedItems(new Set());
-      showNotification("success", `Deleted ${itemIds.length} item(s) successfully.`);
+      showNotification("success", `Deleted ${deleted} item(s) successfully.`);
     } catch (err) {
       console.error("Failed to delete selected items:", err);
       showNotification("error", "Failed to delete selected items. Please try again.");
@@ -594,28 +670,19 @@ export default function LibraryPage() {
     }
   };
 
-  const handleGenerateCollage = () => {
-    const selectedBags: Item[] = [];
-    const selectedThreats: Item[] = [];
-    const selectedOthers: Item[] = [];
-
-    selectedItems.forEach((itemId) => {
-      for (const subcats of Object.values(categorizedItems)) {
-        for (const items of Object.values(subcats as Record<string, Item[]>)) {
-          const match = (items as Item[]).find((item) => item.id === itemId);
-          if (match) {
-            const normalizedCategory = normalizeCategoryName(match.category);
-            if (normalizedCategory === "bags") selectedBags.push(match);
-            else if (normalizedCategory === "threats") selectedThreats.push(match);
-            else selectedOthers.push(match);
-            return;
-          }
-        }
-      }
-    });
+  const handleGenerateCollage = async () => {
+    const { selectedBags, selectedThreats, selectedOthers } = classifySelectedItems();
 
     if (selectedBags.length === 0) return;
 
+    // Soft cap: confirm before proceeding with very large selections
+    const totalSelected = selectedBags.length + selectedThreats.length + selectedOthers.length;
+    if (totalSelected > SELECT_GENERATE_SOFT_CAP) {
+      const confirmed = await showConfirm(
+        `You've selected ${totalSelected.toLocaleString()} items. Generating combinations with this many items may take a very long time and consume significant memory. Continue anyway?`
+      );
+      if (!confirmed) return;
+    }
     // Set generating state in the UI
     setIsGenerating(true);
     setGenerationProgress(`Generating ${kValue} combinations...`);
@@ -647,6 +714,7 @@ export default function LibraryPage() {
         nonThreatDistribution,
         requireAtLeastOneNonThreat,
         existingIds,
+        autoSave,
       });
 
       // Clear selections and navigate immediately — generation continues in background
@@ -655,26 +723,100 @@ export default function LibraryPage() {
     })();
   };
 
-  // K-combinations generation handler with Web Worker
-  const handleGenerate = useCallback(async (): Promise<{ results: CombinatorialResult[]; failures: FailureLog[] }> => {
+  // Build lookup maps: itemId -> category AND itemId -> Item object, both single-pass O(T)
+  const { itemCategoryMap, itemByIdMap } = useMemo(() => {
+    const catMap = new Map<string, string>();
+    const idMap = new Map<string, Item>();
+    for (const [cat, subcats] of Object.entries(categorizedItems)) {
+      const subcatsObj = subcats as Record<string, Item[]>;
+      for (const items of Object.values(subcatsObj)) {
+        for (const item of items) {
+          catMap.set(item.id, cat);
+          idMap.set(item.id, item);
+        }
+      }
+    }
+    return { itemCategoryMap: catMap, itemByIdMap: idMap };
+  }, [categorizedItems]);
+
+  // Pre-compute per-category and per-subcategory selection counts from selectedItems in O(S).
+  // Used by the sidebar to avoid O(T) .filter/.every scans per category/subcategory.
+  const sidebarSelectionStats = useMemo(() => {
+    const byCategory: Record<string, { selected: number; total: number }> = {};
+    const bySubcategory: Record<string, Record<string, { selected: number; total: number }>> = {};
+    // Seed totals
+    for (const [cat, subcats] of Object.entries(categorizedItems)) {
+      const subcatsObj = subcats as Record<string, Item[]>;
+      byCategory[cat] = { selected: 0, total: 0 };
+      bySubcategory[cat] = {};
+      for (const [subKey, items] of Object.entries(subcatsObj)) {
+        const len = (items as Item[]).length;
+        bySubcategory[cat][subKey] = { selected: 0, total: len };
+        byCategory[cat].total += len;
+      }
+    }
+    // Add selections — O(S) scan
+    for (const itemId of selectedItems) {
+      const item = itemByIdMap.get(itemId);
+      if (!item) continue;
+      const cat = item.category;
+      const sub = item.subcategory || "General";
+      if (byCategory[cat]) byCategory[cat].selected++;
+      if (bySubcategory[cat] && bySubcategory[cat][sub]) {
+        bySubcategory[cat][sub].selected++;
+      }
+    }
+    return { byCategory, bySubcategory };
+  }, [categorizedItems, selectedItems, itemByIdMap]);
+
+  // Helper: classify selected items into bags/threats/others in O(S) using the maps
+  const classifySelectedItems = useCallback(() => {
     const selectedBags: Item[] = [];
     const selectedThreats: Item[] = [];
     const selectedOthers: Item[] = [];
+    for (const itemId of selectedItems) {
+      const item = itemByIdMap.get(itemId);
+      if (!item) continue;
+      const normalized = normalizeCategoryName(item.category);
+      if (normalized === "bags") selectedBags.push(item);
+      else if (normalized === "threats") selectedThreats.push(item);
+      else selectedOthers.push(item);
+    }
+    return { selectedBags, selectedThreats, selectedOthers };
+  }, [selectedItems, itemByIdMap]);
 
-    selectedItems.forEach((itemId) => {
-      for (const subcats of Object.values(categorizedItems)) {
-        for (const items of Object.values(subcats as Record<string, Item[]>)) {
-          const match = (items as Item[]).find((item) => item.id === itemId);
-          if (match) {
-            const normalizedCategory = normalizeCategoryName(match.category);
-            if (normalizedCategory === "bags") selectedBags.push(match);
-            else if (normalizedCategory === "threats") selectedThreats.push(match);
-            else selectedOthers.push(match);
-            return;
-          }
-        }
+  // Calculate selection counts using the lookup map — O(S) instead of O(S×T)
+  const { selectedNonThreatCount, selectedThreatCount, selectedBagCount } = useMemo(() => {
+    let nonThreat = 0;
+    let threat = 0;
+    let bag = 0;
+    for (const itemId of selectedItems) {
+      const cat = itemCategoryMap.get(itemId);
+      if (!cat) continue;
+      const normalized = normalizeCategoryName(cat);
+      if (normalized === "bags") bag++;
+      else if (normalized === "threats") threat++;
+      else nonThreat++;
+    }
+    return { selectedNonThreatCount: nonThreat, selectedThreatCount: threat, selectedBagCount: bag };
+  }, [selectedItems, itemCategoryMap]);
+
+  // K-combinations generation handler with Web Worker
+  const handleGenerate = useCallback(async (): Promise<{ results: CombinatorialResult[]; failures: FailureLog[] }> => {
+    const { selectedBags, selectedThreats, selectedOthers } = (() => {
+      const bags: Item[] = [];
+      const threats: Item[] = [];
+      const others: Item[] = [];
+      for (const itemId of selectedItems) {
+        const item = itemByIdMap.get(itemId);
+        if (!item) continue;
+        const normalized = normalizeCategoryName(item.category);
+        if (normalized === "bags") bags.push(item);
+        else if (normalized === "threats") threats.push(item);
+        else others.push(item);
       }
-    });
+      return { selectedBags: bags, selectedThreats: threats, selectedOthers: others };
+    })();
 
     if (selectedBags.length === 0) {
       setGenerationProgress("Select at least one bag before generating combinations.");
@@ -775,7 +917,7 @@ export default function LibraryPage() {
       setIsGenerating(false);
       return { results: [], failures: [] };
     }
-  }, [selectedItems, categorizedItems, kValue, maxThreats, threatDistribution, maxNonThreats, nonThreatDistribution, requireAtLeastOneNonThreat]);
+  }, [selectedItems, itemByIdMap, kValue, maxThreats, threatDistribution, maxNonThreats, nonThreatDistribution, requireAtLeastOneNonThreat]);
 
   // Persist K value
   useEffect(() => {
@@ -839,36 +981,6 @@ export default function LibraryPage() {
   const activeCategoryConfig = getCategoryConfig(activeCategory);
   const totalCategoryItemsCount = useMemo(() => Object.values(subcategoriesData).flat().length, [subcategoriesData]);
 
-  // Build a lookup map for item categories to avoid repeated nested iteration
-  const itemCategoryMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const [cat, subcats] of Object.entries(categorizedItems)) {
-      const subcatsObj = subcats as Record<string, Item[]>;
-      for (const items of Object.values(subcatsObj)) {
-        for (const item of items) {
-          map.set(item.id, cat);
-        }
-      }
-    }
-    return map;
-  }, [categorizedItems]);
-
-  // Calculate selection counts using the lookup map
-  const { selectedNonThreatCount, selectedThreatCount, selectedBagCount } = useMemo(() => {
-    let nonThreat = 0;
-    let threat = 0;
-    let bag = 0;
-    for (const itemId of selectedItems) {
-      const cat = itemCategoryMap.get(itemId);
-      if (!cat) continue;
-      const normalized = normalizeCategoryName(cat);
-      if (normalized === "bags") bag++;
-      else if (normalized === "threats") threat++;
-      else nonThreat++;
-    }
-    return { selectedNonThreatCount: nonThreat, selectedThreatCount: threat, selectedBagCount: bag };
-  }, [selectedItems, itemCategoryMap]);
-
   // Check if selection is incomplete (needs bag + at least one threat)
   const hasIncompleteSelection = selectedItems.size > 0 && (selectedBagCount === 0 || selectedThreatCount === 0);
 
@@ -922,6 +1034,7 @@ export default function LibraryPage() {
           onDeleteCategory={deleteCategory}
           onDeleteSubcategory={deleteSubcategory}
           isGenerating={isGenerating}
+          sidebarSelectionStats={sidebarSelectionStats}
         />
         <main className="flex-1 flex flex-col overflow-hidden">
           <LibraryToolbar
@@ -974,6 +1087,10 @@ export default function LibraryPage() {
                   onPageChange={handlePageChange}
                   itemsPerPage={ITEMS_PER_PAGE}
                   totalItems={displayedItems.length}
+                  pageItemsCount={paginatedItems.length}
+                  pageSelectedCount={pageSelectedCount}
+                  onSelectAllPage={selectAllCurrentPage}
+                  onDeselectAllPage={deselectAllCurrentPage}
                 />
               </>
             )}
@@ -998,6 +1115,8 @@ export default function LibraryPage() {
         selectedNonThreatCount={selectedNonThreatCount}
         requireAtLeastOneNonThreat={requireAtLeastOneNonThreat}
         setRequireAtLeastOneNonThreat={setRequireAtLeastOneNonThreat}
+        autoSave={autoSave}
+        setAutoSave={setAutoSave}
         isGenerating={isGenerating}
         generationProgress={generationProgress}
         onGenerate={handleGenerate}

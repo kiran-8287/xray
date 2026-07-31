@@ -1,0 +1,4 @@
+runNumber,testType,parameter,passed,error,kValue,attempted,saved,failed,duration_ms,avgTimePerLayout_ms,peakRSS_mb,memoryGrowth_mb,objectCount,bagCount,threatCount,nonThreatCount
+1,k-combinations,5,true,"null",5,4,1,3,30049,30049,58,0,,,,
+2,k-combinations,10,false,No layouts saved,10,3,0,3,30013,0,58,0,,,,
+3,objects-per-combo,5,false,Timeout after 10000ms: save layout with 5 objects,,,false,,10014,,59,0,5,1,5,3
