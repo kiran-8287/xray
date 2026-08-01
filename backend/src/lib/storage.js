@@ -27,6 +27,84 @@ const CUSTOM_SUBCATEGORIES_FILE = path.join(DATA_DIR, 'customSubcategories.json'
 
 const DEFAULT_PARTITION_CAP = 5000;
 
+// ---- Duplicate ID helpers ----
+
+// Generate a fresh unique item ID (used when healing duplicate IDs or when a
+// batch item collides with an existing stored item).
+function generateFreshItemId(catKey, existingIds, salt = '') {
+  let id;
+  do {
+    id = `item_${catKey}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}${salt ? `_${salt}` : ''}`;
+  } while (existingIds.has(id));
+  return id;
+}
+
+// Heal duplicate item IDs across all category partition files.
+// Returns the number of duplicate occurrences that were re-assigned fresh IDs.
+// Runs once (guarded by a marker file) so existing corrupted data is repaired
+// without rewriting files on every startup.
+async function healDuplicateItemIds() {
+  const markerPath = path.join(DATA_DIR, '.dedup_healed');
+  try {
+    await fs.access(markerPath);
+    return 0; // Already healed on a previous run
+  } catch {
+    // Marker missing — proceed with healing
+  }
+
+  const catalog = await getCatalog();
+  let healedCount = 0;
+
+  for (const catKey of ['bags', 'threats', 'non_threats']) {
+    const catMeta = catalog.categories[catKey];
+    if (!catMeta) continue;
+
+    for (const pNum of catMeta.partitions) {
+      const partPath = getPartitionFilePath(catKey, pNum);
+      const items = await readJSONFile(partPath, []);
+      if (items.length === 0) continue;
+
+      const seen = new Set();
+      let changed = false;
+
+      for (let i = 0; i < items.length; i++) {
+        const id = items[i]?.id;
+        if (!id) {
+          // Missing ID — assign a fresh one
+          items[i].id = generateFreshItemId(catKey, seen, `heal_${i}`);
+          seen.add(items[i].id);
+          changed = true;
+          healedCount++;
+        } else if (seen.has(id)) {
+          // Duplicate ID — re-assign a fresh unique one
+          items[i].id = generateFreshItemId(catKey, seen, `heal_${i}`);
+          seen.add(items[i].id);
+          changed = true;
+          healedCount++;
+        } else {
+          seen.add(id);
+        }
+      }
+
+      if (changed) {
+        await writeJSONFileAtomic(partPath, items);
+      }
+    }
+  }
+
+  // Write marker so healing only runs once
+  try {
+    await fs.writeFile(markerPath, JSON.stringify({ healedAt: new Date().toISOString(), healedCount }), 'utf8');
+  } catch (err) {
+    console.warn('[storage] Failed to write dedup marker:', err);
+  }
+
+  if (healedCount > 0) {
+    console.log(`[storage] Healed ${healedCount} duplicate/missing item ID(s) across category partitions.`);
+  }
+  return healedCount;
+}
+
 // ---- Atomic write helpers & Locks ----
 
 // Self-clearing mutex per file path.
@@ -195,6 +273,9 @@ async function ensureDataDir() {
 
     await saveCatalog(catalog);
   }
+
+  // Heal any duplicate/missing item IDs from previous uploads (runs once)
+  await healDuplicateItemIds();
 }
 
 // ---- Items Partitioned Storage Core ----
@@ -269,14 +350,36 @@ async function createItemsBatch(itemsArray) {
   const catalog = await getCatalog();
   const createdItems = [];
 
-  // Group items by category
+  // Build a set of ALL existing item IDs across every category partition so we
+  // never store a duplicate ID (duplicates silently collapse the frontend's
+  // Set-based selection, e.g. "SELECT ALL" selecting only 200 of 300 items).
+  const existingIds = new Set();
+  for (const catKey of ['bags', 'threats', 'non_threats']) {
+    const catMeta = catalog.categories[catKey];
+    if (!catMeta) continue;
+    for (const pNum of catMeta.partitions) {
+      const partPath = getPartitionFilePath(catKey, pNum);
+      const partItems = await readJSONFile(partPath, []);
+      for (const it of partItems) {
+        if (it && it.id) existingIds.add(it.id);
+      }
+    }
+  }
+
+  // Group items by category, re-assigning any ID that collides with an existing
+  // stored item OR with another item in the same batch.
   const grouped = { bags: [], threats: [], non_threats: [] };
   for (const rawItem of itemsArray) {
     const catKey = normalizeCategoryKey(rawItem.category);
+    let id = rawItem.id;
+    if (!id || existingIds.has(id)) {
+      id = generateFreshItemId(catKey, existingIds);
+    }
+    existingIds.add(id);
     const item = {
-      id: rawItem.id || `item_${catKey}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       created_at: rawItem.created_at || new Date().toISOString(),
       ...rawItem,
+      id, // id must come AFTER the spread so a rawItem.id can never clobber our unique ID
     };
     grouped[catKey].push(item);
     createdItems.push(item);

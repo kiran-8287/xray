@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface PaginationProps {
   currentPage: number;
@@ -69,38 +68,6 @@ export default function Pagination({
 
   const startItem = totalItems === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
   const endItem = Math.min(currentPage * itemsPerPage, totalItems);
-
-  const getPageNumbers = () => {
-    const pages: (number | string)[] = [];
-    const maxVisible = 5;
-
-    if (totalPages <= maxVisible) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
-    } else {
-      pages.push(1);
-
-      if (currentPage > 3) {
-        pages.push("...");
-      }
-
-      const start = Math.max(2, currentPage - 2);
-      const end = Math.min(totalPages - 1, currentPage + 2);
-
-      for (let i = start; i <= end; i++) {
-        pages.push(i);
-      }
-
-      if (currentPage < totalPages - 3) {
-        pages.push("...");
-      }
-
-      pages.push(totalPages);
-    }
-
-    return pages;
-  };
 
   // Normalize user text input to an integer in [1, totalPages], with robust edge-case handling.
   // Returns { value, clamped, invalid, rawParsed } — rawParsed is the actual number entered (before clamping) for toast feedback.
@@ -223,56 +190,17 @@ export default function Pagination({
         </div>
 
         {showNav && (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => onPageChange(currentPage - 1)}
-              disabled={currentPage === 1}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-surface text-xs font-medium text-ink hover:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              disabled={currentPage <= 1 || totalPages <= 1}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink disabled:cursor-not-allowed disabled:opacity-40 transition-all hover:bg-panel"
             >
-              <ChevronLeft size={14} />
-              <span className="hidden sm:inline">Previous</span>
+              Prev
             </button>
-
-            <div className="flex items-center gap-1">
-              {getPageNumbers().map((page, index) => {
-                if (page === "...") {
-                  return (
-                    <span
-                      key={`ellipsis-${index}`}
-                      className="px-2 py-1 text-xs text-muted"
-                    >
-                      ...
-                    </span>
-                  );
-                }
-
-                const pageNum = page as number;
-                return (
-                  <button
-                    key={pageNum}
-                    onClick={() => onPageChange(pageNum)}
-                    className={`min-w-[30px] px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                      currentPage === pageNum
-                        ? "bg-accent text-white shadow-sm"
-                        : "border border-border bg-surface text-ink hover:bg-panel"
-                    }`}
-                  >
-                    {pageNum}
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              onClick={() => onPageChange(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-surface text-xs font-medium text-ink hover:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-            >
-              <span className="hidden sm:inline">Next</span>
-              <ChevronRight size={14} />
-            </button>
-
-            <div className="flex items-center gap-1 ml-1">
+            {/* Direct page-number input */}
+            <div className="flex items-center gap-1.5">
+              <span className="hidden sm:inline text-xs text-muted whitespace-nowrap">Page</span>
               <input
                 type="text"
                 inputMode="numeric"
@@ -282,12 +210,20 @@ export default function Pagination({
                 onBeforeInput={handleInputBeforeInput}
                 onKeyDown={handleInputKeyDown}
                 onBlur={handleInputBlur}
-                className="w-14 rounded-md border border-border bg-surface px-2 py-1 text-center text-xs font-medium text-ink focus:outline-none focus:ring-2 focus:ring-accent/50"
+                className="w-14 rounded-lg border border-border bg-surface px-2 py-1 text-center text-xs font-medium text-ink focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-40"
                 placeholder="1"
-                title="Type page number, then Enter. ArrowUp=Next, ArrowDown=Prev, Home=First, End=Last. Esc cancels."
+                title="Type page number, then Enter. Arrow keys, Home, End also work. Esc cancels."
+                disabled={totalPages <= 1}
               />
               <span className="text-xs text-muted whitespace-nowrap">/ {totalPages}</span>
             </div>
+            <button
+              onClick={() => onPageChange(currentPage + 1)}
+              disabled={currentPage >= totalPages || totalPages <= 1}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink disabled:cursor-not-allowed disabled:opacity-40 transition-all hover:bg-panel"
+            >
+              Next
+            </button>
           </div>
         )}
       </div>

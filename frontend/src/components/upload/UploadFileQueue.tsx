@@ -1013,7 +1013,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   const handleAddCustomSubcategory = async (name: string): Promise<void> => {
     if (!addingSubcategoryFor) return;
     
-    const res = await fetch('/api/custom-subcategories', {
+    const res = await fetch(`${API_BASE_URL}/api/custom-subcategories`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ category: addingSubcategoryFor, name }),
@@ -1316,10 +1316,10 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                     // ---- REMOVE MODE ----
                     // First, narrow indicesToUpdate to only items that actually contain any of the tags being removed
                     // (prevents a "0 changes made" confirmation dialog and keeps the counter honest)
-                    const tagSet = new Set(tagsToApply);
+                    const tagSet = new Set<string>(tagsToApply);
                     const actuallyAffected = indicesToUpdate.filter(idx => {
                       const t = staged[idx]?.tags || [];
-                      return t.some(tag => tagSet.has(tag));
+                      return t.some((tag: string) => tagSet.has(tag));
                     });
 
                     if (actuallyAffected.length === 0) {
@@ -1344,15 +1344,15 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       confirmLabel: `Remove ${tagsToApply.length} Tag${tagsToApply.length === 1 ? "" : "s"}`,
                       cancelLabel: "Cancel",
                       confirmVariant: "danger",
-                      onConfirm: () => {
-                        const copy = [...staged];
-                        actuallyAffected.forEach(idx => {
-                          const prev = copy[idx]?.tags || [];
-                          copy[idx] = {
-                            ...copy[idx],
-                            tags: prev.filter(t => !tagSet.has(t)),
-                          };
-                        });
+                    onConfirm: () => {
+                      const copy = [...staged];
+                      actuallyAffected.forEach(idx => {
+                        const prev = copy[idx]?.tags || [];
+                        copy[idx] = {
+                          ...copy[idx],
+                          tags: prev.filter((t: string) => !tagSet.has(t)),
+                        };
+                      });
                         setStaged(copy);
 
                         setShowMassTagSelector(false);

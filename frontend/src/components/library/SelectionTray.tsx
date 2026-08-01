@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Trash2 } from "lucide-react";
 
 interface SelectionTrayProps {
@@ -105,17 +105,70 @@ export default function SelectionTray({
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-muted uppercase tracking-wider">Generate</span>
         </div>
-        <input
-          type="number"
-          min={1}
-          max={10000}
-          value={kValue}
-          onChange={(e) => {
-            const val = parseInt(e.target.value) || 1;
-            setKValue(Math.max(1, Math.min(10000, val)));
-          }}
-          className="w-25 bg-surface border border-border rounded-xl px-3 py-1.5 text-sm text-ink font-mono text-center focus:outline-none focus:border-accent"
-        />
+        {(() => {
+          const [draft, setDraft] = useState(String(kValue));
+          const inputRef = useRef<HTMLInputElement>(null);
+
+          // Keep draft in sync when kValue changes externally (e.g., localStorage init)
+          useEffect(() => {
+            setDraft(String(kValue));
+          }, [kValue]);
+
+          // Auto-resize input width based on content length
+          useEffect(() => {
+            const el = inputRef.current;
+            if (!el) return;
+            const len = draft.length || 1;
+            // Base width ~6ch, grow ~1ch per digit, capped at ~18ch
+            const width = Math.min(18, 6 + len * 1);
+            el.style.width = `${width}ch`;
+          }, [draft]);
+
+          const commit = (raw: string) => {
+            const digits = raw.replace(/\D/g, "");
+            const val = digits === "" ? 1 : Math.min(1_000_000, Math.max(1, parseInt(digits, 10) || 1));
+            setKValue(val);
+            setDraft(String(val));
+          };
+
+          return (
+            <input
+              ref={inputRef}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={draft}
+              onChange={(e) => {
+                // Strip non-digits immediately so user can only type numbers
+                const sanitized = e.target.value.replace(/\D/g, "");
+                // Enforce 1,000,000 cap immediately while typing
+                if (sanitized === "") {
+                  setDraft("");
+                } else {
+                  const num = parseInt(sanitized, 10);
+                  if (num > 1_000_000) {
+                    setDraft("1000000");
+                  } else {
+                    setDraft(sanitized);
+                  }
+                }
+              }}
+              onBlur={() => commit(draft)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commit(draft);
+                  (e.target as HTMLInputElement).blur();
+                } else if (e.key === "Escape") {
+                  setDraft(String(kValue));
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              className="bg-surface border border-border rounded-xl px-3 py-1.5 text-sm text-ink font-mono text-center focus:outline-none focus:border-accent inline-block"
+              style={{ width: `${Math.min(18, 6 + (draft.length || 1) * 1)}ch` }}
+            />
+          );
+        })()}
         <span className="text-xs text-muted">unique combinations</span>
 
         <div className="w-px h-6 bg-border mx-1" />

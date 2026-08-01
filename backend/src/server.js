@@ -78,7 +78,14 @@ app.use((req, res, next) => {
         } catch (e) {
             // ignore metric labeling errors
         }
-        logger.info({ method: req.method, path: req.path, status: res.statusCode, duration_s: durationSec }, 'request_finished');
+        // Skip verbose logging for static asset requests and 304 cache revalidations.
+        // These dominate the log output when browsing the library (every thumbnail
+        // image triggers a request, and browsers re-validate cached resources with 304s).
+        const isStaticAsset = req.path.startsWith('/data/') || /\.(png|jpe?g|gif|svg|webp|ico|css|js|map|woff2?|ttf|npz|json)$/i.test(req.path);
+        const isCacheRevalidation = res.statusCode === 304;
+        if (!isStaticAsset && !isCacheRevalidation) {
+            logger.info({ method: req.method, path: req.path, status: res.statusCode, duration_s: durationSec }, 'request_finished');
+        }
     });
     next();
 });
