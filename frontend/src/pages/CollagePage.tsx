@@ -153,6 +153,7 @@ export default function CollagePage() {
   const [customOutputPath, setCustomOutputPath] = useState("");
   const [selectedDirHandle, setSelectedDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "single" | "bulk"; saveImages?: boolean } | null>(null);
+  const [isChoosingFolder, setIsChoosingFolder] = useState(false);
 
   useEffect(() => {
     GenerationService.restoreFromStorage();
@@ -422,6 +423,33 @@ export default function CollagePage() {
     await lowWritable.write(lowBlob);
     await lowWritable.close();
   }
+
+  const handleChooseDirectory = async () => {
+    if (typeof window === "undefined" || !(window as Window & typeof globalThis & { showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker) {
+      showToast("info", "This browser does not support folder picker. Please enter a custom path instead.");
+      setSaveLocationOption("custom");
+      return;
+    }
+
+    try {
+      setIsChoosingFolder(true);
+      const dirHandle = await (window as Window & typeof globalThis & { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker({
+        mode: "readwrite",
+        startIn: "desktop",
+      });
+      setSelectedDirHandle(dirHandle);
+      setSaveLocationOption("custom");
+      setCustomOutputPath("");
+      showToast("info", "Folder selected. Click Continue to save the collage images there.");
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        console.error("Error choosing directory:", err);
+        showToast("info", "Folder selection was cancelled or unavailable.");
+      }
+    } finally {
+      setIsChoosingFolder(false);
+    }
+  };
 
   const handleSaveImage = async () => {
     if (!selectedCombination) return;
@@ -1087,6 +1115,23 @@ export default function CollagePage() {
                   Choose a custom directory path
                 </span>
               </button>
+
+              <button
+                onClick={handleChooseDirectory}
+                disabled={isChoosingFolder}
+                className="w-full px-4 py-2.5 rounded-xl border border-border bg-surface text-ink font-semibold text-sm hover:bg-panel transition-all cursor-pointer text-left flex items-center gap-2"
+              >
+                <FolderOpen size={16} className="text-accent" />
+                <span>{isChoosingFolder ? "Selecting folder..." : "Choose folder from desktop"}</span>
+              </button>
+
+              {selectedDirHandle && (
+                <div className="mt-1 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
+                  <p className="text-xs text-emerald-800">
+                    Selected folder: <span className="font-semibold">{selectedDirHandle.name}</span>
+                  </p>
+                </div>
+              )}
 
               {saveLocationOption === "custom" && (
                 <div className="mt-2">

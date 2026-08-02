@@ -90,7 +90,38 @@ export function calculateOptimalWorkerCount(options = {}) {
   // Use the most conservative estimate (CPU cap ↓ memory ↓ hard cap)
   const recommendedWorkers = Math.min(cpuBasedWorkers, memoryBasedWorkers);
 
-  return Math.max(minWorkers, Math.min(recommendedWorkers, cpuBasedWorkers));
+  const bounded = Math.max(minWorkers, Math.min(recommendedWorkers, cpuBasedWorkers));
+
+  return Number.isFinite(bounded) ? bounded : minWorkers;
+}
+
+function isValidWorkerCount(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 8;
+}
+
+function normalizePersistedConfig(config) {
+  if (!config || typeof config !== 'object') {
+    return null;
+  }
+
+  const systemInfo = getSystemInfo();
+  const cpuCount = Number.isInteger(config.cpuCount) && config.cpuCount > 0
+    ? config.cpuCount
+    : systemInfo.cpuCount;
+  const cpuModel = typeof config.cpuModel === 'string' && config.cpuModel.trim()
+    ? config.cpuModel
+    : systemInfo.cpuModel;
+  const optimalWorkerCount = isValidWorkerCount(config.optimalWorkerCount)
+    ? config.optimalWorkerCount
+    : calculateOptimalWorkerCount();
+
+  return {
+    cpuCount,
+    cpuModel,
+    optimalWorkerCount,
+    detectedAt: typeof config.detectedAt === 'string' ? config.detectedAt : new Date().toISOString(),
+    lastUpdated: typeof config.lastUpdated === 'string' ? config.lastUpdated : new Date().toISOString(),
+  };
 }
 
 /**
@@ -126,26 +157,29 @@ export async function saveSystemConfig(config) {
  */
 export async function initializeSystemConfig() {
   const existingConfig = await loadSystemConfig();
-  
-  if (existingConfig && existingConfig.cpuCount) {
-    // Config exists, return it
-    return existingConfig;
-  }
-  
-  // First run - detect and save
   const systemInfo = getSystemInfo();
-  const optimalWorkers = calculateOptimalWorkerCount();
-  
+  const freshOptimalWorkers = calculateOptimalWorkerCount();
+  const now = new Date().toISOString();
+
+  const normalized = normalizePersistedConfig(existingConfig);
+  const hasBadPersistedConfig = !normalized
+    || normalized.cpuCount !== systemInfo.cpuCount
+    || normalized.cpuModel !== systemInfo.cpuModel
+    || !isValidWorkerCount(normalized.optimalWorkerCount)
+    || normalized.optimalWorkerCount !== freshOptimalWorkers;
+
   const config = {
     cpuCount: systemInfo.cpuCount,
     cpuModel: systemInfo.cpuModel,
-    optimalWorkerCount: optimalWorkers,
-    detectedAt: new Date().toISOString(),
-    lastUpdated: new Date().toISOString()
+    optimalWorkerCount: freshOptimalWorkers,
+    detectedAt: normalized?.detectedAt || now,
+    lastUpdated: now,
   };
-  
-  await saveSystemConfig(config);
-  
+
+  if (hasBadPersistedConfig) {
+    await saveSystemConfig(config);
+  }
+
   return config;
 }
 
@@ -167,24 +201,16 @@ const OPERATION_PROFILES = {
  * @returns {number} Worker count to use
  */
 export async function getWorkerCount(operation, defaultCount = 4) {
-  const config = await loadSystemConfig();
   const profile = OPERATION_PROFILES[operation] || OPERATION_PROFILES.default;
 
-  if (!config) {
-    // No persisted config yet — use operation-tuned defaults (not the raw fallback)
-    return calculateOptimalWorkerCount({
-      minWorkers: 1,
-      maxWorkers: profile.hardCap,
-      memoryPerWorkerMB: profile.memoryPerWorkerMB,
-      hardCap: profile.hardCap,
-    });
-  }
-
-  const base = config.optimalWorkerCount || calculateOptimalWorkerCount({
+  const recommended = calculateOptimalWorkerCount({
+    minWorkers: 1,
+    maxWorkers: profile.hardCap,
     memoryPerWorkerMB: profile.memoryPerWorkerMB,
     hardCap: profile.hardCap,
   });
-  return Math.max(1, Math.min(base, profile.hardCap));
+
+  return Math.max(1, Math.min(recommended, profile.hardCap));
 }
 
 /**

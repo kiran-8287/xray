@@ -2032,8 +2032,29 @@ app.get("/api/items/:id/pixel-data", async (req, res) => {
                 if (code === 0 && lastLine) {
                     try {
                         const parsed = JSON.parse(lastLine);
-                        if (parsed.status === 'error') reject(new Error(parsed.reason));
-                        else resolve(parsed);
+                        if (parsed.status === 'error') {
+                            reject(new Error(parsed.reason));
+                        } else if (Array.isArray(parsed)) {
+                            // ── Streaming format ──
+                            // read_npz.py streams the raw pixel array on the
+                            // last line: [[row0],[row1],...]
+                            let width = 0;
+                            let height = parsed.length;
+                            try {
+                                const meta = JSON.parse(lines[0]);
+                                if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
+                                    width = meta.width || (parsed[0] ? parsed[0].length : 0);
+                                    height = meta.height || height;
+                                }
+                            } catch {
+                                // fall through with dimensions derived from array
+                            }
+                            if (width === 0 && parsed[0]) width = parsed[0].length;
+                            resolve({ pixel_data: parsed, width, height });
+                        } else {
+                            // ── Legacy object format (older scripts) ──
+                            resolve(parsed);
+                        }
                     } catch { reject(new Error(`Invalid JSON from Python: ${lastLine}`)); }
                 } else {
                     reject(new Error(stderr.trim() || lastLine || 'Python process failed'));
@@ -2168,12 +2189,21 @@ app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
             lowEnergyDir = collageLowRoot;
         }
 
-        const enrichedObjects = await enrichObjectsWithPixelData(objects);
+        // Enrich objects separately for each energy type to ensure correct pixel data paths
+        const highEnergyObjects = await enrichObjectsWithPixelData(objects);
+        const lowEnergyObjects = await enrichObjectsWithPixelData(objects);
+        
+        // Update low energy objects to use lowenergy paths
+        for (const obj of lowEnergyObjects) {
+            if (obj.pixel_data_path) {
+                obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, "lowenergy/");
+            }
+        }
 
-        const highPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "highenergy");
+        const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, "highenergy");
         await fs.writeFile(path.join(highEnergyDir, filename), highPngBuffer);
 
-        const lowPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "lowenergy");
+        const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, "lowenergy");
         await fs.writeFile(path.join(lowEnergyDir, filename), lowPngBuffer);
 
         let isAbsolutePath = false;
@@ -2295,16 +2325,26 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                 }
 
                 if (flatObjects.length > 0) {
-                    const enrichedObjects = await enrichObjectsWithPixelData(flatObjects);
+                    // Enrich objects separately for each energy type to ensure correct pixel data paths
+                    const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
+                    const lowEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
+                    
+                    // Update low energy objects to use lowenergy paths
+                    for (const obj of lowEnergyObjects) {
+                        if (obj.pixel_data_path) {
+                            obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, "lowenergy/");
+                        }
+                    }
+                    
                     const safeLayoutId = String(layout.id || 'layout').replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'layout';
                     const baseName = `SB_${safeLayoutId}`;
 
                     // Render and add HIGH energy image
-                    const highPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, 'highenergy');
+                    const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, 'highenergy');
                     archive.append(highPngBuffer, { name: `${baseName}_high.png` });
 
                     // Render and add LOW energy image
-                    const lowPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, 'lowenergy');
+                    const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, 'lowenergy');
                     archive.append(lowPngBuffer, { name: `${baseName}_low.png` });
                 }
             } catch (err) {

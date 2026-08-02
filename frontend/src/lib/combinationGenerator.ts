@@ -19,6 +19,31 @@ const DEFAULT_BATCH_SIZE = 5000;
 const validRegionCache = new Map<string, Point[]>();
 const CACHE_MAX_SIZE = 100;
 
+// Bug #2 fix: module-level fast ID counter used by generateCombinationsIncremental.
+// Initialised once per call via initIdCounter() inside that function.
+let _idBasePrefix = '';
+let _idSequence = 1;
+
+/**
+ * O(1) ID generator — uses the pre-computed counter instead of scanning the
+ * full existingIds array on every combo.  Only valid inside
+ * generateCombinationsIncremental after initIdCounter() has run.
+ */
+function nextSynthesizedId(usedIds: Set<string>): string {
+  let seq = _idSequence;
+  let id: string;
+  do {
+    const letterIndex = Math.floor((seq - 1) / 99999);
+    const numberPart  = ((seq - 1) % 99999) + 1;
+    const letter = String.fromCharCode(65 + letterIndex);
+    id = `${_idBasePrefix}-${letter}${String(numberPart).padStart(5, '0')}`;
+    seq++;
+  } while (usedIds.has(id));
+  _idSequence = seq;
+  usedIds.add(id);
+  return id;
+}
+
 function parseOutline(item: Item): { x: number; y: number }[] | undefined {
   if (item.valid_region_points) {
     const raw = typeof item.valid_region_points === "string"
@@ -307,7 +332,9 @@ function buildPositionRotationCandidates(
 ): { x: number; y: number; rotation: number }[] {
   const validRegion: Point[] = getCachedValidRegion(bagObj) || [];
 
-  let minX = 0, maxX = 0, minY = 0, maxY = 0;
+  // Bug #5 fix: fall back to the bag's bounding box when no valid-region polygon
+  // exists, so random candidates don't all collapse to (0, 0).
+  let minX: number, maxX: number, minY: number, maxY: number;
   if (validRegion.length >= 3) {
     minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
     for (let i = 0; i < validRegion.length; i++) {
@@ -317,6 +344,12 @@ function buildPositionRotationCandidates(
       if (p.y < minY) minY = p.y;
       if (p.y > maxY) maxY = p.y;
     }
+  } else {
+    // Use the bag's axis-aligned bounding box as the candidate region.
+    minX = bagObj.transform.x - bagObj.transform.width / 2;
+    maxX = bagObj.transform.x + bagObj.transform.width / 2;
+    minY = bagObj.transform.y - bagObj.transform.height / 2;
+    maxY = bagObj.transform.y + bagObj.transform.height / 2;
   }
 
   const threatW = threat.width ? Math.round(threat.width) : 120;
@@ -542,7 +575,8 @@ function generateMultiThreatPlacements(
   nonThreats: Item[],
   nonThreatDistribution: Record<number, number>,
   requireAtLeastOneNonThreat: boolean = false,
-  globalUsedIds?: Set<string>
+  globalUsedIds?: Set<string>,
+  nextId?: (usedIds: Set<string>) => string
 ): { results: CombinatorialResult[]; failure: FailureLog | null } {
   const results: CombinatorialResult[] = [];
   const usedIds = globalUsedIds ?? new Set<string>();
@@ -552,7 +586,9 @@ function generateMultiThreatPlacements(
   const totalTarget = Object.values(targetByCount).reduce((sum, bounds) => sum + bounds.target, 0);
   
   // OPTIMIZATION: More attempts since overlap is allowed (much higher success rate)
-  const maxAttempts = Math.min(5000, Math.max(totalTarget * 5, 1000));
+  // Bug #1 fix: removed the Math.min(5000, ...) hard-cap so large targets can
+  // exhaust all bag/rotation candidates before giving up.
+  const maxAttempts = Math.max(totalTarget * 5, 1000);
 
   for (let attempt = 0; attempt < maxAttempts && results.length < totalTarget; attempt++) {
     // Pick threat count based on remaining targets
@@ -648,8 +684,10 @@ function generateMultiThreatPlacements(
     }
 
     // Generate unique synthesized ID
-    const generatedId = generateSynthesizedId(bag.id, Array.from(usedIds));
-    usedIds.add(generatedId.id);
+    const generatedId = nextId
+      ? { id: nextId(usedIds) }
+      : generateSynthesizedId(bag.id, Array.from(usedIds));
+    if (!nextId) usedIds.add(generatedId.id);
 
     results.push({
       id: generatedId.id,
@@ -811,7 +849,8 @@ function generateCleanCombinations(
   nonThreats: Item[],
   nonThreatDistribution: Record<number, number>,
   requireAtLeastOneNonThreat: boolean = false,
-  globalUsedIds?: Set<string>
+  globalUsedIds?: Set<string>,
+  nextId?: (usedIds: Set<string>) => string
 ): CombinatorialResult[] {
   const results: CombinatorialResult[] = [];
   const usedHashes = new Set<string>();
@@ -843,8 +882,10 @@ function generateCleanCombinations(
       usedHashes.add(hash);
 
       // Generate unique synthesized ID using global used IDs set
-      const generatedId = generateSynthesizedId(bag.id, Array.from(usedIds));
-      usedIds.add(generatedId.id);
+      const generatedId = nextId
+        ? { id: nextId(usedIds) }
+        : generateSynthesizedId(bag.id, Array.from(usedIds));
+      if (!nextId) usedIds.add(generatedId.id);
       results.push({
         id: generatedId.id,
         bag,
@@ -882,8 +923,10 @@ function generateCleanCombinations(
     });
 
     // Generate unique synthesized ID using global used IDs set
-    const generatedId = generateSynthesizedId(bag.id, Array.from(usedIds));
-    usedIds.add(generatedId.id);
+    const generatedId = nextId
+      ? { id: nextId(usedIds) }
+      : generateSynthesizedId(bag.id, Array.from(usedIds));
+    if (!nextId) usedIds.add(generatedId.id);
     results.push({
       id: generatedId.id,
       bag,
@@ -965,6 +1008,31 @@ export async function generateCombinations(
   // Seed with previously-saved IDs so the sequence continues from the highest
   // counter for the current date prefix instead of restarting at 00001.
   const usedIds = new Set<string>(existingIds); // Track all generated IDs globally
+
+  // Bug #2 fix: pre-compute the next sequence number ONCE from existingIds so
+  // that every subsequent ID generation is O(1) instead of O(N) per combo.
+  (function initIdCounter() {
+    const now = new Date();
+    const day   = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year  = String(now.getFullYear()).slice(-2);
+    _idBasePrefix = `SB${day}${month}${year}`;
+    let maxSeq = 0;
+    for (const id of existingIds) {
+      if (id.startsWith(_idBasePrefix + '-')) {
+        const suffix = id.slice(_idBasePrefix.length + 1);
+        if (suffix.length >= 6) {
+          const letter = suffix.charAt(0);
+          const num = parseInt(suffix.slice(1), 10);
+          if (!isNaN(num) && letter >= 'A' && letter <= 'Z') {
+            const seq = (letter.charCodeAt(0) - 65) * 99999 + num;
+            if (seq > maxSeq) maxSeq = seq;
+          }
+        }
+      }
+    }
+    _idSequence = maxSeq + 1;
+  })();
 
   type BagEntry = {
     bag: Item;
@@ -1063,7 +1131,8 @@ export async function generateCombinations(
         nonThreats,
         nonThreatDistribution,
         requireAtLeastOneNonThreat,
-        usedIds
+        usedIds,
+        nextSynthesizedId
       );
       if (placements.length > 0) {
         entry.usageCount++;
@@ -1087,7 +1156,8 @@ export async function generateCombinations(
         nonThreats,
         nonThreatDistribution,
         requireAtLeastOneNonThreat,
-        usedIds
+        usedIds,
+        nextSynthesizedId
       );
       if (placements.length > 0) {
         entry.usageCount++;
@@ -1196,7 +1266,10 @@ export async function generateCombinations(
     
     // Main adaptive generation loop
     let attemptsWithoutProgress = 0;
-    const maxAttemptsWithoutProgress = Math.min(5000, Math.max(k * 3, 1000));
+    // Bug #1 fix: removed the Math.min(5000, ...) hard-cap so the loop can
+    // exhaust all bags/rotations before giving up.  The limit is now generous
+    // but still bounded to prevent infinite loops on truly impossible inputs.
+    const maxAttemptsWithoutProgress = Math.max(k * 10, 50_000);
     let lastLogTime = Date.now();
     const LOG_INTERVAL_MS = 2000; // Log every 2 seconds
     
@@ -1390,11 +1463,13 @@ export async function generateCombinations(
       }
       
       // Generate unique synthesized ID
-      const generatedId = generateSynthesizedId(entry.bag.id, Array.from(usedIds));
-      usedIds.add(generatedId.id);
+      // Bug #2 fix: use the O(1) module-level counter instead of scanning the
+      // full usedIds array on every combo.
+      const generatedId = nextSynthesizedId(usedIds);
+      usedIds.add(generatedId);
       
       results.push({
-        id: generatedId.id,
+        id: generatedId,
         bag: entry.bag,
         threats: placedThreats.map(pt => pt.item),
         others: selectedNonThreats,
@@ -1509,6 +1584,32 @@ export async function generateCombinationsIncremental(
   const seenFailures = new Set<string>();
   const usedIds = new Set<string>(existingIds);
 
+  // Bug #2 fix: pre-compute the next sequence number ONCE from existingIds so
+  // that every subsequent ID generation is O(1) instead of O(N) per combo.
+  // We replicate the same date-prefix logic used by generateSynthesizedId.
+  (function initIdCounter() {
+    const now = new Date();
+    const day   = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year  = String(now.getFullYear()).slice(-2);
+    _idBasePrefix = `SB${day}${month}${year}`;
+    let maxSeq = 0;
+    for (const id of existingIds) {
+      if (id.startsWith(_idBasePrefix + '-')) {
+        const suffix = id.slice(_idBasePrefix.length + 1);
+        if (suffix.length >= 6) {
+          const letter = suffix.charAt(0);
+          const num = parseInt(suffix.slice(1), 10);
+          if (!isNaN(num) && letter >= 'A' && letter <= 'Z') {
+            const seq = (letter.charCodeAt(0) - 65) * 99999 + num;
+            if (seq > maxSeq) maxSeq = seq;
+          }
+        }
+      }
+    }
+    _idSequence = maxSeq + 1;
+  })();
+
   type BagEntry = {
     bag: Item;
     hasValidRegion: boolean;
@@ -1577,7 +1678,7 @@ export async function generateCombinationsIncremental(
         }
       }
       const { results: placements, failure } = generateMultiThreatPlacements(
-        entry.bag, threats, targetByCount, nonThreats, nonThreatDistribution, requireAtLeastOneNonThreat, usedIds
+        entry.bag, threats, targetByCount, nonThreats, nonThreatDistribution, requireAtLeastOneNonThreat, usedIds, nextSynthesizedId
       );
       if (placements.length > 0) {
         entry.usageCount++;
@@ -1594,7 +1695,7 @@ export async function generateCombinationsIncremental(
         return null;
       }
     } else {
-      const placements = generateCleanCombinations(entry.bag, 1, nonThreats, nonThreatDistribution, requireAtLeastOneNonThreat, usedIds);
+      const placements = generateCleanCombinations(entry.bag, 1, nonThreats, nonThreatDistribution, requireAtLeastOneNonThreat, usedIds, nextSynthesizedId);
       if (placements.length > 0) {
         entry.usageCount++;
         return placements[0];
@@ -1675,7 +1776,10 @@ export async function generateCombinationsIncremental(
     const exhaustedCount = new Set<number>();
     const maxConsecutivePerCount = Math.max(10, Math.ceil(k / 10));
     let attemptsWithoutProgress = 0;
-    const maxAttemptsWithoutProgress = Math.min(5000, Math.max(k * 3, 1000));
+    // Bug #1 fix: removed the Math.min(5000, ...) hard-cap so the loop can
+    // exhaust all bags/rotations before giving up.  The limit is now generous
+    // but still bounded to prevent infinite loops on truly impossible inputs.
+    const maxAttemptsWithoutProgress = Math.max(k * 10, 50_000);
     let lastBatchIndex = 0;
 
     while (results.length < k && totalRemaining > 0 && attemptsWithoutProgress < maxAttemptsWithoutProgress) {
@@ -1786,10 +1890,9 @@ export async function generateCombinationsIncremental(
       });
       for (const tObj of threatObjs) objects.push({ ...tObj, layer: layer++ });
 
-      const generatedId = generateSynthesizedId(entry.bag.id, Array.from(usedIds));
-      usedIds.add(generatedId.id);
+      const id = nextSynthesizedId(usedIds);
       results.push({
-        id: generatedId.id, bag: entry.bag,
+        id, bag: entry.bag,
         threats: placedThreats.map(pt => pt.item),
         others: selectedNonThreats, objects,
       });

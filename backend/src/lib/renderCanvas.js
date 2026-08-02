@@ -52,19 +52,45 @@ async function loadPixelDataFromNpz(npzPath) {
 
       if (code === 0 && lastLine) {
         try {
+          // read_npz.py streams output:
+          //   Line 1: {"width": W, "height": H, "pixel_data": "streaming"}
+          //   Last line: raw JSON array [[row0],[row1],...]
+          // The last line must be parsed FIRST because it could be either:
+          //   - a raw pixel array (streaming format) OR
+          //   - a metadata object (older/error format)
           const parsed = JSON.parse(lastLine);
+
           if (parsed.status === 'error') {
             reject(new Error(parsed.reason || 'Python script returned error'));
-          } else {
-            // Convert to the expected format for getPixelArray
+          } else if (Array.isArray(parsed)) {
+            // ── Streaming format ──
+            // parsed is the raw 2D pixel array. Extract width/height from the
+            // first metadata line ("pixel_data": "streaming").
+            let width = 0;
+            let height = parsed.length;
+            try {
+              const meta = JSON.parse(lines[0]);
+              if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
+                width = meta.width || (parsed[0] ? parsed[0].length : 0);
+                height = meta.height || height;
+              }
+            } catch {
+              // fall through with dimensions derived from the array itself
+            }
+            if (width === 0 && parsed[0]) width = parsed[0].length;
+            resolve({ pixel_data: parsed, width, height });
+          } else if (parsed && typeof parsed === 'object' && parsed.pixel_data) {
+            // ── Legacy object format ──
             resolve({
               pixel_data: parsed.pixel_data,
               width: parsed.width,
               height: parsed.height
             });
+          } else {
+            reject(new Error(`Unexpected Python output: ${lastLine.slice(0, 200)}`));
           }
         } catch {
-          reject(new Error(`Invalid JSON from Python: ${lastLine}`));
+          reject(new Error(`Invalid JSON from Python: ${lastLine.slice(0, 200)}`));
         }
       } else {
         reject(new Error(stderr.trim() || lastLine || 'Python process failed'));
@@ -85,6 +111,8 @@ function getPixelArray(pixelData) {
   if (pixelData.R) return pixelData.R;
   if (pixelData.high) return pixelData.high;
   if (pixelData.high_raw) return pixelData.high_raw;
+  if (pixelData.low) return pixelData.low;
+  if (pixelData.low_raw) return pixelData.low_raw;
   return null;
 }
 
