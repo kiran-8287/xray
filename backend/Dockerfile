@@ -1,8 +1,7 @@
 FROM node:20-alpine
 
 # Install curl for Docker healthcheck, and Python3 + pip + Pillow for raw file processing
-RUN apk add --no-cache curl python3 py3-pip py3-numpy py3-pillow && ln -sf /usr/bin/python3 /usr/bin/python
-RUN pip install --no-cache-dir scipy opencv-python-headless
+RUN apk add --no-cache curl python3 py3-pip py3-numpy py3-pillow py3-scipy py3-opencv && ln -sf /usr/bin/python3 /usr/bin/python
 
 WORKDIR /app
 
