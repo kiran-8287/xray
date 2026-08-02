@@ -1047,10 +1047,10 @@ export async function generateCombinations(
       for (const [count, weight] of Object.entries(threatDistribution)) {
         const countNum = parseInt(count);
         if (countNum <= threats.length && weight > 0) {
-          const target = Math.round((weight / totalWeight) * 1);
+          const target = Math.round((weight / totalWeight) * k);
           targetByCount[countNum] = {
             min: Math.max(0, Math.floor(target * (1 - tolerance))),
-            target: target,
+            target,
             max: Math.ceil(target * (1 + tolerance))
           };
         }
@@ -1568,7 +1568,7 @@ export async function generateCombinationsIncremental(
       for (const [count, weight] of Object.entries(threatDistribution)) {
         const countNum = parseInt(count);
         if (countNum <= threats.length && weight > 0) {
-          const target = Math.round((weight / totalWeight) * 1);
+          const target = Math.round((weight / totalWeight) * k);
           targetByCount[countNum] = {
             min: Math.max(0, Math.floor(target * (1 - tolerance))),
             target,

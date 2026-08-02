@@ -23,6 +23,16 @@
       "partitions": [
         1
       ]
+    },
+    "savedLayouts": {
+      "partitions": [
+        1,
+        2,
+        3
+      ],
+      "activePartition": 3,
+      "partitionCap": 5000,
+      "totalCount": 11500
     }
   }
 }

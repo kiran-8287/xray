@@ -267,6 +267,7 @@ async function readJSONFile(filePath, defaultValue = []) {
         console.warn(
           `[storage] Healed ${path.basename(filePath)} from .bak (${healed.length ?? healed.size ?? '?'} items) — previous atomic rename left 0-byte/corrupted primary.`
         );
+        await writeJSONFileAtomic(filePath, healed);
         return healed;
       } catch (bakErr) {
         if (bakErr.code !== 'ENOENT') {
@@ -277,6 +278,14 @@ async function readJSONFile(filePath, defaultValue = []) {
         } else {
           console.warn(`[storage] Corrupted JSON file: ${filePath}. Returning default.`);
         }
+
+        try {
+          await writeJSONFileAtomic(filePath, defaultValue);
+          console.warn(`[storage] Rebuilt ${path.basename(filePath)} with safe default state.`);
+        } catch (writeErr) {
+          console.warn(`[storage] Failed to rebuild ${path.basename(filePath)} with default state: ${writeErr.message}`);
+        }
+
         return defaultValue;
       }
     }

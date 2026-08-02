@@ -574,6 +574,7 @@ export default function CollagePage() {
         setSelectedThreats([]);
         setSelectedOthers([]);
         setBufferCount(0);
+        setSavedCount(0);
         try {
           sessionStorage.removeItem("collageCombinations");
           sessionStorage.removeItem("collageFailures");
@@ -583,6 +584,11 @@ export default function CollagePage() {
         } catch (e) {
           console.error("Error clearing storage after bulk save:", e);
         }
+        
+        // Reset bulk save state to idle after showing success message
+        setTimeout(() => {
+          setBulkSaveState({ status: "idle", message: "", savedCount: 0 });
+        }, 3000);
       } else {
         setBulkSaveState({
           status: "error",
@@ -758,6 +764,7 @@ export default function CollagePage() {
       setSelectedThreats([]);
       setSelectedOthers([]);
       setBufferCount(0);
+      setSavedCount(0);
       try {
         sessionStorage.removeItem("collageCombinations");
         sessionStorage.removeItem("collageFailures");
@@ -767,6 +774,11 @@ export default function CollagePage() {
       } catch (e) {
         console.error("Error clearing storage after bulk save:", e);
       }
+      
+      // Reset bulk save state to idle after showing success message
+      setTimeout(() => {
+        setBulkSaveState({ status: "idle", message: "", savedCount: 0 });
+      }, 3000);
     } catch (err) {
       console.error(err);
       setBulkSaveState({

@@ -2296,9 +2296,8 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
 
                 if (flatObjects.length > 0) {
                     const enrichedObjects = await enrichObjectsWithPixelData(flatObjects);
-                    const layoutSeed = [layout.id, layout.name].filter(Boolean).join('_').toString();
-                    const safeBaseName = layoutSeed.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'layout';
-                    const baseName = `SB_${safeBaseName}`;
+                    const safeLayoutId = String(layout.id || 'layout').replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'layout';
+                    const baseName = `SB_${safeLayoutId}`;
 
                     // Render and add HIGH energy image
                     const highPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, 'highenergy');

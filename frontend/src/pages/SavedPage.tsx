@@ -704,11 +704,13 @@ export default function SavedPage() {
       // Clear selection first so the UI stops showing deleted items immediately.
       clearExportSelection();
 
-      // Refresh the current page from the server so the next set of layouts appears right away.
+      // Always reload the target page directly to ensure immediate UI update.
+      // Don't rely on setPage() -> useEffect() which can be async.
+      await loadLayouts(targetPage);
+      
+      // Update page state if it changed
       if (targetPage !== page) {
         setPage(targetPage);
-      } else {
-        await loadLayouts(page);
       }
 
       // Show result message
@@ -818,11 +820,13 @@ export default function SavedPage() {
         setSelectedLayout(null);
       }
 
-      // Refresh the visible page from the server so the list stays in sync immediately.
+      // Always reload the target page directly to ensure immediate UI update.
+      // Don't rely on setPage() -> useEffect() which can be async.
+      await loadLayouts(targetPage);
+      
+      // Update page state if it changed
       if (targetPage !== page) {
         setPage(targetPage);
-      } else {
-        await loadLayouts(page);
       }
 
       // Close confirmation dialog
