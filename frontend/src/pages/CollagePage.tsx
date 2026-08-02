@@ -321,6 +321,28 @@ export default function CollagePage() {
     }
   }, [failures]);
 
+  // Warn user and clean up if they reload during generation
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      // Only warn if generation is in progress
+      if (GenerationService.isGenerating()) {
+        // Clean up the generation process
+        GenerationService.abort();
+
+        // Show browser's native confirmation dialog
+        const message = "Combination generation is in progress. If you reload, all progress will be lost. Are you sure you want to continue?";
+        event.returnValue = message;
+        return message;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
+
   const handleToggleAutoSave = (checked: boolean) => {
     if (checked) {
       setShowAutoSaveModeDialog(true);
@@ -433,7 +455,7 @@ export default function CollagePage() {
 
     try {
       setIsChoosingFolder(true);
-      const dirHandle = await (window as Window & typeof globalThis & { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker({
+      const dirHandle = await (window as Window & typeof globalThis & { showDirectoryPicker: (options?: { mode?: string; startIn?: string }) => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker({
         mode: "readwrite",
         startIn: "desktop",
       });
