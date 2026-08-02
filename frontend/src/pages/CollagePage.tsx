@@ -17,11 +17,11 @@ const ITEMS_PER_PAGE = GenerationService.ITEMS_PER_PAGE;
 const MAX_CONCURRENT_RENDERS = 2; // Limit concurrent image rendering to prevent backend overload
 
 const toastStyles = `
-  @keyframes slide-down {
-    from { transform: translate(-50%, -20px); opacity: 0; }
+  @keyframes slide-up {
+    from { transform: translate(-50%, 20px); opacity: 0; }
     to { transform: translate(-50%, 0); opacity: 1; }
   }
-  .animate-slide-down { animation: slide-down 0.25s ease-out; }
+  .animate-slide-up { animation: slide-up 0.25s ease-out; }
 `;
 
 type CollageToast = { id: string; type: "info"; message: string };
@@ -822,8 +822,9 @@ export default function CollagePage() {
   const totalPending = combinations.length + bufferCount;
   const totalRequested = generationProgress?.total || 0;
   const totalGenerated = generationProgress?.generated || 0;
+  // Only show auto-save banner while there are still combinations to process or generation is active
   const showAutoSaveBanner = autoSaveStatus?.enabled && (
-    isGenerating || totalPending > 0 || (generationProgress?.total ?? 0) > 0 || autoSaveStatus.queued > 0 || autoSaveStatus.pagesCompleted > 0
+    isGenerating || totalPending > 0
   );
 
   return (
@@ -1129,11 +1130,15 @@ export default function CollagePage() {
       {combinations.length === 0 && failures.length === 0 && !isGenerating ? (
         <div className="text-center py-32 px-12 bg-panel rounded-2xl border border-border shadow-card">
           <div className="w-20 h-20 bg-surface rounded-full flex items-center justify-center mx-auto mb-5 border-2 border-border">
-            <Grid3X3 size={34} className="text-muted/30" />
+            <CheckCircle2 size={34} className="text-emerald-500" />
           </div>
-          <h3 className="text-xl font-bold text-ink mb-2 font-heading">No scanned bags selected</h3>
+          <h3 className="text-xl font-bold text-ink mb-2 font-heading">
+            {autoSaveStatus?.enabled ? "All combinations saved!" : "No scanned bags selected"}
+          </h3>
           <p className="text-base text-muted mb-8 max-w-md mx-auto leading-relaxed">
-            Please go to the Library page and select bags and objects to generate combinations.
+            {autoSaveStatus?.enabled
+              ? `All ${(autoSaveStatus.queued || totalRequested).toLocaleString()} combinations have been saved successfully.`
+              : "Please go to the Library page and select bags and objects to generate combinations."}
           </p>
           <button
             onClick={handleNavigateToLibrary}
@@ -1156,10 +1161,10 @@ export default function CollagePage() {
                 </p>
               )}
               <p>
-                {totalGenerated > 0
-                  ? `${combinations.length.toLocaleString()} showing now${bufferCount > 0 ? ` · ${bufferCount.toLocaleString()} in buffer` : ""}${savedCount > 0 ? ` · ${savedCount.toLocaleString()} already saved` : ""}${isGenerating ? ` · generating ${totalGenerated.toLocaleString()}/${totalRequested.toLocaleString()}` : ""}`
-                  : isGenerating
-                  ? `Generating ${generationProgress?.generated || 0} / ${generationProgress?.total || 0} combinations...`
+                {isGenerating
+                  ? `Generating ${totalGenerated.toLocaleString()}/${totalRequested.toLocaleString()} combinations...`
+                  : totalGenerated > 0
+                  ? `${combinations.length.toLocaleString()} showing now${bufferCount > 0 ? ` · ${bufferCount.toLocaleString()} in buffer` : ""}${savedCount > 0 ? ` · ${savedCount.toLocaleString()} saved` : (autoSaveStatus?.queued ?? 0) > 0 ? ` · ${autoSaveStatus!.queued.toLocaleString()} saved` : ""}`
                   : "0 combinations generated"}
               </p>
             </div>
@@ -1280,11 +1285,11 @@ export default function CollagePage() {
       )}
 
       {toasts.length > 0 && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 pointer-events-none">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 pointer-events-none">
           {toasts.map((t) => (
             <div
               key={t.id}
-              className="flex items-center gap-2 px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 shadow-lg text-sm font-medium animate-slide-down"
+              className="flex items-center gap-2 px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 shadow-lg text-sm font-medium animate-slide-up"
             >
               <span>{t.message}</span>
             </div>

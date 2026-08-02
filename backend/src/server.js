@@ -51,8 +51,10 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "100mb" }));
 
-// Structured logger
-const logger = pino({ level: config.logLevel });
+// Structured logger - set to warn to reduce terminal noise
+const logger = pino({ 
+  level: config.logLevel === 'info' ? 'warn' : config.logLevel
+});
 
 // Prometheus metrics
 const collectDefaultMetrics = client.collectDefaultMetrics;
@@ -172,18 +174,11 @@ app.use((req, res, next) => {
         in_flight: inFlightAtStart,
         ...mem0,
     };
+    // Only log to monitoring.log file, not to console (reduces terminal noise)
     try {
         logStream.write(`${JSON.stringify(startEntry)}\n`);
     } catch {
         /* swallow: logger must never break request flow */
-    }
-    try {
-        logger.info(
-            { requestId, method: req.method, path: req.path, route: routeTemplate, page_hint, in_flight: inFlightAtStart },
-            'request_started'
-        );
-    } catch {
-        /* ignore */
     }
 
     function finishHandler() {
@@ -231,23 +226,6 @@ app.use((req, res, next) => {
         };
         try {
             logStream.write(`${JSON.stringify(finishEntry)}\n`);
-        } catch {
-            /* ignore */
-        }
-        try {
-            logger.info(
-                {
-                    requestId,
-                    method: req.method,
-                    path: req.path,
-                    status: res.statusCode,
-                    duration_s: finishEntry.duration_s,
-                    page_hint,
-                    in_flight: inFlightAtEnd,
-                    rss_mb: mem1.rss_mb,
-                },
-                'request_finished'
-            );
         } catch {
             /* ignore */
         }
@@ -1115,110 +1093,6 @@ app.post('/api/saved-layouts/batch-bulk/drain', requireAuth, async (_req, res) =
     }
 });
 
-// Export saved layout images as a ZIP archive (MUST be before /:id route)
-app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
-    try {
-        const layoutIds = req.query.ids;
-        let targetLayouts = [];
-        
-        if (layoutIds && typeof layoutIds === 'string') {
-            const ids = layoutIds.split(',').map(id => id.trim()).filter(Boolean);
-            const allLayouts = await getSavedLayouts();
-            targetLayouts = allLayouts.filter(l => ids.includes(l.id));
-        } else {
-            targetLayouts = await getSavedLayouts();
-        }
-        
-        if (targetLayouts.length === 0) {
-            return res.status(404).json({ ok: false, error: 'No layouts found to export' });
-        }
-        
-        const zipFilename = `saved-layouts-${new Date().toISOString().slice(0, 10)}.zip`;
-        res.setHeader('Content-Type', 'application/zip');
-        res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
-        
-        const archive = archiver('zip', { zlib: { level: 6 } });
-        archive.pipe(res);
-        
-        for (const layout of targetLayouts) {
-            try {
-                const objects = layout.layout_json?.objects || {};
-                const flatObjects = [];
-                
-                if (objects.bag) {
-                    flatObjects.push({
-                        id: objects.bag.id,
-                        filepath: objects.bag.filepath,
-                        pixel_data_path: objects.bag.pixel_data_path,
-                        transform: {
-                            x: objects.bag.center?.x || 0,
-                            y: objects.bag.center?.y || 0,
-                            width: objects.bag.size?.width || 800,
-                            height: objects.bag.size?.height || 600,
-                            rotation: 0,
-                        },
-                        layer: objects.bag.layer || 0,
-                    });
-                }
-                
-                if (Array.isArray(objects.threats)) {
-                    for (const obj of objects.threats) {
-                        flatObjects.push({
-                            id: obj.id,
-                            filepath: obj.filepath,
-                            pixel_data_path: obj.pixel_data_path,
-                            transform: {
-                                x: obj.center?.x || 0,
-                                y: obj.center?.y || 0,
-                                width: obj.size?.width || 100,
-                                height: obj.size?.height || 100,
-                                rotation: obj.rotation || 0,
-                            },
-                            layer: obj.layer || 1,
-                        });
-                    }
-                }
-                
-                if (Array.isArray(objects['non-threats'])) {
-                    for (const obj of objects['non-threats']) {
-                        flatObjects.push({
-                            id: obj.id,
-                            filepath: obj.filepath,
-                            pixel_data_path: obj.pixel_data_path,
-                            transform: {
-                                x: obj.center?.x || 0,
-                                y: obj.center?.y || 0,
-                                width: obj.size?.width || 100,
-                                height: obj.size?.height || 100,
-                                rotation: obj.rotation || 0,
-                            },
-                            layer: obj.layer || 2,
-                        });
-                    }
-                }
-                
-                if (flatObjects.length > 0) {
-                    const enrichedObjects = await enrichObjectsWithPixelData(flatObjects);
-                    const pngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "highenergy");
-                    
-                    const safeName = layout.name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
-                    archive.append(pngBuffer, { name: `${safeName}.png` });
-                }
-            } catch (err) {
-                console.error(`[export] Failed to render layout ${layout.id}:`, err);
-            }
-        }
-        
-        await archive.finalize();
-        
-    } catch (err) {
-        console.error('[export] Error:', err);
-        if (!res.headersSent) {
-            res.status(500).json({ ok: false, error: String(err) });
-        }
-    }
-});
-
 // Check data integrity of saved layouts (MUST be before /:id route)
 app.get('/api/saved-layouts/integrity', async (_req, res) => {
   try {
@@ -1306,6 +1180,48 @@ app.delete('/api/saved-layouts/:id', requireAuth, async (req, res) => {
         res.json({ ok: true });
     } catch (err) {
         console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Batch delete saved layouts (more efficient than multiple individual requests)
+app.post('/api/saved-layouts/batch-delete', requireAuth, async (req, res) => {
+    try {
+        const { ids } = req.body;
+        
+        if (!Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ ok: false, error: 'ids array is required and must not be empty' });
+        }
+        
+        if (ids.length > 1000) {
+            return res.status(400).json({ ok: false, error: 'Maximum 1000 layouts can be deleted at once' });
+        }
+        
+        const results = [];
+        let successCount = 0;
+        let failCount = 0;
+        
+        // Delete layouts sequentially to avoid overwhelming the storage layer
+        for (const id of ids) {
+            try {
+                await deleteSavedLayout(id);
+                results.push({ id, success: true });
+                successCount++;
+            } catch (err) {
+                console.error(`[batch-delete] Failed to delete layout ${id}:`, err);
+                results.push({ id, success: false, error: String(err) });
+                failCount++;
+            }
+        }
+        
+        res.json({
+            ok: true,
+            successCount,
+            failCount,
+            results
+        });
+    } catch (err) {
+        console.error('[batch-delete] Error:', err);
         res.status(500).json({ ok: false, error: String(err) });
     }
 });
@@ -2293,7 +2209,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
     try {
         const layoutIds = req.query.ids;
         let targetLayouts = [];
-        
+
         if (layoutIds && typeof layoutIds === 'string') {
             // Export specific layouts by ID (comma-separated)
             const ids = layoutIds.split(',').map(id => id.trim()).filter(Boolean);
@@ -2303,29 +2219,29 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             // Export all layouts
             targetLayouts = await getSavedLayouts();
         }
-        
+
         if (targetLayouts.length === 0) {
             return res.status(404).json({ ok: false, error: 'No layouts found to export' });
         }
-        
+
         // Set up ZIP response headers
         const zipFilename = `saved-layouts-${new Date().toISOString().slice(0, 10)}.zip`;
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
-        
+
         // Create archiver instance
         const archive = archiver('zip', { zlib: { level: 6 } });
-        
+
         // Pipe archive data to response
         archive.pipe(res);
-        
-        // Add each layout's rendered image to the ZIP
+
+        // Add each layout's rendered image to the ZIP (both high and low energy)
         for (const layout of targetLayouts) {
             try {
                 // Render the layout
                 const objects = layout.layout_json?.objects || {};
                 const flatObjects = [];
-                
+
                 if (objects.bag) {
                     flatObjects.push({
                         id: objects.bag.id,
@@ -2341,7 +2257,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                         layer: objects.bag.layer || 0,
                     });
                 }
-                
+
                 if (Array.isArray(objects.threats)) {
                     for (const obj of objects.threats) {
                         flatObjects.push({
@@ -2359,7 +2275,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                         });
                     }
                 }
-                
+
                 if (Array.isArray(objects['non-threats'])) {
                     for (const obj of objects['non-threats']) {
                         flatObjects.push({
@@ -2377,23 +2293,30 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                         });
                     }
                 }
-                
+
                 if (flatObjects.length > 0) {
                     const enrichedObjects = await enrichObjectsWithPixelData(flatObjects);
-                    const pngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "highenergy");
-                    
-                    const safeName = layout.name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
-                    archive.append(pngBuffer, { name: `${safeName}.png` });
+                    const layoutSeed = [layout.id, layout.name].filter(Boolean).join('_').toString();
+                    const safeBaseName = layoutSeed.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'layout';
+                    const baseName = `SB_${safeBaseName}`;
+
+                    // Render and add HIGH energy image
+                    const highPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, 'highenergy');
+                    archive.append(highPngBuffer, { name: `${baseName}_high.png` });
+
+                    // Render and add LOW energy image
+                    const lowPngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, 'lowenergy');
+                    archive.append(lowPngBuffer, { name: `${baseName}_low.png` });
                 }
             } catch (err) {
                 console.error(`[export] Failed to render layout ${layout.id}:`, err);
                 // Continue with other layouts even if one fails
             }
         }
-        
-// Finalize the ZIP archive
+
+        // Finalize the ZIP archive
         await archive.finalize();
-        
+
     } catch (err) {
         console.error('[export] Error:', err);
         if (!res.headersSent) {

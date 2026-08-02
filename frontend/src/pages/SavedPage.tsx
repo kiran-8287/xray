@@ -662,7 +662,7 @@ export default function SavedPage() {
 
   const clearExportSelection = () => setSelectedForExport(new Set());
 
-  // Delete selected layouts
+  // Delete selected layouts using batch endpoint
   const deleteSelected = async () => {
     if (selectedForExport.size === 0) {
       showToast('error', 'No layouts selected for deletion');
@@ -678,30 +678,38 @@ export default function SavedPage() {
     setDeleting(true);
     try {
       const ids = Array.from(selectedForExport);
-      const deletePromises = ids.map(id =>
-        fetchWithTimeout(`${API_BASE}/api/saved-layouts/${id}`, {
-          method: 'DELETE',
-        })
-      );
+      
+      // Use batch delete endpoint to avoid timeout issues
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/batch-delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      }, 120000); // 2 minute timeout for batch delete
 
-      const results = await Promise.all(deletePromises);
-      const successCount = results.filter(r => r.ok).length;
-      const failCount = results.filter(r => !r.ok).length;
-
-      // Remove deleted layouts from local state
-      setLayouts(prev => prev.filter(l => !selectedForExport.has(l.id)));
-
-      // Update pagination total
-      if (pagination) {
-        setPagination({
-          ...pagination,
-          total: pagination.total - successCount,
-          totalPages: Math.max(1, Math.ceil((pagination.total - successCount) / pagination.limit))
-        });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `Delete failed (HTTP ${res.status})`);
       }
 
-      // Clear selection
+      const result = await res.json();
+      const successCount = result.successCount || 0;
+      const failCount = result.failCount || 0;
+      const deletedIds = Array.from(selectedForExport);
+      const remainingOnCurrentPage = layouts.filter(layout => !deletedIds.includes(layout.id)).length;
+      const nextTotalPages = pagination ? Math.max(1, Math.ceil(Math.max(0, pagination.total - successCount) / pagination.limit)) : 1;
+      const targetPage = remainingOnCurrentPage === 0 && pagination
+        ? (page < nextTotalPages ? page + 1 : Math.min(page, nextTotalPages))
+        : page;
+
+      // Clear selection first so the UI stops showing deleted items immediately.
       clearExportSelection();
+
+      // Refresh the current page from the server so the next set of layouts appears right away.
+      if (targetPage !== page) {
+        setPage(targetPage);
+      } else {
+        await loadLayouts(page);
+      }
 
       // Show result message
       if (failCount === 0) {
@@ -711,7 +719,7 @@ export default function SavedPage() {
       }
 
       // Close detail modal if selected layout was deleted
-      if (selectedLayout && selectedForExport.has(selectedLayout.id)) {
+      if (selectedLayout && deletedIds.includes(selectedLayout.id)) {
         setSelectedLayout(null);
       }
     } catch (error) {
@@ -799,26 +807,27 @@ export default function SavedPage() {
         throw new Error(data?.error || `Failed to delete layout (HTTP ${res.status})`);
       }
       
-      // Remove from local state
-      setLayouts(prev => prev.filter(l => l.id !== layoutId));
-      
+      const remainingOnCurrentPage = layouts.filter(layout => layout.id !== layoutId).length;
+      const nextTotalPages = pagination ? Math.max(1, Math.ceil(Math.max(0, pagination.total - 1) / pagination.limit)) : 1;
+      const targetPage = remainingOnCurrentPage === 0 && pagination
+        ? (page < nextTotalPages ? page + 1 : Math.min(page, nextTotalPages))
+        : page;
+
       // Close detail modal if this layout was selected
       if (selectedLayout?.id === layoutId) {
         setSelectedLayout(null);
       }
-      
-      // Update pagination total
-      if (pagination) {
-        setPagination({
-          ...pagination,
-          total: pagination.total - 1,
-          totalPages: Math.max(1, Math.ceil((pagination.total - 1) / pagination.limit))
-        });
+
+      // Refresh the visible page from the server so the list stays in sync immediately.
+      if (targetPage !== page) {
+        setPage(targetPage);
+      } else {
+        await loadLayouts(page);
       }
-      
+
       // Close confirmation dialog
       setDeleteConfirm({ show: false, layout: null });
-      
+
       // Show success message
       showToast('success', `Layout ${layoutId} deleted successfully`);
       

@@ -49,6 +49,7 @@ let lastNotifyTime = 0;
 let pendingNotify = false;
 let autoSaveStartTime = 0;
 let lastAutoSaveTime = 0; // Track when last auto-save completed
+let savedComboIds = new Set<string>(); // Track combo IDs that have been saved to prevent double-saving
 
 // Chunked generation state
 let totalGeneratedCount = 0; // Total combinations generated so far
@@ -232,9 +233,11 @@ async function saveOneComboAnnotationOnly(combo: CombinatorialResult): Promise<b
 
 async function saveComboAnnotationBatch(page: CombinatorialResult[]): Promise<Set<string>> {
   const savedIds = new Set<string>();
-  if (page.length === 0) return savedIds;
+  // Filter out combos that have already been saved to prevent double-saving
+  const unsavedPage = page.filter(combo => !(combo.id && savedComboIds.has(combo.id)));
+  if (unsavedPage.length === 0) return savedIds;
   try {
-    const payloads = page.map(comboToLayout);
+    const payloads = unsavedPage.map(comboToLayout);
     const res = await fetchWithTimeout(`${API_BASE_URL}/api/saved-layouts/batch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -244,13 +247,17 @@ async function saveComboAnnotationBatch(page: CombinatorialResult[]): Promise<Se
     const data = await res.json();
     if (!data || !Array.isArray(data.savedLayouts)) return savedIds;
     for (const layout of data.savedLayouts) {
-      if (layout && layout.id) savedIds.add(layout.id);
+      if (layout && layout.id) {
+        savedIds.add(layout.id);
+        savedComboIds.add(layout.id);
+      }
     }
   } catch {
     // Fallback: save one-by-one so partial progress isn't lost.
-    for (const combo of page) {
+    for (const combo of unsavedPage) {
       if (await saveOneComboAnnotationOnly(combo) && combo.id) {
         savedIds.add(combo.id);
+        savedComboIds.add(combo.id);
       }
     }
   }
@@ -325,25 +332,36 @@ function evictFromDisplayWindow(evictableIds: Set<string>) {
     remaining.push(c);
   }
   state.combinations = remaining;
+  // Also evict from buffer to prevent re-saving saved combos
+  if (generatedBuffer.length > 0) {
+    generatedBuffer = generatedBuffer.filter(c => !(c.id && evictableIds.has(c.id)));
+  }
 }
 
 async function processNextAutoSavePage(): Promise<boolean> {
-  const page = state.combinations.slice(0, ITEMS_PER_PAGE);
-  if (page.length === 0) return false;
+  // Set pageSaveRunningRef to prevent concurrent manual saves during auto-save
+  pageSaveRunningRef = true;
+  try {
+    const page = state.combinations.slice(0, ITEMS_PER_PAGE);
+    if (page.length === 0) return false;
 
-  const { savedAnnotations, evictableIds } = await savePage(page, autoSaveMode);
+    const { savedAnnotations, evictableIds } = await savePage(page, autoSaveMode);
 
-  if (state.autoSaveStatus) {
-    state.autoSaveStatus.queued += savedAnnotations;
-    state.autoSaveStatus.batchesSent++;
-    state.autoSaveStatus.pagesCompleted++;
+    if (state.autoSaveStatus) {
+      state.autoSaveStatus.queued += savedAnnotations;
+      state.autoSaveStatus.batchesSent++;
+      state.autoSaveStatus.pagesCompleted++;
+    }
+
+    evictFromDisplayWindow(evictableIds);
+    refillDisplayWindow();
+    notifySubscribers();
+    persistToStorage();
+    return state.combinations.length > 0 || generatedBuffer.length > 0;
+  } finally {
+    pageSaveRunningRef = false;
+    wakeLoopNow();
   }
-
-  evictFromDisplayWindow(evictableIds);
-  refillDisplayWindow();
-  notifySubscribers();
-  persistToStorage();
-  return state.combinations.length > 0 || generatedBuffer.length > 0;
 }
 
 function interruptibleSleep(ms: number, signal: { resolve: (() => void) | null }): Promise<void> {
@@ -501,7 +519,8 @@ export const GenerationService = {
       autoSaveStartTime = Date.now(); // Record when generation started
     }
 
-    // Reset chunked generation state
+    // Reset saved combo tracking and chunked generation state
+    savedComboIds = new Set<string>();
     totalGeneratedCount = 0;
     isGeneratingChunk = false;
     currentGenerationParams = params; // Store params for later chunk requests
@@ -810,6 +829,7 @@ export const GenerationService = {
     }
     autoSaveEnabled = false;
     generatedBuffer = [];
+    savedComboIds = new Set<string>();
     state = {
       isGenerating: false,
       combinations: [],
@@ -828,6 +848,7 @@ export const GenerationService = {
 
   setCombinations(combinations: CombinatorialResult[], failures: FailureLog[]) {
     if (state.isGenerating) return;
+    savedComboIds = new Set<string>();
     generatedBuffer = combinations;
     state.combinations = [];
     refillDisplayWindow();

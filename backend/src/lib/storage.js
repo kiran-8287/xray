@@ -831,23 +831,14 @@ async function createSavedLayoutsBatch(layoutDataList) {
     const catMeta = catalog.categories.savedLayouts || { partitions: [1], activePartition: 1, partitionCap: SAVED_LAYOUTS_PARTITION_CAP };
     
     // Get current partition
-    const activePartition = catMeta.activePartition || 1;
-    const partPath = getSavedLayoutsPartitionPath(activePartition);
+    let activePartition = catMeta.activePartition || 1;
+    let partPath = getSavedLayoutsPartitionPath(activePartition);
     let layouts = await readJSONFile(partPath, []);
     
     const now = new Date().toISOString();
     const created = [];
     
     for (const layoutData of layoutDataList) {
-      const newLayout = {
-        id: layoutData.id || crypto.randomUUID(),
-        created_at: layoutData.created_at || now,
-        ...layoutData,
-      };
-      layouts.push(newLayout);
-      created.push(newLayout);
-      
-      // Check if partition is full after each insert
       if (layouts.length >= SAVED_LAYOUTS_PARTITION_CAP) {
         console.log(`[storage] Saved layouts partition ${activePartition} full (${layouts.length}), creating partition ${activePartition + 1}`);
         
@@ -855,29 +846,35 @@ async function createSavedLayoutsBatch(layoutDataList) {
         await writeJSONFileAtomic(partPath, layouts);
         
         // Create new partition
-        const newPartition = activePartition + 1;
-        const newPartPath = getSavedLayoutsPartitionPath(newPartition);
-        await writeJSONFileAtomic(newPartPath, []);
+        activePartition++;
+        partPath = getSavedLayoutsPartitionPath(activePartition);
         
-        // Update catalog
-        catMeta.activePartition = newPartition;
-        catMeta.partitions = [...(catMeta.partitions || [1]), newPartition];
-        catMeta.totalCount = (catMeta.totalCount || 0) + layouts.length;
-        await saveCatalog(catalog);
+        // Update catalog metadata in memory
+        if (!catMeta.partitions) catMeta.partitions = [1];
+        if (!catMeta.partitions.includes(activePartition)) {
+          catMeta.partitions.push(activePartition);
+        }
         
         // Reset for next partition
         layouts = [];
       }
+
+      const newLayout = {
+        id: layoutData.id || crypto.randomUUID(),
+        created_at: layoutData.created_at || now,
+        ...layoutData,
+      };
+      
+      layouts.push(newLayout);
+      created.push(newLayout);
+      catMeta.totalCount = (catMeta.totalCount || 0) + 1;
     }
     
     // Write remaining layouts if any
-    if (layouts.length > 0) {
-      const currentPartition = catMeta.activePartition || 1;
-      const currentPartPath = getSavedLayoutsPartitionPath(currentPartition);
-      await writeJSONFileAtomic(currentPartPath, layouts);
-      catMeta.totalCount = (catMeta.totalCount || 0) + layouts.length;
-      await saveCatalog(catalog);
-    }
+    await writeJSONFileAtomic(partPath, layouts);
+    catMeta.activePartition = activePartition;
+    catalog.categories.savedLayouts = catMeta;
+    await saveCatalog(catalog);
     
     // Invalidate cache
     savedLayoutsMemCache = null;
