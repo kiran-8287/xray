@@ -33,31 +33,55 @@ export function getSystemInfo() {
 }
 
 /**
- * Calculate recommended worker count based on system resources
+ * Calculate recommended worker count based on system resources.
+ *
+ * IMPORTANT MEMORY BUDGET NOTES
+ * ------------------------------
+ * Each Node worker thread in the upload pipeline spawns a **separate Python**
+ * subprocess that imports NumPy + PIL + (dumpread/tipread). Baseline RSS of
+ * such a child is ~200–350 MB. The auto-valid-region path additionally spawns
+ * Pythons importing scipy + cv2 (~300–500 MB each). On Windows the commit-
+ * charge limit (RAM + pagefile) is the real bottleneck; even tiny 1 MB
+ * allocations fail once the kernel can no longer promise pages.
+ *
+ * We therefore apply three safeguards:
+ *   1. Hard global cap (MAX_WORKERS_HARD_CAP) regardless of CPU count.
+ *   2. Realistic per-worker memory footprint (not the optimistic 100 MB).
+ *   3. Reserve headroom for the Node process itself and the OS.
+ *
  * @param {Object} options - Configuration options
  * @param {number} options.minWorkers - Minimum workers (default: 1)
- * @param {number} options.maxWorkers - Maximum workers (default: CPU count)
- * @param {number} options.memoryPerWorkerMB - Estimated memory per worker in MB (default: 100)
+ * @param {number} options.maxWorkers - Absolute caller cap (before our hard cap)
+ * @param {number} options.memoryPerWorkerMB - Estimated commit per worker in MB
  * @returns {number} Recommended worker count
  */
 export function calculateOptimalWorkerCount(options = {}) {
+  const MAX_WORKERS_HARD_CAP = 6;         // absolute ceiling for commit-safety
+  const NODE_RESERVE_MB = 1024;           // reserve 1 GB for Node + OS
+  const DEFAULT_MEM_PER_WORKER_MB = 400;  // realistic Python child baseline
+
   const {
     minWorkers = 1,
     maxWorkers,
-    memoryPerWorkerMB = 100
+    memoryPerWorkerMB = DEFAULT_MEM_PER_WORKER_MB,
   } = options;
 
   const systemInfo = getSystemInfo();
-  const cpuBasedWorkers = maxWorkers || systemInfo.cpuCount;
-  
-  // Memory-based calculation: how many workers can we fit?
-  const availableMemoryMB = systemInfo.freeMemoryMB;
-  const memoryBasedWorkers = Math.floor(availableMemoryMB / memoryPerWorkerMB);
-  
-  // Use the more conservative of CPU count vs memory capacity
+  const cpuBasedWorkers = Math.min(
+    maxWorkers || systemInfo.cpuCount,
+    MAX_WORKERS_HARD_CAP
+  );
+
+  // Memory-based worker cap
+  const availableForWorkersMB = Math.max(
+    0,
+    systemInfo.freeMemoryMB - NODE_RESERVE_MB
+  );
+  const memoryBasedWorkers = Math.floor(availableForWorkersMB / memoryPerWorkerMB);
+
+  // Use the most conservative estimate (CPU cap ↓ memory ↓ hard cap)
   const recommendedWorkers = Math.min(cpuBasedWorkers, memoryBasedWorkers);
-  
-  // Ensure we're within bounds
+
   return Math.max(minWorkers, Math.min(recommendedWorkers, cpuBasedWorkers));
 }
 

@@ -1,76 +1,65 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { CheckCircle2, AlertCircle, Upload as UploadIcon, AlertTriangle, Wand2, X, Save } from "lucide-react";
+import { CheckCircle2, AlertCircle, AlertTriangle, X, Save } from "lucide-react";
 import { useBlocker } from "react-router-dom";
 import UploadDropZone from "../components/upload/UploadDropZone";
 import UploadFileQueue from "../components/upload/UploadFileQueue";
 import { useUploadContext } from "../context/UploadContext";
 import { API_BASE_URL } from "../config/api";
-import { LIBRARIES_UI, getLibrarySubcategories } from "../config/categories";
+import { LIBRARIES_UI } from "../config/categories";
 import ConfirmModal from "../components/common/ConfirmModal";
-import { concurrencyController, initializeConcurrencyPools, adjustConcurrencyForLoad } from "../lib/concurrencyController";
+import { initializeConcurrencyPools, adjustConcurrencyForLoad } from "../lib/concurrencyController";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
 
 const LIBRARIES = LIBRARIES_UI;
-const PAGE_SIZE = 100; // 100 files per batch — optimal for 12-core system (saturates worker pool, ~300MB peak RAM)
+const PAGE_SIZE = 100;
+
+interface FileSlot {
+  file: File;
+  originalIndex: number;
+}
 
 export default function UploadPage() {
   const { files, setFiles, staged, setStaged, clearAll } = useUploadContext();
-  const [uploading, setUploading] = useState(false);
+
+  const fileSlotsRef = useRef<FileSlot[]>([]);
+  const originalTotalFilesRef = useRef<number>(0);
+  const processedOriginalIndicesRef = useRef<Set<number>>(new Set());
+  const savedOriginalIndicesRef = useRef<Set<number>>(new Set());
+  const processingQueueRef = useRef<(() => Promise<void>)[]>([]);
+  const isProcessingRef = useRef(false);
+  const processingTotalRef = useRef(0);
+  const processingCompletedRef = useRef(0);
+  const lookAheadRunningRef = useRef(false);
+
   const [savingPage, setSavingPage] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "success" | "error">("idle");
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
-  const [folderName, setFolderName] = useState("My Upload");
   const [selectedForMass, setSelectedForMass] = useState<Set<number>>(new Set());
-  const [confirmUpload, setConfirmUpload] = useState(false);
-  const [duplicateFilenames, setDuplicateFilenames] = useState<string[]>([]);
-
-  // Active page index (1-based)
-  const [activePage, setActivePage] = useState(1);
-  const processedPagesRef = useRef<Set<number>>(new Set());
-
-  const hasUnsavedChanges = staged.length > 0 || files.length > 0;
-  const routerBlocker = useBlocker(hasUnsavedChanges);
-
-  useEffect(() => {
-    if (routerBlocker.state === "blocked" && !hasUnsavedChanges) {
-      routerBlocker.reset?.();
-    }
-  }, [routerBlocker.state, hasUnsavedChanges, routerBlocker]);
-
-  // Pipeline state
   const [processing, setProcessing] = useState(false);
   const [processingProgress, setProcessingProgress] = useState<{ n: number; total: number } | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [streamErrors, setStreamErrors] = useState<{ id: string; reason: string }[]>([]);
-  const processingTotalRef = useRef(0);
-  const processingCompletedRef = useRef(0);
-  const processingQueueRef = useRef<(() => Promise<void>)[]>([]);
-  const isProcessingRef = useRef(false);
+  const [currentBatchIndex, setCurrentBatchIndex] = useState<number>(0);
 
   useEffect(() => {
     initializeConcurrencyPools();
   }, []);
 
-  // Reset upload context + local refs/state on component MOUNT.
-  // UploadProvider wraps the entire app, so stale files/staged from a previous
-  // visit to UploadPage (e.g. user saved all batches, went to Library/Collage,
-  // then came back) would otherwise show an empty progress bar "0 / 1000".
   const didMountResetRef = useRef(false);
   useEffect(() => {
     if (didMountResetRef.current) return;
     didMountResetRef.current = true;
 
-    // Wipe context (files + staged)
     clearAll();
-
-    // Reset page + processing counters + processed page tracker
-    setActivePage(1);
-    processedPagesRef.current = new Set();
-    furthestScheduledPageRef.current = 0;
-    processingTotalRef.current = 0;
-    processingCompletedRef.current = 0;
+    fileSlotsRef.current = [];
+    originalTotalFilesRef.current = 0;
+    processedOriginalIndicesRef.current = new Set();
+    savedOriginalIndicesRef.current = new Set();
     processingQueueRef.current = [];
     isProcessingRef.current = false;
+    processingTotalRef.current = 0;
+    processingCompletedRef.current = 0;
+    lookAheadRunningRef.current = false;
     setProcessing(false);
     setProcessingProgress(null);
     setStreamErrors([]);
@@ -79,27 +68,31 @@ export default function UploadPage() {
     setValidationMessage(null);
     setUploadStatus("idle");
     setSavingPage(false);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    setCurrentBatchIndex(0);
+  }, []);
 
-  // Cleanup orphaned files on mount
   useEffect(() => {
     const cleanupOrphanedFiles = async () => {
       const orphanedItems = sessionStorage.getItem('orphanedPreprocessedItems');
-      if (orphanedItems) {
-        try {
-          const itemIds = JSON.parse(orphanedItems);
-          await Promise.all(
-            itemIds.map((itemId: string) =>
-              fetch(`${API_BASE_URL}/api/temp-files/${itemId}`, {
-                method: 'DELETE',
-              }).catch(err => console.error('Failed to cleanup orphaned files:', err))
-            )
-          );
-        } catch (err) {
-          console.error('Error parsing orphaned items:', err);
+      if (!orphanedItems) return;
+
+      try {
+        const itemIds = JSON.parse(orphanedItems);
+        if (!Array.isArray(itemIds) || itemIds.length === 0) {
+          sessionStorage.removeItem('orphanedPreprocessedItems');
+          return;
         }
-        sessionStorage.removeItem('orphanedPreprocessedItems');
+
+        await fetch(`${API_BASE_URL}/api/temp-files/batch-delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itemIds }),
+        }).catch(err => console.error('Failed to cleanup orphaned files:', err));
+      } catch (err) {
+        console.error('Error parsing orphaned items:', err);
       }
+
+      sessionStorage.removeItem('orphanedPreprocessedItems');
     };
     cleanupOrphanedFiles();
   }, []);
@@ -112,78 +105,45 @@ export default function UploadPage() {
         return '';
       }
     };
+
+    const handlePageHide = () => {
+      const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
+      if (Array.isArray(orphanedItems) && orphanedItems.length > 0) {
+        navigator.sendBeacon(
+          `${API_BASE_URL}/api/temp-files/batch-delete`,
+          JSON.stringify({ itemIds: orphanedItems })
+        );
+      }
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
   }, [staged.length, files.length]);
 
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(files.length / PAGE_SIZE)), [files.length]);
+  const hasUnsavedChanges = staged.length > 0 || files.length > 0;
+  const routerBlocker = useBlocker(hasUnsavedChanges);
 
-  // Handle new files dropped / selected
-  const handleFilesSelected = (newFiles: File[]) => {
-    const seenNames = new Set<string>();
-    const uniqueNewFiles: File[] = [];
-    const duplicateNames: string[] = [];
-    
-    for (const f of newFiles) {
-      if (seenNames.has(f.name)) {
-        duplicateNames.push(f.name);
-      } else {
-        seenNames.add(f.name);
-        uniqueNewFiles.push(f);
-      }
+  useEffect(() => {
+    if (routerBlocker.state === "blocked" && !hasUnsavedChanges) {
+      routerBlocker.reset?.();
     }
-    
-    if (duplicateNames.length > 0) {
-      setDuplicateWarning(`${duplicateNames.length} duplicate file(s) in selection: ${duplicateNames.slice(0, 3).join(", ")}${duplicateNames.length > 3 ? "..." : ""}`);
-      setTimeout(() => setDuplicateWarning(null), 5000);
-    }
-    
-    const validFiles: File[] = [];
-    const invalidFiles: string[] = [];
-    
-    for (const f of uniqueNewFiles) {
-      const lowerName = f.name.toLowerCase();
-      if (
-        lowerName.endsWith(".dump.pgm") || 
-        lowerName.endsWith(".pgm") || 
-        lowerName.endsWith(".tip") || 
-        lowerName.endsWith(".dump")
-      ) {
-        validFiles.push(f);
-      } else {
-        invalidFiles.push(f.name);
-      }
-    }
-    
-    if (invalidFiles.length > 0) {
-      const errorMessage = `Invalid file type(s): ${invalidFiles.slice(0, 5).join(", ")}${invalidFiles.length > 5 ? ` and ${invalidFiles.length - 5} more` : ""}. Supported extensions: .dump.pgm, .pgm, .tip, .dump.`;
-      setValidationMessage(errorMessage);
-      setTimeout(() => setValidationMessage(null), 5000);
-    }
-    
-    if (validFiles.length === 0) return;
-    
-    setDuplicateWarning(null);
-    setStreamErrors([]);
+  }, [routerBlocker.state, hasUnsavedChanges, routerBlocker]);
 
-    const updatedFiles = [...files, ...validFiles];
-    setFiles(updatedFiles);
+  const totalOriginalBatches = useMemo(
+    () => Math.max(1, Math.ceil(originalTotalFilesRef.current / PAGE_SIZE)),
+    [staged.length, files.length, currentBatchIndex]
+  );
 
-    // Trigger 50-item page processing with 2-page background pre-fetch buffer
-    triggerPageProcessing(updatedFiles, 1);
-  };
-
-  /**
-   * Continuous queue worker loop: processes all scheduled page batches sequentially in background.
-   * Re-drains the queue after each task to catch tasks added while a task was running.
-   */
   const startQueueWorker = async () => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
     setProcessing(true);
     adjustConcurrencyForLoad(true);
 
-    // Keep looping as long as there are tasks — new tasks may be enqueued while we process
     while (processingQueueRef.current.length > 0) {
       const task = processingQueueRef.current.shift();
       if (task) {
@@ -201,42 +161,18 @@ export default function UploadPage() {
     adjustConcurrencyForLoad(false);
   };
 
-  /**
-   * Schedule processing for target page and pre-fetch next 2 pages in background buffer.
-   * Tracks the furthest page ever scheduled to ensure the 2-page buffer always looks ahead.
-   */
-  const furthestScheduledPageRef = useRef(0);
+  function enqueueRawFilesBatch(slots: FileSlot[], batchNumber: number) {
+    if (slots.length === 0) return;
 
-  function triggerPageProcessing(allFilesList: File[], targetPage: number = 1) {
-    const totalPagesNow = Math.ceil(allFilesList.length / PAGE_SIZE);
-
-    // Maintain a strict 1-page lookahead buffer (active page + next 1 page) to minimize memory & CPU usage
-    const bufferEnd = Math.min(targetPage + 1, totalPagesNow);
-
-    for (let p = targetPage; p <= bufferEnd; p++) {
-      if (p < 1 || p > totalPagesNow) continue;
-      if (processedPagesRef.current.has(p)) continue; // already processed/queued
-
-      processedPagesRef.current.add(p);
-      if (p > furthestScheduledPageRef.current) furthestScheduledPageRef.current = p;
-
-      const startIndex = (p - 1) * PAGE_SIZE;
-      const pageFiles = allFilesList.slice(startIndex, startIndex + PAGE_SIZE);
-      if (pageFiles.length > 0) {
-        enqueueRawFilesBatch(pageFiles, p);
-      }
-    }
-
-    // (Re)start background queue processing if not already running
-    startQueueWorker();
-  }
-
-
-  /**
-   * Enqueue a 50-file page batch task
-   */
-  function enqueueRawFilesBatch(batchFiles: File[], pageNumber: number) {
+    const batchFiles = slots.map(s => s.file);
     processingTotalRef.current += batchFiles.length;
+
+    const slotByItemId = new Map<string, FileSlot>();
+    for (const s of slots) {
+      const dotIndex = s.file.name.indexOf(".");
+      const itemId = dotIndex === -1 ? s.file.name : s.file.name.slice(0, dotIndex);
+      slotByItemId.set(itemId, s);
+    }
 
     processingQueueRef.current.push(async () => {
       const formData = new FormData();
@@ -273,38 +209,120 @@ export default function UploadPage() {
               }
 
               if (msg.status === "done") {
-                processingCompletedRef.current++;
-                setProcessingProgress({ n: processingCompletedRef.current, total: processingTotalRef.current });
+                const slot = slotByItemId.get(msg.id);
+                const origIdx = slot ? slot.originalIndex : -1;
 
-                const newItem = {
-                  file: new File([], msg.id),
-                  category: msg.fileType === "dump" ? "bags" : "non-threats",
-                  subcategory: "",
-                  valid_region_points: null,
-                  preProcessed: true,
-                  filepath: msg.filepath,
-                  preGeneratedFilepath: msg.filepath,
-                  fileType: msg.fileType,
-                  itemId: msg.id,
-                  pixelDataFilename: msg.pixelDataFilename,
-                  width: msg.width,
-                  height: msg.height,
-                  pageNumber,
-                };
+                if (origIdx !== -1 && !processedOriginalIndicesRef.current.has(origIdx)) {
+                  processedOriginalIndicesRef.current.add(origIdx);
+                  processingCompletedRef.current++;
+                  setProcessingProgress({
+                    n: processingCompletedRef.current,
+                    total: processingTotalRef.current,
+                  });
 
-                const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
-                if (!orphanedItems.includes(msg.id)) {
-                  orphanedItems.push(msg.id);
-                  sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(orphanedItems));
+                  const newItem = {
+                    file: slot!.file,
+                    category: msg.fileType === "dump" ? "bags" : "non-threats",
+                    subcategory: "",
+                    valid_region_points: null,
+                    preProcessed: true,
+                    filepath: msg.filepath,
+                    preGeneratedFilepath: msg.filepath,
+                    fileType: msg.fileType,
+                    itemId: msg.id,
+                    pixelDataFilename: msg.pixelDataFilename,
+                    width: msg.width,
+                    height: msg.height,
+                    pageNumber: Math.floor(origIdx / PAGE_SIZE),
+                    globalIndex: origIdx,
+                  };
+
+                  const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
+                  if (!orphanedItems.includes(msg.id)) {
+                    orphanedItems.push(msg.id);
+                    sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(orphanedItems));
+                  }
+
+                  setStaged((prev) => [...prev, newItem]);
+                }
+              } else if (msg.status === "duplicate") {
+                const slot = slotByItemId.get(msg.itemId);
+                if (slot) {
+                  const origIdx = slot.originalIndex;
+                  if (!processedOriginalIndicesRef.current.has(origIdx)) {
+                    processedOriginalIndicesRef.current.add(origIdx);
+                    savedOriginalIndicesRef.current.add(origIdx);
+                    processingCompletedRef.current++;
+                    setProcessingProgress({
+                      n: processingCompletedRef.current,
+                      total: processingTotalRef.current,
+                    });
+                  }
+                }
+              } else if (msg.status === "error") {
+                const displayReason = msg.reason && typeof msg.reason === "string" && msg.reason.trim().length > 0
+                  ? msg.reason.replace(/\s+/g, " ").trim()
+                  : "Unknown processing error — no details returned from worker";
+
+                const displayId = msg.filename && typeof msg.filename === "string"
+                  ? msg.filename
+                  : (msg.id || "unknown");
+
+                setStreamErrors((prev) => [...prev, { id: displayId, reason: displayReason }]);
+
+                let slot = slotByItemId.get(msg.id);
+                if (!slot && typeof msg.filename === "string") {
+                  const dotIndex = msg.filename.indexOf(".");
+                  const fileItemId = dotIndex === -1 ? msg.filename : msg.filename.slice(0, dotIndex);
+                  slot = slotByItemId.get(fileItemId);
                 }
 
-                setStaged((prev) => [...prev, newItem]);
-              } else if (msg.status === "error") {
-                setStreamErrors((prev) => [...prev, { id: msg.id, reason: msg.reason }]);
+                if (slot) {
+                  const origIdx = slot.originalIndex;
+                  if (!processedOriginalIndicesRef.current.has(origIdx)) {
+                    processedOriginalIndicesRef.current.add(origIdx);
+                    processingCompletedRef.current++;
+                    setProcessingProgress({
+                      n: processingCompletedRef.current,
+                      total: processingTotalRef.current,
+                    });
+                  }
+                }
+              } else if (msg.status === "skipped") {
+                const dotIndex = msg.filename.indexOf(".");
+                const itemId = dotIndex === -1 ? msg.filename : msg.filename.slice(0, dotIndex);
+                const slot = slotByItemId.get(itemId);
+                if (slot) {
+                  const origIdx = slot.originalIndex;
+                  if (!processedOriginalIndicesRef.current.has(origIdx)) {
+                    processedOriginalIndicesRef.current.add(origIdx);
+                    processingCompletedRef.current++;
+                    setProcessingProgress({
+                      n: processingCompletedRef.current,
+                      total: processingTotalRef.current,
+                    });
+                  }
+                }
               } else if (msg.status === "complete") {
                 if (msg.duplicates > 0) {
                   setDuplicateWarning(`${msg.duplicates} file(s) skipped — already in library`);
+                  setTimeout(() => setDuplicateWarning(null), 5000);
                 }
+
+                setTimeout(() => {
+                  setCurrentBatchIndex((prevCurrent) => {
+                    const nextUnsaved = findFirstUnsavedBatch();
+                    const totalSlots = fileSlotsRef.current.length;
+                    if (totalSlots === 0) {
+                      originalTotalFilesRef.current = 0;
+                      return prevCurrent;
+                    }
+                    if (nextUnsaved !== prevCurrent) {
+                      return nextUnsaved;
+                    }
+                    return prevCurrent;
+                  });
+                }, 50);
               }
             }
           }
@@ -313,44 +331,226 @@ export default function UploadPage() {
           if (done) break;
         }
       } catch (err) {
-        console.error(`[Page ${pageNumber}] Batch processing error:`, err);
+        console.error(`[Batch ${batchNumber}] Batch processing error:`, err);
       }
     });
   }
 
-  // Active 50 items displayed on current page
-  const activePageItems = useMemo(() => {
-    const pageItems = staged.filter((item: any) => item.pageNumber === activePage);
-    if (pageItems.length > 0) return pageItems;
-    // Fallback: slice staged items by 50
-    const startIdx = (activePage - 1) * PAGE_SIZE;
-    return staged.slice(startIdx, startIdx + PAGE_SIZE);
-  }, [staged, activePage]);
+  const triggerBatchProcessingFor = useCallback((targetBatch: number) => {
+    const totalSlots = fileSlotsRef.current.length;
+    if (totalSlots === 0) return;
 
-  // Page-aware state updater to prevent active-page edits from overwriting master staged state
-  const setStagedForActivePage = useCallback(
+    const totalBatches = Math.ceil(totalSlots / PAGE_SIZE);
+    const lookAheadBatch = Math.min(targetBatch + 1, totalBatches - 1);
+
+    const batchesToProcess = [targetBatch];
+    if (lookAheadBatch !== targetBatch) {
+      batchesToProcess.push(lookAheadBatch);
+    }
+
+    for (const b of batchesToProcess) {
+      const startIdx = b * PAGE_SIZE;
+      const endIdx = Math.min(startIdx + PAGE_SIZE, totalSlots);
+
+      const unprocessedSlots: FileSlot[] = [];
+      for (let i = startIdx; i < endIdx; i++) {
+        const slot = fileSlotsRef.current[i];
+        if (!slot) continue;
+        if (savedOriginalIndicesRef.current.has(slot.originalIndex)) continue;
+        if (processedOriginalIndicesRef.current.has(slot.originalIndex)) continue;
+        unprocessedSlots.push(slot);
+      }
+
+      if (unprocessedSlots.length > 0) {
+        enqueueRawFilesBatch(unprocessedSlots, b);
+      }
+    }
+
+    startQueueWorker();
+  }, []);
+
+  useEffect(() => {
+    if (lookAheadRunningRef.current) return;
+
+    const totalSlots = fileSlotsRef.current.length;
+    if (totalSlots === 0) return;
+
+    const targetBatch = currentBatchIndex;
+    const totalBatches = Math.ceil(totalSlots / PAGE_SIZE);
+    const lookAheadBatch = Math.min(targetBatch + 1, totalBatches - 1);
+
+    let needsLookAhead = false;
+    const startIdx = lookAheadBatch * PAGE_SIZE;
+    const endIdx = Math.min(startIdx + PAGE_SIZE, totalSlots);
+    for (let i = startIdx; i < endIdx; i++) {
+      const slot = fileSlotsRef.current[i];
+      if (!slot) continue;
+      if (savedOriginalIndicesRef.current.has(slot.originalIndex)) continue;
+      if (!processedOriginalIndicesRef.current.has(slot.originalIndex)) {
+        needsLookAhead = true;
+        break;
+      }
+    }
+
+    if (needsLookAhead && !isProcessingRef.current) {
+      lookAheadRunningRef.current = true;
+      setTimeout(() => {
+        lookAheadRunningRef.current = false;
+        triggerBatchProcessingFor(currentBatchIndex);
+      }, 50);
+    }
+  }, [currentBatchIndex, staged.length, triggerBatchProcessingFor]);
+
+  const handleFilesSelected = (newFiles: File[]) => {
+    const seenNames = new Set<string>();
+    const uniqueNewFiles: File[] = [];
+    const duplicateNames: string[] = [];
+
+    for (const f of newFiles) {
+      if (seenNames.has(f.name)) {
+        duplicateNames.push(f.name);
+      } else {
+        seenNames.add(f.name);
+        uniqueNewFiles.push(f);
+      }
+    }
+
+    if (duplicateNames.length > 0) {
+      setDuplicateWarning(`${duplicateNames.length} duplicate file(s) in selection: ${duplicateNames.slice(0, 3).join(", ")}${duplicateNames.length > 3 ? "..." : ""}`);
+      setTimeout(() => setDuplicateWarning(null), 5000);
+    }
+
+    const validFiles: File[] = [];
+    const invalidFiles: string[] = [];
+
+    for (const f of uniqueNewFiles) {
+      const lowerName = f.name.toLowerCase();
+      if (
+        lowerName.endsWith(".dump.pgm") ||
+        lowerName.endsWith(".pgm") ||
+        lowerName.endsWith(".tip") ||
+        lowerName.endsWith(".dump")
+      ) {
+        validFiles.push(f);
+      } else {
+        invalidFiles.push(f.name);
+      }
+    }
+
+    if (invalidFiles.length > 0) {
+      const errorMessage = `Invalid file type(s): ${invalidFiles.slice(0, 5).join(", ")}${invalidFiles.length > 5 ? ` and ${invalidFiles.length - 5} more` : ""}. Supported extensions: .dump.pgm, .pgm, .tip, .dump.`;
+      setValidationMessage(errorMessage);
+      setTimeout(() => setValidationMessage(null), 5000);
+    }
+
+    if (validFiles.length === 0) return;
+
+    setDuplicateWarning(null);
+    setStreamErrors([]);
+
+    const nextSlotIndex = fileSlotsRef.current.length;
+    const newSlots: FileSlot[] = validFiles.map((f, i) => ({
+      file: f,
+      originalIndex: nextSlotIndex + i,
+    }));
+    fileSlotsRef.current = [...fileSlotsRef.current, ...newSlots];
+    originalTotalFilesRef.current = fileSlotsRef.current.length;
+
+    const updatedFiles = [...files, ...validFiles];
+    setFiles(updatedFiles);
+
+    triggerBatchProcessingFor(currentBatchIndex);
+  };
+
+  const currentBatchItems = useMemo(() => {
+    const within = staged.filter((item: any) => item.pageNumber === currentBatchIndex);
+    within.sort((a: any, b: any) => Number(a.globalIndex) - Number(b.globalIndex));
+    return within;
+  }, [staged, currentBatchIndex]);
+
+  const setStagedForCurrentBatch = useCallback(
     (action: React.SetStateAction<any[]>) => {
       setStaged((prevMaster) => {
-        const currentActiveItems = prevMaster.filter((item: any) => item.pageNumber === activePage);
-        const newActiveItems = typeof action === "function" ? action(currentActiveItems) : action;
-        const otherItems = prevMaster.filter((item: any) => item.pageNumber !== activePage);
-        return [...otherItems, ...newActiveItems];
+        const currentBatchItemsLocal = prevMaster.filter((item: any) => item.pageNumber === currentBatchIndex);
+        currentBatchItemsLocal.sort((a: any, b: any) => Number(a.globalIndex) - Number(b.globalIndex));
+        const newBatchItems = typeof action === "function" ? action(currentBatchItemsLocal) : action;
+        const otherItems = prevMaster.filter((item: any) => item.pageNumber !== currentBatchIndex);
+        const merged = [...otherItems, ...newBatchItems];
+        merged.sort((a: any, b: any) => Number(a.globalIndex) - Number(b.globalIndex));
+        return merged;
       });
     },
-    [activePage]
+    [currentBatchIndex]
   );
 
-  const isNextBufferReady = useMemo(() => {
-    if (activePage >= totalPages) return false;
-    const nextPageNumber = activePage + 1;
-    const nextPageItems = staged.filter((item: any) => item.pageNumber === nextPageNumber);
-    return nextPageItems.length > 0;
-  }, [staged, activePage, totalPages]);
+  const handleSetFilesFromChild = useCallback(
+    (update: React.SetStateAction<File[]>) => {
+      const filesBefore = [...files];
+      const nextFiles: File[] =
+        typeof update === "function" ? (update as any)(filesBefore) : update;
 
-  // Save current page items to library and advance to pre-buffered next page
-  const handleSaveCurrentPage = async () => {
-    if (activePageItems.length === 0) {
-      setValidationMessage("No processed items to save on this page.");
+      const removedFiles = filesBefore.filter(
+        (f) => !nextFiles.some((nf) => nf === f || nf.name === f.name)
+      );
+
+      for (const rf of removedFiles) {
+        const slot = fileSlotsRef.current.find(
+          (s) => s.file === rf || s.file.name === rf.name
+        );
+        if (slot) savedOriginalIndicesRef.current.add(slot.originalIndex);
+      }
+
+      setFiles(nextFiles);
+    },
+    [files, setFiles]
+  );
+
+  const findFirstUnsavedBatch = useCallback((): number => {
+    const totalSlots = fileSlotsRef.current.length;
+    for (let b = 0; b * PAGE_SIZE < totalSlots; b++) {
+      const startIdx = b * PAGE_SIZE;
+      const endIdx = Math.min(startIdx + PAGE_SIZE, totalSlots);
+      let hasUnsavedInBatch = false;
+      for (let i = startIdx; i < endIdx; i++) {
+        if (!savedOriginalIndicesRef.current.has(i)) {
+          hasUnsavedInBatch = true;
+          break;
+        }
+      }
+      if (hasUnsavedInBatch) return b;
+    }
+    return Math.ceil(totalSlots / PAGE_SIZE);
+  }, []);
+
+  useEffect(() => {
+    const totalSlots = fileSlotsRef.current.length;
+    if (totalSlots === 0) return;
+    if (isProcessingRef.current) return;
+
+    const totalBatches = Math.ceil(totalSlots / PAGE_SIZE);
+    if (currentBatchIndex >= totalBatches) return;
+
+    const currStart = currentBatchIndex * PAGE_SIZE;
+    const currEnd = Math.min(currStart + PAGE_SIZE, totalSlots);
+    let allCurrSaved = true;
+    for (let i = currStart; i < currEnd; i++) {
+      if (!savedOriginalIndicesRef.current.has(i)) {
+        allCurrSaved = false;
+        break;
+      }
+    }
+
+    if (allCurrSaved) {
+      const nextUnsaved = findFirstUnsavedBatch();
+      if (nextUnsaved !== currentBatchIndex) {
+        setCurrentBatchIndex(nextUnsaved);
+      }
+    }
+  }, [currentBatchIndex, staged.length, findFirstUnsavedBatch]);
+
+  const handleSaveCurrentBatch = async () => {
+    if (currentBatchItems.length === 0) {
+      setValidationMessage("No processed items to save in this batch.");
       setTimeout(() => setValidationMessage(null), 3000);
       return;
     }
@@ -358,14 +558,14 @@ export default function UploadPage() {
     const missingCategory: string[] = [];
     const missingBagsRegion: string[] = [];
 
-    activePageItems.forEach((s: any, i: number) => {
+    currentBatchItems.forEach((s: any, i: number) => {
       const sn = `#${i + 1}`;
       if (!s.category || !s.subcategory) missingCategory.push(sn);
       if (s.category === "bags" && !s.valid_region_points) missingBagsRegion.push(sn);
     });
 
     if (missingCategory.length > 0 || missingBagsRegion.length > 0) {
-      const msgs = [];
+      const msgs: string[] = [];
       if (missingCategory.length > 0) msgs.push(`Set category & subcategory for ${missingCategory.length} item(s)`);
       if (missingBagsRegion.length > 0) msgs.push(`Draw valid region for ${missingBagsRegion.length} bag item(s)`);
       setValidationMessage(msgs.join(" | "));
@@ -377,7 +577,7 @@ export default function UploadPage() {
     setValidationMessage(null);
 
     try {
-      const payloadItems = activePageItems.map((s: any) => ({
+      const payloadItems = currentBatchItems.map((s: any) => ({
         id: s.itemId || `item_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         category: s.category,
         subcategory: s.subcategory,
@@ -396,81 +596,67 @@ export default function UploadPage() {
       }, LONG_REQUEST_TIMEOUT_MS, 1);
 
       const data = await res.json();
-      if (data.ok) {
-        setUploadStatus("success");
-        setTimeout(() => setUploadStatus("idle"), 3000);
-
-        // ------ 1. Evict saved-page portion from files array ------
-        // The progress banner render is gated on `files.length > 0`; if we
-        // never shrink `files`, the bar (with stale denominator) stays visible
-        // forever even after every batch has been saved to the library.
-        const savedStart = (activePage - 1) * PAGE_SIZE;
-        const savedEnd = Math.min(savedStart + PAGE_SIZE, files.length);
-        const remainingFiles = [...files.slice(0, savedStart), ...files.slice(savedEnd)];
-
-        // Because we're physically shrinking the files array, all page numbers
-        // AFTER activePage must move DOWN by one (since what was page N+1 is now
-        // page N). If we simply keep advancing activePage without compacting,
-        // the 2nd save would splice out the wrong slice of files. So instead:
-        //  - Compact files (remove the active page's slice)
-        //  - Renumber remaining staged items: pageNumber > activePage decremented by 1
-        //  - If files is now EMPTY: reset activePage → 1, wipe processedPages ref
-        //    so a brand-new upload starting from page 1 works cleanly.
-        //  - Else: keep activePage the same (the next page has now shifted INTO
-        //    activePage's position because we removed files before it), unless
-        //    activePage would now exceed new totalPages (at the final page when
-        //    saving the last non-final chunk) — clamp to new totalPages.
-        setFiles(remainingFiles);
-
-        setStaged((prev) => {
-          const afterPageRemoval = prev.filter((item: any) => item.pageNumber !== activePage);
-          const renumbered = afterPageRemoval.map((item: any) => {
-            if (item.pageNumber > activePage) {
-              return { ...item, pageNumber: item.pageNumber - 1 };
-            }
-            return item;
-          });
-          return renumbered;
-        });
-
-        // Also remove this page from the processed set so a future upload that
-        // reaches the same page number can be processed again if needed.
-        processedPagesRef.current.delete(activePage);
-
-        if (remainingFiles.length === 0) {
-          // ------ Final page saved: FULL RESET ------
-          // Wipe every page tracker so starting a new upload from scratch works
-          processedPagesRef.current = new Set();
-          furthestScheduledPageRef.current = 0;
-          processingTotalRef.current = 0;
-          processingCompletedRef.current = 0;
-          processingQueueRef.current = [];
-          isProcessingRef.current = false;
-          setProcessing(false);
-          setProcessingProgress(null);
-          setStreamErrors([]);
-          setSelectedForMass(new Set());
-          setActivePage(1);
-        } else {
-          // ------ More pages remain: keep activePage at same logical index ------
-          // Because files for activePage were spliced out, what used to be page
-          // (activePage + 1) is now page activePage, so activePage stays put.
-          // Only if activePage is now past totalPages (edge case at final page)
-          // do we clamp.
-          const newTotalPages = Math.max(1, Math.ceil(remainingFiles.length / PAGE_SIZE));
-          if (activePage > newTotalPages) {
-            setActivePage(newTotalPages);
-          } else {
-            // Kick off lookahead processing for the (now-shifted) current page
-            // and its next-page lookahead buffer (the new shifted active page
-            // may not yet have been pre-processed if the old buffer ended one
-            // page earlier).
-            triggerPageProcessing(remainingFiles, activePage);
-          }
-        }
-      } else {
+      if (!data.ok) {
         setUploadStatus("error");
         setValidationMessage(data.error || "Failed to save batch. Please try again.");
+        return;
+      }
+
+      setUploadStatus("success");
+      setTimeout(() => setUploadStatus("idle"), 3000);
+
+      const savedItemIds: string[] = [];
+      for (const s of currentBatchItems) {
+        if (typeof s.globalIndex === "number") {
+          savedOriginalIndicesRef.current.add(s.globalIndex);
+        }
+        if (s.itemId) savedItemIds.push(s.itemId);
+      }
+
+      const orphanedItems: string[] = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
+      const remainingOrphans = orphanedItems.filter((id: string) => !savedItemIds.includes(id));
+      sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(remainingOrphans));
+
+      setStaged((prev) => prev.filter((item: any) => item.pageNumber !== currentBatchIndex));
+
+      const remainingFilesList: File[] = [];
+      for (const slot of fileSlotsRef.current) {
+        if (savedOriginalIndicesRef.current.has(slot.originalIndex)) continue;
+        remainingFilesList.push(slot.file);
+      }
+      setFiles(remainingFilesList);
+
+      setSelectedForMass(new Set());
+
+      const totalRemaining = fileSlotsRef.current.length - savedOriginalIndicesRef.current.size;
+
+      if (totalRemaining === 0) {
+        fileSlotsRef.current = [];
+        originalTotalFilesRef.current = 0;
+        processedOriginalIndicesRef.current = new Set();
+        savedOriginalIndicesRef.current = new Set();
+        processingTotalRef.current = 0;
+        processingCompletedRef.current = 0;
+        processingQueueRef.current = [];
+        isProcessingRef.current = false;
+        lookAheadRunningRef.current = false;
+        setProcessing(false);
+        setProcessingProgress(null);
+        setStreamErrors([]);
+        setCurrentBatchIndex(0);
+        clearAll();
+      } else {
+        const nextFirstUnsaved = findFirstUnsavedBatch();
+        setCurrentBatchIndex(nextFirstUnsaved);
+
+        const totalBatches = Math.ceil(fileSlotsRef.current.length / PAGE_SIZE);
+        const nextLookAhead = Math.min(nextFirstUnsaved + 1, totalBatches - 1);
+
+        if (nextLookAhead !== nextFirstUnsaved) {
+          setTimeout(() => {
+            triggerBatchProcessingFor(nextFirstUnsaved);
+          }, 100);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -481,10 +667,10 @@ export default function UploadPage() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedForMass.size === activePageItems.length) {
+    if (selectedForMass.size === currentBatchItems.length) {
       setSelectedForMass(new Set());
     } else {
-      setSelectedForMass(new Set(activePageItems.map((_, i) => i)));
+      setSelectedForMass(new Set(currentBatchItems.map((_, i) => i)));
     }
   };
 
@@ -497,44 +683,54 @@ export default function UploadPage() {
     });
   };
 
+  const displayDenominator = originalTotalFilesRef.current;
+  const displayNumerator = Math.min(
+    displayDenominator,
+    processingCompletedRef.current
+  );
+  const displayPercent = displayDenominator > 0
+    ? Math.min(100, Math.round((displayNumerator / displayDenominator) * 100))
+    : 0;
+
+  const remainingSlotsCount = fileSlotsRef.current.length - savedOriginalIndicesRef.current.size;
+  const isFinalBatch = remainingSlotsCount <= PAGE_SIZE;
+
   return (
     <div className="w-full py-6 px-6 animate-fade-in">
       <div className="border-l-4 border-accent pl-4 mb-8">
         <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Upload Images</h2>
         <p className="text-sm text-muted mt-1">
-          Auto-partitioned 100-file batch streaming with 1-batch lookahead buffer
+          100-file batches with automatic look-ahead pre-processing — next batch is always buffered and ready
         </p>
       </div>
 
       <div className="space-y-6 max-w-5xl mx-auto">
         <UploadDropZone onFilesSelected={handleFilesSelected} />
 
-        {/* Main Processing & Save Progress Bar Banner */}
-        {files.length > 0 && (
+        {displayDenominator > 0 && (
           <div className="bg-panel border border-border rounded-2xl p-5 shadow-card space-y-2.5 max-w-5xl mx-auto">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className={`w-3 h-3 rounded-full ${processing ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
                 <span className="text-sm font-semibold text-ink font-heading">
-                  Progress: {Math.min(files.length, (activePage - 1) * PAGE_SIZE + activePageItems.length)} / {files.length} files processed
+                  Progress: {displayNumerator.toLocaleString()} / {displayDenominator.toLocaleString()} files processed
                 </span>
               </div>
               <span className="text-xs font-mono font-semibold text-accent">
-                {Math.round((Math.min(files.length, (activePage - 1) * PAGE_SIZE + activePageItems.length) / files.length) * 100)}%
+                {displayPercent}%
               </span>
             </div>
             <div className="w-full bg-surface-hover/80 h-2.5 rounded-full overflow-hidden border border-border/50">
               <div
                 className="bg-emerald-600 h-full transition-all duration-300 rounded-full"
                 style={{
-                  width: `${Math.min(100, Math.round((Math.min(files.length, (activePage - 1) * PAGE_SIZE + activePageItems.length) / files.length) * 100))}%`
+                  width: `${displayPercent}%`
                 }}
               />
             </div>
           </div>
         )}
 
-        {/* Stream errors */}
         {streamErrors.length > 0 && (
           <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 shadow-card">
             <h4 className="text-xs font-semibold text-rose-700 uppercase tracking-wider mb-2">Processing Errors</h4>
@@ -548,7 +744,6 @@ export default function UploadPage() {
           </div>
         )}
 
-        {/* Duplicate warning banner */}
         {duplicateWarning && (
           <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex items-center justify-between gap-3 shadow-card">
             <div className="flex items-center gap-3">
@@ -563,21 +758,20 @@ export default function UploadPage() {
           </div>
         )}
 
-        {/* Save Batch Controls */}
-        {activePageItems.length > 0 && (
+        {currentBatchItems.length > 0 && displayDenominator > 0 && (
           <div className="bg-panel rounded-2xl border border-border p-6 shadow-card max-w-5xl mx-auto flex items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-semibold text-ink font-heading">
-                Active Batch ({activePageItems.length} Files) — Step {activePage} of {totalPages}
+                Active Batch ({currentBatchItems.length} Files) — Batch {currentBatchIndex + 1} of {totalOriginalBatches}
               </h3>
               <p className="text-xs text-muted mt-1">
-                Assign categories & valid regions, then save to store in library and load the next batch.
+                Assign categories & valid regions, then save to store in library and reveal the next pre-buffered batch instantly.
               </p>
             </div>
 
             <button
-              onClick={handleSaveCurrentPage}
-              disabled={savingPage || activePageItems.length === 0}
+              onClick={handleSaveCurrentBatch}
+              disabled={savingPage || currentBatchItems.length === 0}
               className="flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all duration-150 transform active:scale-98 flex-shrink-0"
             >
               {savingPage ? (
@@ -588,7 +782,7 @@ export default function UploadPage() {
               ) : (
                 <>
                   <Save size={18} />
-                  {activePage === totalPages ? "Save Final Batch to Library" : "Save Batch & Load Next Batch"}
+                  {isFinalBatch ? "Save Final Batch to Library" : "Save Batch & Load Next Batch"}
                 </>
               )}
             </button>
@@ -604,15 +798,15 @@ export default function UploadPage() {
           </div>
         )}
 
-        {staged.length > 0 && (
+        {staged.length > 0 && currentBatchItems.length > 0 && (
           <UploadFileQueue
             files={files}
-            staged={activePageItems}
-            setStaged={setStagedForActivePage}
-            setFiles={setFiles}
+            staged={currentBatchItems}
+            setStaged={setStagedForCurrentBatch}
+            setFiles={handleSetFilesFromChild}
             uploading={savingPage}
             processing={processing}
-            handleUpload={handleSaveCurrentPage}
+            handleUpload={handleSaveCurrentBatch}
             selectedForMass={selectedForMass}
             onToggleSelect={toggleSelect}
             onSelectAll={toggleSelectAll}
@@ -644,7 +838,7 @@ export default function UploadPage() {
         </div>
       )}
 
-      {uploadStatus === "error" && duplicateFilenames.length === 0 && (
+      {uploadStatus === "error" && (
         <div className="fixed bottom-6 right-6 z-50 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl p-4 flex items-center gap-3 shadow-card animate-slide-up">
           <div className="w-5 h-5 bg-rose-500 rounded-full text-white flex items-center justify-center flex-shrink-0">
             <AlertCircle size={14} />

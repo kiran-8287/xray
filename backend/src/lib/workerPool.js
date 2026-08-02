@@ -131,20 +131,60 @@ class WorkerPool {
       const messageHandler = (result) => {
         // Ignore results if batch already failed (worker crashed)
         if (batchFailed) return;
-        
+
         resultsReceived++;
-        
-        // Route the result to the matching callback by itemId
-        // The result has an "id" field (itemId) from Python, and each entry has item.itemId
+
+        // Route the result to the matching callback by itemId.
+        // Python result IDs should match entry.item.itemId for successes.
+        // For generic errors (id="parse", id="batch", or unknown IDs)
+        // fall back to the next remaining entry that hasn't been routed yet,
+        // so no task is ever left dangling.
+        let routed = false;
+        const entryId = entry => entry.item.itemId;
         for (const entry of batchEntries) {
-          if (entry.callback && entry.item.itemId === result.id) {
-            entry.callback(result);
+          if (!entry._routed && entryId(entry) === result.id) {
+            entry._routed = true;
+            routed = true;
+            if (entry.callback) entry.callback(result);
             break;
+          }
+        }
+        if (!routed) {
+          // Fallback: assign to the next unrouted entry regardless of id.
+          // This preserves per-file progress even when the worker reports
+          // errors that aren't keyed by itemId.
+          for (const entry of batchEntries) {
+            if (!entry._routed) {
+              entry._routed = true;
+              routed = true;
+              // Preserve the originating itemId so server.js writes the correct filename.
+              const normalized = {
+                ...result,
+                id: entryId(entry),
+              };
+              if (entry.callback) entry.callback(normalized);
+              break;
+            }
           }
         }
         
         // If all results received, return worker to idle
         if (resultsReceived >= totalExpected) {
+          // Safety: any still-unrouted entries (e.g. worker said fewer results than expected)
+          // produce a synthetic error so they don't hang forever.
+          for (const entry of batchEntries) {
+            if (!entry._routed) {
+              entry._routed = true;
+              if (entry.callback) {
+                entry.callback({
+                  status: "error",
+                  id: entryId(entry),
+                  reason: `Worker did not return a result for this file (got ${resultsReceived}/${totalExpected})`,
+                });
+              }
+            }
+          }
+
           this._pendingBatches--;
           worker.removeListener("message", messageHandler);
           this.idle.add(worker);

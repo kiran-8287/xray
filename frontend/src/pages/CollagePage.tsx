@@ -157,7 +157,9 @@ export default function CollagePage() {
     GenerationService.restoreFromStorage();
     const savedAuto = localStorage.getItem("libraryAutoSave");
     const savedMode = localStorage.getItem("libraryAutoSaveMode");
-    if (savedAuto && JSON.parse(savedAuto) === true) {
+    const serviceState = GenerationService.getState();
+    const hasActiveResults = GenerationService.isGenerating() || serviceState.combinations.length > 0 || GenerationService.getBufferCount() > 0;
+    if (savedAuto && JSON.parse(savedAuto) === true && hasActiveResults) {
       const mode = savedMode === "both" ? "both" : "annotations";
       setAutoSave(true);
       setAutoSaveLocalMode(mode);
@@ -525,7 +527,7 @@ export default function CollagePage() {
             if (response.ok) savedCount++; else failedCount++;
           } catch { failedCount++; }
         }
-        await GenerationService.saveCurrentPage("annotations");
+        setCombinations(prev => prev.slice(batch.length));
         setBufferCount(GenerationService.getBufferCount());
         setBulkSaveState(prev => ({
           ...prev,
@@ -686,7 +688,7 @@ export default function CollagePage() {
             failedCount++;
           }
         }
-        await GenerationService.saveCurrentPage("both");
+        setCombinations(prev => prev.slice(batch.length));
         setBufferCount(GenerationService.getBufferCount());
         setBulkSaveState(prev => ({
           ...prev,
@@ -701,7 +703,6 @@ export default function CollagePage() {
         savedCount
       });
       GenerationService.clear();
-      setCombinations([]);
       setFailures([]);
       setSelectedBags([]);
       setSelectedThreats([]);
@@ -771,6 +772,9 @@ export default function CollagePage() {
   const totalPending = combinations.length + bufferCount;
   const totalRequested = generationProgress?.total || 0;
   const totalGenerated = generationProgress?.generated || 0;
+  const showAutoSaveBanner = autoSaveStatus?.enabled && (
+    isGenerating || totalPending > 0 || (generationProgress?.total ?? 0) > 0 || autoSaveStatus.queued > 0 || autoSaveStatus.pagesCompleted > 0
+  );
 
   return (
     <div className="max-w-6xl mx-auto py-8 px-6 animate-fade-in text-sm">
@@ -836,7 +840,7 @@ export default function CollagePage() {
       )}
 
       {/* Auto-Save Progress Banner */}
-      {autoSaveStatus?.enabled && (
+      {showAutoSaveBanner && (
         <div className="mb-6 p-3 rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-800 flex items-center justify-between text-xs font-medium flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />

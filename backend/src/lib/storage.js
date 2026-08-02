@@ -27,6 +27,84 @@ const CUSTOM_SUBCATEGORIES_FILE = path.join(DATA_DIR, 'customSubcategories.json'
 
 const DEFAULT_PARTITION_CAP = 5000;
 
+// ---- Duplicate ID helpers ----
+
+// Generate a fresh unique item ID (used when healing duplicate IDs or when a
+// batch item collides with an existing stored item).
+function generateFreshItemId(catKey, existingIds, salt = '') {
+  let id;
+  do {
+    id = `item_${catKey}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}${salt ? `_${salt}` : ''}`;
+  } while (existingIds.has(id));
+  return id;
+}
+
+// Heal duplicate item IDs across all category partition files.
+// Returns the number of duplicate occurrences that were re-assigned fresh IDs.
+// Runs once (guarded by a marker file) so existing corrupted data is repaired
+// without rewriting files on every startup.
+async function healDuplicateItemIds() {
+  const markerPath = path.join(DATA_DIR, '.dedup_healed');
+  try {
+    await fs.access(markerPath);
+    return 0; // Already healed on a previous run
+  } catch {
+    // Marker missing — proceed with healing
+  }
+
+  const catalog = await getCatalog();
+  let healedCount = 0;
+
+  for (const catKey of ['bags', 'threats', 'non_threats']) {
+    const catMeta = catalog.categories[catKey];
+    if (!catMeta) continue;
+
+    for (const pNum of catMeta.partitions) {
+      const partPath = getPartitionFilePath(catKey, pNum);
+      const items = await readJSONFile(partPath, []);
+      if (items.length === 0) continue;
+
+      const seen = new Set();
+      let changed = false;
+
+      for (let i = 0; i < items.length; i++) {
+        const id = items[i]?.id;
+        if (!id) {
+          // Missing ID — assign a fresh one
+          items[i].id = generateFreshItemId(catKey, seen, `heal_${i}`);
+          seen.add(items[i].id);
+          changed = true;
+          healedCount++;
+        } else if (seen.has(id)) {
+          // Duplicate ID — re-assign a fresh unique one
+          items[i].id = generateFreshItemId(catKey, seen, `heal_${i}`);
+          seen.add(items[i].id);
+          changed = true;
+          healedCount++;
+        } else {
+          seen.add(id);
+        }
+      }
+
+      if (changed) {
+        await writeJSONFileAtomic(partPath, items);
+      }
+    }
+  }
+
+  // Write marker so healing only runs once
+  try {
+    await fs.writeFile(markerPath, JSON.stringify({ healedAt: new Date().toISOString(), healedCount }), 'utf8');
+  } catch (err) {
+    console.warn('[storage] Failed to write dedup marker:', err);
+  }
+
+  if (healedCount > 0) {
+    console.log(`[storage] Healed ${healedCount} duplicate/missing item ID(s) across category partitions.`);
+  }
+  return healedCount;
+}
+
 // ---- Atomic write helpers & Locks ----
 
 // Self-clearing mutex per file path.
@@ -195,6 +273,9 @@ async function ensureDataDir() {
 
     await saveCatalog(catalog);
   }
+
+  // Heal any duplicate/missing item IDs from previous uploads (runs once)
+  await healDuplicateItemIds();
 }
 
 // ---- Items Partitioned Storage Core ----
@@ -269,14 +350,36 @@ async function createItemsBatch(itemsArray) {
   const catalog = await getCatalog();
   const createdItems = [];
 
-  // Group items by category
+  // Build a set of ALL existing item IDs across every category partition so we
+  // never store a duplicate ID (duplicates silently collapse the frontend's
+  // Set-based selection, e.g. "SELECT ALL" selecting only 200 of 300 items).
+  const existingIds = new Set();
+  for (const catKey of ['bags', 'threats', 'non_threats']) {
+    const catMeta = catalog.categories[catKey];
+    if (!catMeta) continue;
+    for (const pNum of catMeta.partitions) {
+      const partPath = getPartitionFilePath(catKey, pNum);
+      const partItems = await readJSONFile(partPath, []);
+      for (const it of partItems) {
+        if (it && it.id) existingIds.add(it.id);
+      }
+    }
+  }
+
+  // Group items by category, re-assigning any ID that collides with an existing
+  // stored item OR with another item in the same batch.
   const grouped = { bags: [], threats: [], non_threats: [] };
   for (const rawItem of itemsArray) {
     const catKey = normalizeCategoryKey(rawItem.category);
+    let id = rawItem.id;
+    if (!id || existingIds.has(id)) {
+      id = generateFreshItemId(catKey, existingIds);
+    }
+    existingIds.add(id);
     const item = {
-      id: rawItem.id || `item_${catKey}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       created_at: rawItem.created_at || new Date().toISOString(),
       ...rawItem,
+      id, // id must come AFTER the spread so a rawItem.id can never clobber our unique ID
     };
     grouped[catKey].push(item);
     createdItems.push(item);
@@ -506,9 +609,19 @@ async function createNonThreatItem(nonThreatData) {
 
 // ---- Saved layouts storage ----
 
+let savedLayoutsMutex = Promise.resolve();
+let savedLayoutsMemCache = null;
+let savedLayoutsCacheDirty = true;
+
 async function getSavedLayouts() {
   await ensureDataDir();
-  return await readJSONFile(SAVED_LAYOUTS_FILE, []);
+  if (!savedLayoutsCacheDirty && savedLayoutsMemCache) {
+    return savedLayoutsMemCache;
+  }
+  const layouts = await readJSONFile(SAVED_LAYOUTS_FILE, []);
+  savedLayoutsMemCache = layouts;
+  savedLayoutsCacheDirty = false;
+  return layouts;
 }
 
 async function getSavedLayoutById(id) {
@@ -517,34 +630,127 @@ async function getSavedLayoutById(id) {
 }
 
 async function createSavedLayout(layoutData) {
-  await ensureDataDir();
-  const layouts = await getSavedLayouts();
-  const newLayout = {
-    id: layoutData.id || crypto.randomUUID(),
-    created_at: new Date().toISOString(),
-    ...layoutData,
-  };
-  layouts.push(newLayout);
-  await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
-  return newLayout;
+  const prev = savedLayoutsMutex;
+  let resolveNext;
+  savedLayoutsMutex = new Promise(r => { resolveNext = r; });
+  await prev;
+  try {
+    await ensureDataDir();
+    const layouts = await getSavedLayouts();
+    const newLayout = {
+      id: layoutData.id || crypto.randomUUID(),
+      created_at: new Date().toISOString(),
+      ...layoutData,
+    };
+    layouts.push(newLayout);
+    await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
+    savedLayoutsMemCache = layouts;
+    savedLayoutsCacheDirty = false;
+    return newLayout;
+  } finally {
+    resolveNext();
+  }
+}
+
+async function createSavedLayoutsBatch(layoutDataList) {
+  const prev = savedLayoutsMutex;
+  let resolveNext;
+  savedLayoutsMutex = new Promise(r => { resolveNext = r; });
+  await prev;
+  try {
+    await ensureDataDir();
+    const layouts = await getSavedLayouts();
+    const now = new Date().toISOString();
+    const created = [];
+    for (const layoutData of layoutDataList) {
+      const newLayout = {
+        id: layoutData.id || crypto.randomUUID(),
+        created_at: layoutData.created_at || now,
+        ...layoutData,
+      };
+      layouts.push(newLayout);
+      created.push(newLayout);
+    }
+    await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
+    savedLayoutsMemCache = layouts;
+    savedLayoutsCacheDirty = false;
+    return created;
+  } finally {
+    resolveNext();
+  }
 }
 
 async function updateSavedLayout(id, layoutData) {
-  const layouts = await getSavedLayouts();
-  const index = layouts.findIndex(layout => layout.id === id);
-  if (index === -1) return null;
-  layouts[index] = { ...layouts[index], ...layoutData };
-  await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
-  return layouts[index];
+  const prev = savedLayoutsMutex;
+  let resolveNext;
+  savedLayoutsMutex = new Promise(r => { resolveNext = r; });
+  await prev;
+  try {
+    const layouts = await getSavedLayouts();
+    const index = layouts.findIndex(layout => layout.id === id);
+    if (index === -1) return null;
+    layouts[index] = { ...layouts[index], ...layoutData };
+    await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
+    savedLayoutsMemCache = layouts;
+    savedLayoutsCacheDirty = false;
+    return layouts[index];
+  } finally {
+    resolveNext();
+  }
 }
 
 async function deleteSavedLayout(id) {
-  const layouts = await getSavedLayouts();
-  const filteredLayouts = layouts.filter(layout => layout.id !== id);
-  await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, filteredLayouts);
+  const prev = savedLayoutsMutex;
+  let resolveNext;
+  savedLayoutsMutex = new Promise(r => { resolveNext = r; });
+  await prev;
+  try {
+    const layouts = await getSavedLayouts();
+    const filteredLayouts = layouts.filter(layout => layout.id !== id);
+    await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, filteredLayouts);
+    savedLayoutsMemCache = filteredLayouts;
+    savedLayoutsCacheDirty = false;
+  } finally {
+    resolveNext();
+  }
 }
 
 // ---- Custom subcategories storage ----
+
+const BUILTIN_SUBCATEGORIES_BY_CATEGORY = {
+  bags: [
+    "Backpack","Briefcase","Cabin Bag","Camera Bag","Cosmetic Bag","Duffel Bag",
+    "General","Gym Bag","Handbag","Hiking Backpack","Laptop Bag","Messenger Bag",
+    "Pouch","School Bag","Shoulder Bag","Sling Bag","Suitcase","Tote Bag",
+    "Travel Bag","Trolley Bag"
+  ],
+  threats: [
+    "Air Gun","Ammunition","Axe","Baton","Box Cutter","Brass Knuckles","Bullet",
+    "Cartridge","Combat Knife","Crowbar","Dagger","Detonator","Dynamite","Explosive",
+    "Explosive Charge","Firecracker","Folding Knife","General","Grenade","Gun","Hammer",
+    "Hand Grenade","Ice Pick","IED","Kitchen Knife","Knife","Machete","Magazine",
+    "Nunchaku","Pistol","Razor Blade","Revolver","Rifle","Scalpel","Shell","Shotgun",
+    "Shuriken","Submachine Gun","Sword","Taser"
+  ],
+  "non-threats": [
+    "Accessories","Belt","Beverage Can","Blanket","Board Game","Books","Camera","Cap",
+    "Charger","Clothes","Deodorant","Documents","Electronics","First Aid Kit","Food",
+    "Fruits","Gaming Console","General","Gloves","Hard Drive","Headphones","ID Card",
+    "Jacket","Jewelry","Keyboard","Keys","Laptop","Lock","Luggage Tag","Lunch Box",
+    "Magazine","Medical Equipment","Medication","Mobile Phone","Mouse","Notebook",
+    "Perfume","Power Bank","Purse","Scarf","Shampoo","Shoes","Smartwatch","Snacks",
+    "Soap","Socks","Sports Equipment","Stuffed Toy","Sunglasses","Tablet",
+    "Toiletries","Toothbrush","Toothpaste","Toys","Travel Pillow","Umbrella","USB Drive",
+    "Wallet","Watch","Water Bottle"
+  ]
+};
+
+function normalizeSubcategoryKey(name) {
+  return String(name || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, "");
+}
 
 async function getCustomSubcategories() {
   await ensureDataDir();
@@ -557,19 +763,46 @@ async function getCustomSubcategories() {
 
 async function addCustomSubcategory(category, name) {
   await ensureDataDir();
+  const trimmedName = String(name || "").trim();
+  if (!trimmedName) {
+    return { success: false, error: "Subcategory name is required" };
+  }
+
+  const normalizedKey = normalizeSubcategoryKey(trimmedName);
+  const slug = trimmedName
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+
+  const builtins = BUILTIN_SUBCATEGORIES_BY_CATEGORY[category] || [];
+  const builtinMatch = builtins.find(
+    (b) => normalizeSubcategoryKey(b) === normalizedKey
+  );
+  if (builtinMatch) {
+    return {
+      success: false,
+      error: `Subcategory already exists as built-in: "${builtinMatch}"`,
+    };
+  }
+
   const customSubs = await getCustomSubcategories();
-  const slug = name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-
   const categorySubs = customSubs[category] || [];
-  const exists = categorySubs.some(sub => sub.slug === slug || sub.name.toLowerCase() === name.toLowerCase());
-
-  if (exists) {
-    return { success: false, error: 'Subcategory already exists' };
+  const customMatch = categorySubs.find(
+    (sub) =>
+      sub.slug === slug ||
+      normalizeSubcategoryKey(sub.name) === normalizedKey
+  );
+  if (customMatch) {
+    return {
+      success: false,
+      error: `Subcategory already exists as custom: "${customMatch.name}"`,
+    };
   }
 
   const newSubcategory = {
     slug,
-    name,
+    name: trimmedName,
     createdAt: new Date().toISOString(),
   };
 
@@ -609,6 +842,7 @@ export {
   getSavedLayouts,
   getSavedLayoutById,
   createSavedLayout,
+  createSavedLayoutsBatch,
   updateSavedLayout,
   deleteSavedLayout,
   getCustomSubcategories,

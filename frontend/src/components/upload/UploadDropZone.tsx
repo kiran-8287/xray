@@ -33,6 +33,16 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       readBatch();
     });
 
+  const isSupportedFile = (name: string): boolean => {
+    const lower = name.toLowerCase();
+    return (
+      lower.endsWith(".dump.pgm") ||
+      lower.endsWith(".pgm") ||
+      lower.endsWith(".tip") ||
+      lower.endsWith(".dump")
+    );
+  };
+
   const traverseEntry = async (entry: any): Promise<File[]> => {
     if (!entry) {
       return [];
@@ -40,7 +50,14 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
 
     if (entry.isFile) {
       return new Promise((resolve, reject) => {
-        entry.file((file: File) => resolve([file]), reject);
+        entry.file((file: File) => {
+          // Only include supported file types when traversing folders
+          if (isSupportedFile(file.name)) {
+            resolve([file]);
+          } else {
+            resolve([]);
+          }
+        }, reject);
       });
     }
 

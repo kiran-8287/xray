@@ -202,6 +202,51 @@ export function clearCustomSubcategoriesCache() {
   initializeCache();
 }
 
+// Clear + re-fetch custom subcategories from the backend (returns promise so caller can await refresh)
+export async function refreshCustomSubcategories(): Promise<void> {
+  clearCustomSubcategoriesCache();
+  await loadCustomSubcategories();
+}
+
+// Normalize a subcategory name for fuzzy-duplicate comparison.
+// Rules: lowercase, trim, strip ALL non-alphanumerics (spaces, hyphens, underscores, dots, quotes).
+// This makes "School Bag" === "school bag" === "SchoolBag" === "school-bag" === "School  bag".
+export function normalizeSubcategoryKey(name: string): string {
+  return String(name || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+// Checks if a subcategory name already exists (built-in OR custom) for the given
+// category, using the same normalization rules as the backend. Returns null if no
+// duplicate, or a human-readable `{ name, kind }` descriptor for the match.
+export function findDuplicateSubcategory(
+  categorySlug: string,
+  name: string
+): { name: string; kind: "built-in" | "custom" } | null {
+  const key = normalizeSubcategoryKey(name);
+  if (!key) return null;
+
+  const lib = LIBRARIES.find((l) => l.slug === categorySlug);
+  if (lib) {
+    for (const sub of lib.subcategories) {
+      if (normalizeSubcategoryKey(sub.name) === key) {
+        return { name: sub.name, kind: "built-in" };
+      }
+    }
+  }
+
+  const customSubs = customSubcategoriesCache[categorySlug] || [];
+  for (const sub of customSubs) {
+    if (normalizeSubcategoryKey(sub.name) === key) {
+      return { name: sub.name, kind: "custom" };
+    }
+  }
+
+  return null;
+}
+
 // Check if a subcategory is custom
 export function isCustomSubcategory(categorySlug: string, subcategorySlug: string): boolean {
   const customSubs = customSubcategoriesCache[categorySlug] || [];
