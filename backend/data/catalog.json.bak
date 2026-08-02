@@ -3,7 +3,7 @@
     "bags": {
       "activePartition": 1,
       "partitionCap": 5000,
-      "totalCount": 1000,
+      "totalCount": 1100,
       "partitions": [
         1
       ]
@@ -32,7 +32,7 @@
       ],
       "activePartition": 3,
       "partitionCap": 5000,
-      "totalCount": 11500
+      "totalCount": 13000
     }
   }
 }

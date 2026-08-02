@@ -507,26 +507,26 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
         let duplicateCount = 0;
         const duplicateFilenames = [];
 
-        console.log(`[process-raw-files] Received ${files.length} files from multer`);
+        logger.debug({ operationId, fileCount: files.length }, 'Received files from multer');
         const skippedFiles = [];
         for (const file of files) {
             const itemId = deriveItemId(file.originalname);
             const fileType = classifyFileType(file.originalname);
             if (!fileType) {
-                console.log(`[process-raw-files] Skipped ${file.originalname}: unrecognized extension`);
+                logger.debug({ operationId, filename: file.originalname }, 'Skipped file: unrecognized extension');
                 skippedFiles.push({ filename: file.originalname, reason: "Unrecognized file extension (expected .dump.pgm or .tip)" });
                 continue;
             }
 
             if (existingIds.has(itemId)) {
-                console.log(`[process-raw-files] Duplicate: ${itemId}`);
+                logger.debug({ operationId, itemId }, 'Duplicate file');
                 duplicateCount++;
                 duplicateFilenames.push(file.originalname);
             } else {
                 nonDuplicates.push({ file, itemId, fileType });
             }
         }
-        console.log(`[process-raw-files] Non-duplicates: ${nonDuplicates.length}, Duplicates: ${duplicateCount}, Skipped: ${skippedFiles.length}`);
+        logger.debug({ operationId, valid: nonDuplicates.length, duplicates: duplicateCount, skipped: skippedFiles.length }, 'Validation complete');
         
         timer.endStage(PIPELINE_STAGES.VALIDATION, { 
             valid: nonDuplicates.length, 
