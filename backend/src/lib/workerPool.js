@@ -9,6 +9,7 @@ import path from "node:path";
 import pino from 'pino';
 import client from 'prom-client';
 import { PIPELINE_STAGES } from './instrumentation.js';
+import config from './config.js';
 
 // Derive __dirname equivalent in ESM
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -48,7 +49,10 @@ class WorkerPool {
    * @param {number} size - Number of workers to create (default: 4)
    */
   constructor(size = 4) {
-    this.logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+    // Use same log level as server.js (downgrade 'info' to 'warn' to reduce terminal noise)
+    this.logger = pino({ 
+      level: config.logLevel === 'info' ? 'warn' : config.logLevel 
+    });
 
     // Metrics
     try {
@@ -229,7 +233,12 @@ class WorkerPool {
         if (batchFailed) return; // Already handled
         batchFailed = true;
         
-        console.error(`[WorkerPool] Worker crashed mid-batch (${resultsReceived}/${totalExpected} results received). Retrying ${batchEntries.length} tasks...`, err);
+        this.logger.error({ 
+          resultsReceived, 
+          totalExpected, 
+          retryCount: batchEntries.length, 
+          error: err.message 
+        }, 'Worker crashed mid-batch, retrying');
         
         this._pendingBatches--;
         worker.removeListener("message", messageHandler);

@@ -118,12 +118,12 @@ def ensure_packages() -> None:
             missing.append(spec)
     if not missing:
         return
-    print(f"\n⚠️  Missing Python packages: {missing}. Installing...")
+    print(f"\n[WARNING] Missing Python packages: {missing}. Installing...")
     cmd = [sys.executable, "-m", "pip", "install", *missing]
     result = subprocess.run(cmd, check=False)
     if result.returncode != 0:
         print(
-            f"\n❌ Could not install dashboard deps. Install manually:\n"
+            f"\n[ERROR] Could not install dashboard deps. Install manually:\n"
             f"    {sys.executable} -m pip install {' '.join(REQUIRED_PACKAGES)}"
         )
         sys.exit(result.returncode)
@@ -140,14 +140,14 @@ def check_backend_health() -> bool:
         with _req.urlopen(BACKEND_URL, timeout=2) as r:
             live = _json.loads(r.read().decode("utf-8"))
         print(
-            f"\n✅ Backend is alive: {live.get('in_flight_requests', '?')} requests "
+            f"\n[OK] Backend is alive: {live.get('in_flight_requests', '?')} requests "
             f"in flight, RSS {live.get('memory_mb', {}).get('rss_mb', '?')} MB "
-            f"(server time {live.get('server_time_utc', '—')})."
+            f"(server time {live.get('server_time_utc', '--')})."
         )
         return True
     except Exception as exc:
         print(
-            f"\n⚠️  Backend is NOT running at {BACKEND_URL} ({exc}).\n"
+            f"\n[WARNING] Backend is NOT running at {BACKEND_URL} ({exc}).\n"
             f"    Start the backend before you do experiments, otherwise no logs "
             f"will be produced."
         )
@@ -167,7 +167,7 @@ def launch_dashboard(port: int) -> int:
         "--server.headless", "false",
         "--server.runOnSave", "true",
     ]
-    print(f"\n🚀 Launching: {' '.join(cmd)}\n")
+    print(f"\n[LAUNCH] Launching: {' '.join(cmd)}\n")
     proc = subprocess.run(cmd, check=False)
     return proc.returncode
 

@@ -4,8 +4,12 @@
  */
 
 import pino from 'pino';
+import config from './config.js';
 
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+// Use same log level as server.js (downgrade 'info' to 'warn' to reduce terminal noise)
+const logger = pino({ 
+  level: config.logLevel === 'info' ? 'warn' : config.logLevel 
+});
 
 /**
  * Pipeline stages to track
