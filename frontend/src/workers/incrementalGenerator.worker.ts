@@ -4,7 +4,7 @@
 import { generateCombinationsIncremental } from "../lib/combinationGenerator";
 
 export interface IncrementalWorkerRequest {
-  type: "generate";
+  type: "generate" | "generateChunk";
   selectedBags: any[];
   selectedThreats: any[];
   selectedOthers: any[];
@@ -15,20 +15,33 @@ export interface IncrementalWorkerRequest {
   existingIds: string[];
   /** Number of combos per emitted batch (default: 5000) */
   batchSize?: number;
+  /** For chunked generation: how many more to generate (default: 5000) */
+  chunkSize?: number;
+  /** For chunked generation: total already generated */
+  totalGenerated?: number;
 }
 
 export interface IncrementalWorkerResponse {
-  type: "batch" | "complete" | "error";
+  type: "batch" | "complete" | "error" | "progress" | "chunkComplete";
   batch?: any[];
   failures?: any[];
   progress?: { generated: number; total: number };
   error?: string;
+  isComplete?: boolean;
 }
 
 self.onmessage = async (event: MessageEvent<IncrementalWorkerRequest>) => {
   const data = event.data;
 
-  if (data.type !== "generate") {
+  console.log("[Worker] Received message:", data.type, { 
+    k: data.kValue, 
+    bags: data.selectedBags.length,
+    chunkSize: data.chunkSize,
+    totalGenerated: data.totalGenerated 
+  });
+
+  if (data.type !== "generate" && data.type !== "generateChunk") {
+    console.error("[Worker] Invalid request type:", data.type);
     self.postMessage({
       type: "error",
       error: "Invalid request type",
@@ -37,19 +50,42 @@ self.onmessage = async (event: MessageEvent<IncrementalWorkerRequest>) => {
   }
 
   try {
+    // For chunked generation, calculate how many to generate in this chunk
+    let generateCount = data.kValue;
+    if (data.type === "generateChunk" && data.chunkSize) {
+      const remaining = data.kValue - (data.totalGenerated || 0);
+      generateCount = Math.min(data.chunkSize, remaining);
+    }
+
+    console.log("[Worker] Starting generation:", { 
+      total: data.kValue, 
+      generating: generateCount,
+      alreadyGenerated: data.totalGenerated || 0 
+    });
+    
+    // Send immediate progress update
+    self.postMessage({
+      type: "progress",
+      progress: { generated: data.totalGenerated || 0, total: data.kValue },
+    } as IncrementalWorkerResponse);
+
+    console.log("[Worker] Calling generateCombinationsIncremental...");
+    
     // Run incremental generation with batch callback
     const { results, failures } = await generateCombinationsIncremental(
       data.selectedBags,
       data.selectedThreats,
       data.selectedOthers,
-      data.kValue,
+      generateCount,
       // onBatch callback - sends batches to main thread
       (batch, progress) => {
+        const totalProgress = (data.totalGenerated || 0) + progress.generated;
+        console.log("[Worker] Batch callback:", batch.length, "combos, total progress:", totalProgress, "/", data.kValue);
         self.postMessage({
           type: "batch",
           batch,
           failures: [],
-          progress,
+          progress: { generated: totalProgress, total: data.kValue },
         } as IncrementalWorkerResponse);
       },
       data.threatDistribution,
@@ -59,14 +95,19 @@ self.onmessage = async (event: MessageEvent<IncrementalWorkerRequest>) => {
       data.batchSize ?? 5000
     );
 
-    // Send final complete message
+    const totalGenerated = (data.totalGenerated || 0) + results.length;
+    console.log("[Worker] Chunk complete:", results.length, "results, total:", totalGenerated);
+    
+    // Send chunk complete message
     self.postMessage({
-      type: "complete",
+      type: "chunkComplete",
       batch: [],
       failures,
-      progress: { generated: results.length, total: data.kValue },
+      progress: { generated: totalGenerated, total: data.kValue },
+      isComplete: totalGenerated >= data.kValue,
     } as IncrementalWorkerResponse);
   } catch (err) {
+    console.error("[Worker] Error:", err);
     self.postMessage({
       type: "error",
       error: err instanceof Error ? err.message : "Unknown error",
@@ -74,4 +115,4 @@ self.onmessage = async (event: MessageEvent<IncrementalWorkerRequest>) => {
   }
 };
 
-export {};
+export {};

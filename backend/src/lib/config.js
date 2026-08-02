@@ -45,6 +45,7 @@ const config = {
   collageImagesRoot: process.env.COLLAGE_IMAGES_PATH || path.resolve(PROJECT_ROOT, 'data', 'collage_images'),
   pixelDataRoot: process.env.PIXEL_DATA_PATH || path.resolve(PROJECT_ROOT, 'data', 'pixel_data'),
   dataDir: process.env.DATA_DIR || path.resolve(PROJECT_ROOT, 'data'),
+  savedLayoutsDir: process.env.SAVED_LAYOUTS_PATH || 'B:\\xray_saved_layouts',
   exportsRoot: process.env.EXPORTS_PATH || path.resolve(PROJECT_ROOT, 'data', 'exports'),
   tempDir: process.env.TEMP_PATH || path.resolve(PROJECT_ROOT, 'data', 'temp'),
 

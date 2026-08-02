@@ -14,6 +14,7 @@ import ConfirmModal from "../components/common/ConfirmModal";
 import type { GenerationProgress, GenerationState, AutoSaveStatus, AutoSaveMode } from "../types/generation";
 
 const ITEMS_PER_PAGE = GenerationService.ITEMS_PER_PAGE;
+const MAX_CONCURRENT_RENDERS = 2; // Limit concurrent image rendering to prevent backend overload
 
 const toastStyles = `
   @keyframes slide-down {
@@ -434,58 +435,82 @@ export default function CollagePage() {
     setSaveImageState({ status: "saving", message: "Rendering high & low energy images...", imageUrl: null });
 
     try {
-      if (dirHandle) {
-        const response = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            objects: selectedCombination.objects,
-            name: selectedCombination.id,
-          }),
-        }, LONG_REQUEST_TIMEOUT_MS, 1);
-
-        if (!response.ok) {
-          throw new Error("Failed to render images");
+      // Concurrency-limited image rendering
+      const semaphore = { current: 0, queue: [] as (() => void)[] };
+      const acquire = () => new Promise<void>((resolve) => {
+        if (semaphore.current < MAX_CONCURRENT_RENDERS) {
+          semaphore.current++;
+          resolve();
+        } else {
+          semaphore.queue.push(resolve);
         }
-
-        const data = await response.json();
-        const safeName = selectedCombination.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
-        const filename = `${safeName}.png`;
-
-        const highUrl = `${API_BASE_URL}${data.high_url}`;
-        const lowUrl = `${API_BASE_URL}${data.low_url}`;
-
-        const [highRes, lowRes] = await Promise.all([fetch(highUrl), fetch(lowUrl)]);
-        const [highBlob, lowBlob] = await Promise.all([highRes.blob(), lowRes.blob()]);
-
-        await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
-
-        setSaveImageState({
-          status: "success",
-          message: `High & low energy images saved to selected folder!`,
-          imageUrl: data.high_url,
-        });
-      } else {
-        const response = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            objects: selectedCombination.objects,
-            name: selectedCombination.id,
-            outputPath: outputPath || undefined,
-          }),
-        }, LONG_REQUEST_TIMEOUT_MS, 1);
-
-        if (!response.ok) {
-          throw new Error("Failed to render images");
+      });
+      const release = () => {
+        semaphore.current--;
+        if (semaphore.queue.length > 0 && semaphore.current < MAX_CONCURRENT_RENDERS) {
+          const next = semaphore.queue.shift()!;
+          semaphore.current++;
+          next();
         }
+      };
 
-        const data = await response.json();
-        setSaveImageState({
-          status: "success",
-          message: `High & low energy images saved!`,
-          imageUrl: data.high_url,
-        });
+      await acquire();
+      try {
+        if (dirHandle) {
+          const response = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              objects: selectedCombination.objects,
+              name: selectedCombination.id,
+            }),
+          }, LONG_REQUEST_TIMEOUT_MS, 1);
+
+          if (!response.ok) {
+            throw new Error("Failed to render images");
+          }
+
+          const data = await response.json();
+          const safeName = selectedCombination.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+          const filename = `${safeName}.png`;
+
+          const highUrl = `${API_BASE_URL}${data.high_url}`;
+          const lowUrl = `${API_BASE_URL}${data.low_url}`;
+
+          const [highRes, lowRes] = await Promise.all([fetch(highUrl), fetch(lowUrl)]);
+          const [highBlob, lowBlob] = await Promise.all([highRes.blob(), lowRes.blob()]);
+
+          await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
+
+          setSaveImageState({
+            status: "success",
+            message: `High & low energy images saved to selected folder!`,
+            imageUrl: data.high_url,
+          });
+        } else {
+          const response = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              objects: selectedCombination.objects,
+              name: selectedCombination.id,
+              outputPath: outputPath || undefined,
+            }),
+          }, LONG_REQUEST_TIMEOUT_MS, 1);
+
+          if (!response.ok) {
+            throw new Error("Failed to render images");
+          }
+
+          const data = await response.json();
+          setSaveImageState({
+            status: "success",
+            message: `High & low energy images saved!`,
+            imageUrl: data.high_url,
+          });
+        }
+      } finally {
+        release();
       }
     } catch (err) {
       console.error("Error saving images:", err);
@@ -583,6 +608,25 @@ export default function CollagePage() {
     let savedCount = 0;
     let failedCount = 0;
 
+    // Concurrency limiter for image rendering
+    const semaphore = { current: 0, queue: [] as (() => void)[] };
+    const acquire = () => new Promise<void>((resolve) => {
+      if (semaphore.current < MAX_CONCURRENT_RENDERS) {
+        semaphore.current++;
+        resolve();
+      } else {
+        semaphore.queue.push(resolve);
+      }
+    });
+    const release = () => {
+      semaphore.current--;
+      if (semaphore.queue.length > 0 && semaphore.current < MAX_CONCURRENT_RENDERS) {
+        const next = semaphore.queue.shift()!;
+        semaphore.current++;
+        next();
+      }
+    };
+
     try {
       while (combinations.length > 0 || bufferCount > 0 || isGenerating) {
         if (combinations.length === 0) {
@@ -660,29 +704,35 @@ export default function CollagePage() {
           }, LONG_REQUEST_TIMEOUT_MS, 1);
           if (response.ok) {
             savedCount++;
-            try {
-              const renderRes = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  objects: comb.objects,
-                  name: comb.id,
-                  outputPath: dirHandle ? undefined : (outputPath || undefined),
-                }),
-              }, LONG_REQUEST_TIMEOUT_MS, 1);
-              if (dirHandle && renderRes.ok) {
-                const renderData = await renderRes.json();
-                const safeName = comb.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
-                const filename = `${safeName}.png`;
-                const [highRes, lowRes] = await Promise.all([
-                  fetch(`${API_BASE_URL}${renderData.high_url}`),
-                  fetch(`${API_BASE_URL}${renderData.low_url}`)
-                ]);
-                const [highBlob, lowBlob] = await Promise.all([highRes.blob(), lowRes.blob()]);
-                await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
+            // Render images with concurrency limit
+            if (pendingSaveAction.saveImages) {
+              await acquire();
+              try {
+                const renderRes = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    objects: comb.objects,
+                    name: comb.id,
+                    outputPath: dirHandle ? undefined : (outputPath || undefined),
+                  }),
+                }, LONG_REQUEST_TIMEOUT_MS, 1);
+                if (dirHandle && renderRes.ok) {
+                  const renderData = await renderRes.json();
+                  const safeName = comb.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+                  const filename = `${safeName}.png`;
+                  const [highRes, lowRes] = await Promise.all([
+                    fetch(`${API_BASE_URL}${renderData.high_url}`),
+                    fetch(`${API_BASE_URL}${renderData.low_url}`)
+                  ]);
+                  const [highBlob, lowBlob] = await Promise.all([highRes.blob(), lowRes.blob()]);
+                  await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
+                }
+              } catch (err) {
+                console.error(`Error saving images for ${comb.id}:`, err);
+              } finally {
+                release();
               }
-            } catch (err) {
-              console.error(`Error saving images for ${comb.id}:`, err);
             }
           } else {
             failedCount++;

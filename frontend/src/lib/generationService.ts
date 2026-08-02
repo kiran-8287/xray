@@ -26,6 +26,17 @@ import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "./fetchWithTimeout";
 type Subscriber = (state: GenerationState) => void;
 
 const ITEMS_PER_PAGE = 100;
+const MAX_CONCURRENT_RENDERS = 2; // Limit concurrent image rendering requests
+const NOTIFY_THROTTLE_MS = 100; // Throttle subscriber notifications to every 100ms
+
+// Chunked generation constants
+const CHUNK_SIZE = 5000; // Generate 5k combinations per chunk
+const MAX_BUFFER_SIZE = 10000; // Max combinations in memory (2 chunks)
+const BUFFER_REFILL_THRESHOLD = 2000; // Request more when buffer drops below this
+
+// Auto-save timing constants
+const AUTO_SAVE_INITIAL_DELAY_MS = 5000; // Wait 5 seconds before starting auto-save
+const AUTO_SAVE_PAGE_DELAY_MS = 5000; // Wait 5 seconds between each page save
 
 let worker: Worker | null = null;
 let autoSaveEnabled = false;
@@ -34,6 +45,15 @@ let generatedBuffer: CombinatorialResult[] = [];
 let autoSaveRunningRef = false;
 let pageSaveRunningRef = false;
 let loopWakeController: { resolve: (() => void) | null } = { resolve: null };
+let lastNotifyTime = 0;
+let pendingNotify = false;
+let autoSaveStartTime = 0;
+let lastAutoSaveTime = 0; // Track when last auto-save completed
+
+// Chunked generation state
+let totalGeneratedCount = 0; // Total combinations generated so far
+let isGeneratingChunk = false; // Whether we're currently generating a chunk
+let currentGenerationParams: GenerationParams | null = null; // Store params for chunk requests
 
 let state: GenerationState = {
   isGenerating: false,
@@ -47,6 +67,30 @@ let state: GenerationState = {
 const subscribers = new Set<Subscriber>();
 
 function notifySubscribers() {
+  const now = Date.now();
+  const timeSinceLastNotify = now - lastNotifyTime;
+
+  // If we've notified recently, mark as pending and skip
+  if (timeSinceLastNotify < NOTIFY_THROTTLE_MS) {
+    if (!pendingNotify) {
+      pendingNotify = true;
+      // Schedule a notification after throttle period
+      setTimeout(() => {
+        pendingNotify = false;
+        lastNotifyTime = Date.now();
+        for (const cb of subscribers) {
+          try {
+            cb(state);
+          } catch (err) {
+            console.error("[GenerationService] subscriber error:", err);
+          }
+        }
+      }, NOTIFY_THROTTLE_MS - timeSinceLastNotify);
+    }
+    return;
+  }
+
+  lastNotifyTime = now;
   for (const cb of subscribers) {
     try {
       cb(state);
@@ -213,8 +257,30 @@ async function saveComboAnnotationBatch(page: CombinatorialResult[]): Promise<Se
   return savedIds;
 }
 
+// Concurrency-limited image rendering
 async function renderOneComboImage(combo: CombinatorialResult): Promise<boolean> {
+  const semaphore = { current: 0, queue: [] as (() => void)[] };
+
+  const acquire = () => new Promise<void>((resolve) => {
+    if (semaphore.current < MAX_CONCURRENT_RENDERS) {
+      semaphore.current++;
+      resolve();
+    } else {
+      semaphore.queue.push(resolve);
+    }
+  });
+
+  const release = () => {
+    semaphore.current--;
+    if (semaphore.queue.length > 0 && semaphore.current < MAX_CONCURRENT_RENDERS) {
+      const next = semaphore.queue.shift()!;
+      semaphore.current++;
+      next();
+    }
+  };
+
   try {
+    await acquire();
     await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -223,6 +289,8 @@ async function renderOneComboImage(combo: CombinatorialResult): Promise<boolean>
     return true;
   } catch {
     return false;
+  } finally {
+    release();
   }
 }
 
@@ -231,13 +299,20 @@ async function savePage(page: CombinatorialResult[], mode: AutoSaveMode): Promis
   const savedAnnotations = evictableIds.size;
   let savedImages = 0;
   if (mode === "both") {
+    // Render images with concurrency limit to avoid overwhelming backend
+    const renderPromises: Promise<void>[] = [];
     for (const comb of page) {
       if (!comb.id || !evictableIds.has(comb.id)) continue;
-      if (await renderOneComboImage(comb)) {
-        savedImages++;
-        if (state.autoSaveStatus) state.autoSaveStatus.imagesSaved++;
-      }
+      const promise = renderOneComboImage(comb).then((success) => {
+        if (success) {
+          savedImages++;
+          if (state.autoSaveStatus) state.autoSaveStatus.imagesSaved++;
+        }
+      });
+      renderPromises.push(promise);
     }
+    // Wait for all renders with concurrency limit enforced in renderOneComboImage
+    await Promise.all(renderPromises);
   }
   return { savedAnnotations, savedImages, evictableIds };
 }
@@ -296,14 +371,35 @@ async function runAutoSaveLoop() {
   autoSaveRunningRef = true;
 
   try {
+    // Initial delay before starting auto-save
+    const timeSinceStart = Date.now() - autoSaveStartTime;
+    if (timeSinceStart < AUTO_SAVE_INITIAL_DELAY_MS) {
+      const remainingDelay = AUTO_SAVE_INITIAL_DELAY_MS - timeSinceStart;
+      console.log(`[AutoSave] Waiting ${remainingDelay}ms before starting auto-save...`);
+      await interruptibleSleep(remainingDelay, loopWakeController);
+      if (!autoSaveEnabled) return;
+    }
+
     while (autoSaveEnabled) {
       if (pageSaveRunningRef) {
         await interruptibleSleep(100, loopWakeController);
         continue;
       }
+      
+      // Check if we should wait before next save (5 second delay between saves)
+      const timeSinceLastSave = Date.now() - lastAutoSaveTime;
+      if (lastAutoSaveTime > 0 && timeSinceLastSave < AUTO_SAVE_PAGE_DELAY_MS) {
+        const remainingDelay = AUTO_SAVE_PAGE_DELAY_MS - timeSinceLastSave;
+        console.log(`[AutoSave] Waiting ${remainingDelay}ms before next save...`);
+        await interruptibleSleep(remainingDelay, loopWakeController);
+        if (!autoSaveEnabled) break;
+      }
+      
+      // Only start saving after we have at least one full page
       if (state.combinations.length >= ITEMS_PER_PAGE ||
           (!state.isGenerating && state.combinations.length > 0)) {
         const hasMore = await processNextAutoSavePage();
+        lastAutoSaveTime = Date.now(); // Record when save completed
         if (!hasMore && !state.isGenerating) break;
       } else {
         await interruptibleSleep(500, loopWakeController);
@@ -328,6 +424,69 @@ async function autoSaveBatch(batch: CombinatorialResult[]) {
   }
 }
 
+/**
+ * Check if buffer needs refilling and request next chunk if needed
+ */
+function checkAndRefillBuffer() {
+  if (!state.isGenerating || isGeneratingChunk) return;
+  
+  const totalTarget = state.progress?.total || 0;
+  
+  // If buffer is below threshold and we haven't generated all combos, request more
+  if (generatedBuffer.length < BUFFER_REFILL_THRESHOLD && totalGeneratedCount < totalTarget) {
+    console.log(`[GenerationService] Buffer low (${generatedBuffer.length}/${BUFFER_REFILL_THRESHOLD}), requesting next chunk...`);
+    requestNextChunk();
+  }
+}
+
+/**
+ * Request next chunk of combinations from worker
+ */
+function requestNextChunk() {
+  if (!worker || isGeneratingChunk) return;
+  
+  const params = currentGenerationParams;
+  if (!params) return;
+  
+  isGeneratingChunk = true;
+  
+  const totalTarget = params.kValue;
+  const remaining = totalTarget - totalGeneratedCount;
+  const chunkSize = Math.min(CHUNK_SIZE, remaining);
+  
+  if (chunkSize <= 0) {
+    isGeneratingChunk = false;
+    return;
+  }
+  
+  console.log(`[GenerationService] Requesting chunk of ${chunkSize} combos (total so far: ${totalGeneratedCount}/${totalTarget})`);
+  
+  // Reconstruct distributions from params
+  const effectiveThreatDist: Record<number, number> = {};
+  for (let i = 1; i <= params.maxThreats; i++) {
+    effectiveThreatDist[i] = (params.threatDistribution && params.threatDistribution[i]) ?? 0;
+  }
+  const effectiveNonThreatDist: Record<number, number> = {};
+  for (let i = 1; i <= params.maxNonThreats; i++) {
+    effectiveNonThreatDist[i] = (params.nonThreatDistribution && params.nonThreatDistribution[i]) ?? 0;
+  }
+  
+  worker.postMessage({
+    type: "generateChunk",
+    selectedBags: params.selectedBags,
+    selectedThreats: params.selectedThreats,
+    selectedOthers: params.selectedOthers,
+    kValue: totalTarget,
+    threatDistribution: effectiveThreatDist,
+    nonThreatDistribution: effectiveNonThreatDist,
+    requireAtLeastOneNonThreat: params.requireAtLeastOneNonThreat || false,
+    existingIds: params.existingIds || [],
+    chunkSize: chunkSize,
+    totalGenerated: totalGeneratedCount,
+    batchSize: 5000,
+  });
+}
+
 export const GenerationService = {
   ITEMS_PER_PAGE,
 
@@ -338,6 +497,14 @@ export const GenerationService = {
     }
 
     autoSaveEnabled = params.autoSave === true;
+    if (autoSaveEnabled) {
+      autoSaveStartTime = Date.now(); // Record when generation started
+    }
+
+    // Reset chunked generation state
+    totalGeneratedCount = 0;
+    isGeneratingChunk = false;
+    currentGenerationParams = params; // Store params for later chunk requests
 
     state = {
       isGenerating: true,
@@ -359,33 +526,84 @@ export const GenerationService = {
     } catch (_) { /* ignore */ }
 
     try {
+      console.log("[GenerationService] Creating worker...");
       const newWorker = new Worker(
         new URL("../workers/incrementalGenerator.worker.ts", import.meta.url),
         { type: "module" }
       );
       worker = newWorker;
+      console.log("[GenerationService] Worker created successfully");
 
       newWorker.onmessage = (event) => {
         const response = event.data;
+        console.log("[GenerationService] Received message:", response.type, response);
 
-        if (response.type === "batch") {
+        if (response.type === "progress") {
+          // Update progress without adding to buffer
+          if (response.progress) {
+            console.log("[GenerationService] Progress update:", response.progress);
+            state.progress = response.progress;
+            notifySubscribers();
+          }
+        } else if (response.type === "batch") {
           const batch = response.batch || [];
+          console.log("[GenerationService] Batch received:", batch.length, "combos, buffer size:", generatedBuffer.length);
           state.progress = response.progress;
           if (response.failures) {
             state.failures.push(...response.failures);
           }
-          if (autoSaveEnabled) {
-            autoSaveBatch(batch);
+          
+          // Enforce buffer size limit - if buffer is full, we need to pause generation
+          if (generatedBuffer.length >= MAX_BUFFER_SIZE && !autoSaveEnabled) {
+            console.log(`[GenerationService] Buffer full (${generatedBuffer.length}/${MAX_BUFFER_SIZE}), pausing generation...`);
+            // Don't add to buffer, wait for user to save
+            // The worker will naturally slow down as we don't request more chunks
           } else {
+            // Add batch to buffer
             generatedBuffer.push(...batch);
+            totalGeneratedCount += batch.length;
+            
+            // Refill display window from buffer
             refillDisplayWindow();
+            
             if (state.combinations.length > 0 || generatedBuffer.length > 0) {
               state.hasGeneratedResults = true;
             }
             notifySubscribers();
             persistToStorage();
+            
+            // Check if we need to generate more chunks
+            if (autoSaveEnabled) {
+              // In auto-save mode, let auto-save loop handle refilling
+              wakeLoopNow();
+            } else {
+              // In manual mode, check if we need more
+              checkAndRefillBuffer();
+            }
+          }
+        } else if (response.type === "chunkComplete") {
+          console.log("[GenerationService] Chunk complete:", response.progress, "isComplete:", response.isComplete);
+          isGeneratingChunk = false;
+          
+          if (response.failures) {
+            state.failures.push(...response.failures);
+          }
+          
+          // Check if we need to generate more
+          if (!response.isComplete && totalGeneratedCount < params.kValue) {
+            console.log("[GenerationService] Requesting next chunk...");
+            requestNextChunk();
+          } else if (response.isComplete) {
+            console.log("[GenerationService] All chunks complete");
+            state.isGenerating = false;
+            state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
+            state.progress = response.progress || null;
+            notifySubscribers();
+            persistToStorage();
+            worker = null;
           }
         } else if (response.type === "complete") {
+          console.log("[GenerationService] Generation complete:", response.progress);
           state.isGenerating = false;
           state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
           state.failures.push(...(response.failures || []));
@@ -396,6 +614,7 @@ export const GenerationService = {
         } else if (response.type === "error") {
           console.error("[GenerationService] worker error:", response.error);
           state.isGenerating = false;
+          isGeneratingChunk = false;
           state.progress = null;
           notifySubscribers();
           worker = null;
@@ -403,7 +622,7 @@ export const GenerationService = {
       };
 
       newWorker.onerror = (error) => {
-        console.error("[GenerationService] worker error:", error);
+        console.error("[GenerationService] Worker onerror:", error);
         state.isGenerating = false;
         state.progress = null;
         notifySubscribers();
@@ -419,6 +638,7 @@ export const GenerationService = {
         effectiveNonThreatDist[i] = (params.nonThreatDistribution && params.nonThreatDistribution[i]) ?? 0;
       }
 
+      console.log("[GenerationService] Sending message to worker...");
       newWorker.postMessage({
         type: "generate",
         selectedBags: params.selectedBags,
@@ -431,6 +651,7 @@ export const GenerationService = {
         existingIds: params.existingIds || [],
         batchSize: params.batchSize ?? 5000,
       });
+      console.log("[GenerationService] Message sent to worker");
     } catch (err) {
       console.error("[GenerationService] failed to start worker:", err);
       state.isGenerating = false;
@@ -512,6 +733,9 @@ export const GenerationService = {
   enableAutoSave(mode: AutoSaveMode) {
     autoSaveEnabled = true;
     autoSaveMode = mode;
+    autoSaveStartTime = Date.now(); // Record when auto-save was enabled
+    lastAutoSaveTime = 0; // Reset last save time
+    
     if (!state.autoSaveStatus) {
       state.autoSaveStatus = { enabled: true, mode, queued: 0, batchesSent: 0, errors: 0, pagesCompleted: 0, imagesSaved: 0 };
     } else {
@@ -565,6 +789,12 @@ export const GenerationService = {
       }
       notifySubscribers();
       persistToStorage();
+      
+      // After saving, check if we need to generate more to refill buffer
+      if (state.isGenerating) {
+        checkAndRefillBuffer();
+      }
+      
       wakeLoopNow();
       return savedAnnotations;
     } finally {
