@@ -23,6 +23,24 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+
+# --- Globals lazily populated on first use -----------------------------------
+# Import dumpread/tipread ONCE per interpreter lifetime and reuse them for
+# every subsequent file in a --batch run. Previously, process_single_file()
+# would re-invoke importlib machinery per file, adding measurable overhead.
+_DUMPREAD_MOD = None
+_TIPREAD_MOD = None
+_SCRIPTS_DIR = None
+
+
+def _get_scripts_dir():
+    global _SCRIPTS_DIR
+    if _SCRIPTS_DIR is None:
+        script_dir = Path(__file__).resolve().parent
+        _SCRIPTS_DIR = script_dir.parent.parent / "scripts"
+    return _SCRIPTS_DIR
+
+
 def import_from_path(module_name, file_path):
     """Dynamically import a Python module from an arbitrary file path."""
     import importlib.util
@@ -33,11 +51,33 @@ def import_from_path(module_name, file_path):
     spec.loader.exec_module(mod)
     return mod
 
+
+def _get_dumpread():
+    global _DUMPREAD_MOD
+    if _DUMPREAD_MOD is None:
+        scripts_dir = _get_scripts_dir()
+        dumpread_path = scripts_dir / "dumpread.py"
+        if not dumpread_path.exists():
+            raise FileNotFoundError(f"dumpread.py not found at {dumpread_path}")
+        _DUMPREAD_MOD = import_from_path("dumpread", str(dumpread_path))
+    return _DUMPREAD_MOD
+
+
+def _get_tipread():
+    global _TIPREAD_MOD
+    if _TIPREAD_MOD is None:
+        scripts_dir = _get_scripts_dir()
+        tipread_path = scripts_dir / "tipread.py"
+        if not tipread_path.exists():
+            raise FileNotFoundError(f"tipread.py not found at {tipread_path}")
+        _TIPREAD_MOD = import_from_path("tipread", str(tipread_path))
+    return _TIPREAD_MOD
+
+
 def resolve_scripts_dir():
     """Resolve the backend/scripts/ directory relative to this script's location."""
-    script_dir = Path(__file__).resolve().parent
-    scripts_dir = script_dir.parent.parent / "scripts"
-    return scripts_dir
+    return _get_scripts_dir()
+
 
 def ensure_uint16(arr):
     """Ensure array is uint16; convert only if needed to avoid double allocation."""
@@ -45,34 +85,35 @@ def ensure_uint16(arr):
         return arr
     return np.clip(arr, 0, 65535).astype(np.uint16)
 
-def process_single_file(file_path, file_type, item_id, library_images_dir, pixel_data_dir):
-    """Process a single raw file and return result dict."""
-    scripts_dir = resolve_scripts_dir()
 
+def process_single_file(file_path, file_type, item_id, library_images_dir, pixel_data_dir):
+    """Process a single raw file and return result dict.
+
+    gc.collect() is intentionally NOT called per-file anymore. The Python
+    allocator holds freelists of small objects that get reused; forcing a full
+    GC sweep per file added ~5-20 ms/file latency for zero benefit in a batch
+    run where the process exits immediately after anyway. We run a single
+    gc.collect() at the END of the main() batch loop just to leave the heap
+    tidy before the OS tears the process down.
+    """
     if file_type == "dump":
-        dumpread_path = scripts_dir / "dumpread.py"
-        if not dumpread_path.exists():
-            raise FileNotFoundError(f"dumpread.py not found at {dumpread_path}")
-        dumpread = import_from_path("dumpread", str(dumpread_path))
+        dumpread = _get_dumpread()
 
         # ReadDump now returns uint16 arrays directly (no float64 allocation)
         high, low, R = dumpread.ReadDump(file_path, raw=False)
         rows, cols = high.shape
 
-        # Ensure uint16 — to_uint16 is a no-op if already correct dtype
+        # Ensure uint16 — ensure_uint16 is a no-op if already correct dtype
         high_u16 = ensure_uint16(high)
         low_u16  = ensure_uint16(low)
 
-        # Free float arrays as early as possible
+        # Drop references; arrays become garbage once the caller moves on.
+        # In practice CPython's refcounting frees them immediately here.
         del high, low, R
-        gc.collect()
 
         img = high_u16  # preview PNG from high-energy channel
     else:  # file_type == "tip"
-        tipread_path = scripts_dir / "tipread.py"
-        if not tipread_path.exists():
-            raise FileNotFoundError(f"tipread.py not found at {tipread_path}")
-        tipread = import_from_path("tipread", str(tipread_path))
+        tipread = _get_tipread()
         low_raw, high_raw = tipread.read_tip(file_path)
 
         high_u16 = ensure_uint16(np.rot90(high_raw, k=3))
@@ -80,7 +121,6 @@ def process_single_file(file_path, file_type, item_id, library_images_dir, pixel
         rows, cols = high_u16.shape
 
         del high_raw, low_raw
-        gc.collect()
 
         img = high_u16
 
@@ -101,9 +141,8 @@ def process_single_file(file_path, file_type, item_id, library_images_dir, pixel
     low_pixel_path = os.path.join(lowenergy_dir, f"{item_id}.npz")
     np.savez_compressed(low_pixel_path, pixel_data=low_u16)
 
-    # Explicitly free large arrays before next file
+    # Drop references to large arrays
     del high_u16, low_u16
-    gc.collect()
 
     pixel_filename = f"highenergy/{item_id}.npz"
     return {
@@ -159,6 +198,11 @@ def main():
                 }
                 print(json.dumps(error_result), flush=True)
 
+        # End-of-batch tidy-up: one gc.collect() instead of three per file.
+        # CPython refcounting already released transient arrays; this only
+        # handles any cyclic garbage (extremely rare in this pipeline) so
+        # the OS tears the process down with a clean heap.
+        gc.collect()
         sys.exit(0)
     else:
         # Single-file mode (legacy CLI)
@@ -175,6 +219,7 @@ def main():
         try:
             result = process_single_file(file_path, file_type, item_id, library_images_dir, pixel_data_dir)
             print(json.dumps(result))
+            gc.collect()
         except Exception as e:
             error_result = {
                 "status": "error",

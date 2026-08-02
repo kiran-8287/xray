@@ -74,40 +74,96 @@ st.markdown(
 # Log ingestion & parsing helpers
 # ===========================================================================
 
+_TYPE_ALIASES = {
+    "request_started": "request_started",
+    "request_start": "request_started",
+    "started": "request_started",
+    "start": "request_started",
+    "begin": "request_started",
+    "http_started": "request_started",
+    "req_start": "request_started",
+    "request_finished": "request_finished",
+    "request_finish": "request_finished",
+    "request_end": "request_finished",
+    "finished": "request_finished",
+    "finish": "request_finished",
+    "end": "request_finished",
+    "completed": "request_finished",
+    "complete": "request_finished",
+    "done": "request_finished",
+    "http_finished": "request_finished",
+    "req_finish": "request_finished",
+}
+
+
+def _normalize_event_type(obj: dict[str, Any]) -> str:
+    """
+    Resolve a canonical event type (request_started / request_finished) from
+    whatever the log entry carries.
+
+    Strategy (first match wins):
+      1. ``obj["type"]`` if it's an alias we recognise (case+whitespace insensitive)
+      2. ``obj["event"]`` same alias table
+      3. Structural fields: presence of ``status`` or ``duration_ms`` or ``finishedAt``
+         ⇒ finished; otherwise ⇒ started (if at least startedAt/requestId are present)
+      4. Fallback: ``request_finished`` so the event is at least counted.
+    """
+    for key in ("type", "event"):
+        raw = obj.get(key)
+        if isinstance(raw, str):
+            canon = _TYPE_ALIASES.get(raw.strip().lower())
+            if canon:
+                return canon
+    has_finish_markers = any(k in obj for k in ("status", "duration_ms", "duration_s", "finishedAt", "ok"))
+    has_any_request_marker = any(k in obj for k in ("startedAt", "requestId", "method", "path"))
+    if has_finish_markers:
+        return "request_finished"
+    if has_any_request_marker:
+        return "request_started"
+    return "request_finished"
+
+
 def parse_log_line(line: str) -> dict[str, Any] | None:
     s = line.strip()
     if not s:
         return None
     try:
         obj = json.loads(s)
-    except json.JSONDecodeError:
-        # Legacy single-event entries (pre two-event upgrade) — still accept
-        # them when they look like JSON objects without a type field.
-        try:
-            obj = json.loads(s)
-        except Exception:
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        # Lines can contain partial JSON (pino intermix, NDJSON fragments,
+        # legacy formats).  Make a best-effort salvage: if the line contains
+        # something that looks like ``{...}`` try to extract the first object.
+        start = s.find("{")
+        end = s.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            fragment = s[start:end + 1]
+            try:
+                obj = json.loads(fragment)
+            except Exception:
+                return None
+        else:
             return None
     if not isinstance(obj, dict):
         return None
-    obj.setdefault("type", "request_finished")  # backwards compatibility
+    obj["type"] = _normalize_event_type(obj)
     return obj
 
 
-@st.cache_data(show_spinner=False)
-def _load_log_lines_from_disk(path_str: str, limit: int, _fake_tok: int) -> list[dict[str, Any]]:
+def _load_log_lines_from_disk(path_str: str, limit: int) -> list[dict[str, Any]]:
     """
-    Cached loader keyed by (path, limit, mtime-ish counter).
+    Reads the log directly from disk (NO Streamlit cache_data — it caused
+    severe staleness issues: cached 1,517 events from an old process while
+    monitoring.log had been rotated to 510 lines, so dashboard showed
+    0/0 started/finished even after parser fixes).
 
-    ``_fake_tok`` changes each refresh so Streamlit knows to re-read the disk
-    without us having to blow away the entire cache.
+    Direct disk read of a typical 200KB–5MB log is <50ms, which is faster
+    than Streamlit's cache_data pickle round-trip anyway.
     """
     path = Path(path_str)
     if not path.exists():
         return []
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
-            # Efficient tail: seek to end and back-track ~MAX_TAIL_LINES.
-            # For typical log sizes (<100MB) we just read and slice the tail.
             lines = fh.readlines()
     except OSError:
         return []
@@ -122,18 +178,59 @@ def _load_log_lines_from_disk(path_str: str, limit: int, _fake_tok: int) -> list
 
 
 def load_log_entries(path: Path, limit: int = MAX_TAIL_LINES) -> list[dict[str, Any]]:
-    """Public wrapper: uses a cache-busting counter for live polling."""
-    tok = st.session_state.get("log_load_token", 0)
-    return _load_log_lines_from_disk(str(path), limit, tok)
+    """Public wrapper — always a fresh disk read now."""
+    return _load_log_lines_from_disk(str(path), limit)
 
 
 def bump_log_cache_token() -> None:
-    """Must be called *before* loading data if we want a fresh read from disk."""
-    st.session_state["log_load_token"] = st.session_state.get("log_load_token", 0) + 1
+    """
+    No-op kept for backwards-compat with callers.
+
+    We used to bump a fake token for @st.cache_data invalidation; now the
+    loader reads directly from disk, so this is unnecessary but harmless.
+    """
+    return None
 
 
 def _to_dt(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, utc=True, errors="coerce")
+
+
+def _pandas_normalize_type(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Second-layer normalization on the pandas side.
+
+    parse_log_line already resolves aliases, but this guards against:
+      - Any rows that slipped past with unexpected type values
+      - Mixed or NA type values (structural inference on the full columns)
+      - Case/whitespace variants in user-supplied historic logs
+    """
+    if "type" not in df.columns:
+        df["type"] = pd.Series(dtype="string")
+    df["type"] = df["type"].astype("string").str.strip().str.lower()
+
+    alias_map = pd.Series(_TYPE_ALIASES, dtype="string")
+    mapped = df["type"].map(alias_map).astype("string")
+
+    has_fin_marker = pd.Series(False, index=df.index)
+    for col in ("status", "duration_ms", "duration_s", "finishedAt", "ok"):
+        if col in df.columns:
+            if col == "ok":
+                has_fin_marker |= df[col].notna() & (df[col].astype("string") != "")
+            else:
+                has_fin_marker |= pd.to_numeric(df[col], errors="coerce").notna()
+    has_req_marker = pd.Series(False, index=df.index)
+    for col in ("startedAt", "requestId", "method", "path"):
+        if col in df.columns:
+            has_req_marker |= df[col].notna() & (df[col].astype("string") != "")
+
+    structural = pd.Series("request_finished", index=df.index, dtype="string")
+    structural = structural.where(~has_req_marker | has_fin_marker, "request_started")
+    structural = structural.where(has_fin_marker | ~has_req_marker, "request_started")
+
+    final_type = mapped.fillna(structural).fillna("request_finished")
+    df["type"] = final_type.astype("string")
+    return df
 
 
 def build_dataframes(events: list[dict[str, Any]]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -153,13 +250,14 @@ def build_dataframes(events: list[dict[str, Any]]) -> tuple[pd.DataFrame, pd.Dat
                 "content_length"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    for col in ("type", "method", "path", "route", "page_hint", "ok",
-                "requestId"):
+    for col in ("method", "path", "route", "page_hint", "ok", "requestId"):
         if col in df.columns:
             df[col] = df[col].astype("string")
 
-    started = df[df["type"] == "request_started"].copy() if "type" in df.columns else df.iloc[0:0]
-    finished = df[df["type"] == "request_finished"].copy() if "type" in df.columns else df.copy()
+    df = _pandas_normalize_type(df)
+
+    started = df[df["type"] == "request_started"].copy()
+    finished = df[df["type"] == "request_finished"].copy()
 
     return df, started.reset_index(drop=True), finished.reset_index(drop=True)
 
@@ -221,6 +319,31 @@ def _safe_cast_numeric(v, default=0.0, as_int: bool = False):
 
 
 # ===========================================================================
+# Early log load — runs BEFORE the sidebar so the "Source freshness" widget
+# can compare loaded-event count vs on-disk line count and flag the exact
+# staleness cache bug we hit (1,517 cached events vs 510 on disk).
+# ===========================================================================
+
+all_events: list[dict[str, Any]] = load_log_entries(LOG_PATH)
+_LOADED_EVENT_COUNT = len(all_events)
+
+
+def _log_stats(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {"exists": False, "lines": 0, "size_kb": 0}
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            line_count = sum(1 for _ in fh)
+    except OSError:
+        line_count = -1
+    return {
+        "exists": True,
+        "lines": line_count,
+        "size_kb": int(path.stat().st_size / 1024),
+    }
+
+
+# ===========================================================================
 # Sidebar controls
 # ===========================================================================
 
@@ -261,14 +384,50 @@ if col_a.button("🔁 Refresh now", use_container_width=True):
 auto_refresh = col_b.checkbox("Auto refresh", value=True)
 
 st.sidebar.markdown("### Source")
-st.sidebar.code(
-    f"Log: {LOG_PATH}\n"
-    f"Exists: {LOG_PATH.exists()}\n"
-    f"Size: {LOG_PATH.stat().st_size / 1024:.1f} KB" if LOG_PATH.exists() else f"Log: {LOG_PATH} (missing)"
-)
+
+log_stats = _log_stats(LOG_PATH)
+if log_stats["exists"]:
+    loaded = _LOADED_EVENT_COUNT
+    on_disk = log_stats["lines"]
+    freshness_warn = ""
+    if on_disk > 0 and abs(loaded - on_disk) > max(5, int(on_disk * 0.05)):
+        freshness_warn = (
+            f"⚠️ STALE CACHE — loaded={loaded:,} on_disk={on_disk:,}."
+            " Kill & restart Streamlit — the in-memory module bytecode is outdated.\n"
+        )
+    st.sidebar.code(
+        f"Log: {LOG_PATH}\n"
+        f"Size: {log_stats['size_kb']:,} KB\n"
+        f"Lines on disk: {log_stats['lines']:,}\n"
+        f"Events parsed: {loaded:,}\n"
+        f"{freshness_warn}".rstrip()
+    )
+else:
+    st.sidebar.code(f"Log: {LOG_PATH} (missing)")
+
+col_x, col_y = st.sidebar.columns(2)
+if col_x.button("🗑️ Clear caches", use_container_width=True,
+                help="Nukes Streamlit's cache_data / cache_resource in this session."):
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    try:
+        st.cache_resource.clear()
+    except Exception:
+        pass
+    bump_log_cache_token()
+    st.rerun()
+
+if col_y.button("🔁 Hard reload", use_container_width=True):
+    bump_log_cache_token()
+    st.rerun()
+
 st.sidebar.caption(
     "Tip: restart this dashboard via `run_monitoring_dashboard.py` to also "
-    "boot the server if it's not already running."
+    "boot the server if it's not already running.\n"
+    "If numbers look wrong despite fixes, kill & restart the Streamlit process "
+    "— it caches imported module bytecode between runs."
 )
 
 # Handle auto-refresh using a simple counter; Streamlit reruns the script on
@@ -298,7 +457,8 @@ if not LOG_PATH.exists():
     )
     st.stop()
 
-all_events = load_log_entries(LOG_PATH)
+# NOTE: all_events loaded EARLIER (before sidebar) so the Source freshness
+# widget can flag stale cache (loaded events vs on-disk line count mismatch).
 df_all, df_started, df_finished = build_dataframes(all_events)
 
 if df_all.empty:

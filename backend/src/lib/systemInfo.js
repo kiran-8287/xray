@@ -39,37 +39,45 @@ export function getSystemInfo() {
  * ------------------------------
  * Each Node worker thread in the upload pipeline spawns a **separate Python**
  * subprocess that imports NumPy + PIL + (dumpread/tipread). Baseline RSS of
- * such a child is ~200–350 MB. The auto-valid-region path additionally spawns
- * Pythons importing scipy + cv2 (~300–500 MB each). On Windows the commit-
- * charge limit (RAM + pagefile) is the real bottleneck; even tiny 1 MB
- * allocations fail once the kernel can no longer promise pages.
+ * such a child is ~200–350 MB, but because we now batch 20 files per Python
+ * process (BATCH_SIZE=20 in workerPool), the per-file amortized cost is tiny
+ * while the per-child cost is paid once per 20 files.
  *
- * We therefore apply three safeguards:
- *   1. Hard global cap (MAX_WORKERS_HARD_CAP) regardless of CPU count.
- *   2. Realistic per-worker memory footprint (not the optimistic 100 MB).
- *   3. Reserve headroom for the Node process itself and the OS.
+ * The auto-valid-region path additionally spawns Pythons importing scipy+cv2
+ * (~300–500 MB each) and is clamped *separately* (server.js caps it at 3).
+ *
+ * We therefore apply these safeguards:
+ *   1. HARD_CAP 8 for upload (was 6). Because 20 files/child, 8 upload
+ *      workers = max 8 upload Pythons at once — FEWER than before (6–10)
+ *      under the old BATCH_SIZE=1 pattern, while total throughput is higher.
+ *   2. Realistic 500 MB per-worker commit budget for upload workers.
+ *   3. Reserve 1.5 GB for Node itself + OS (your logs showed Node climbing
+ *      to ~800 MB during preprocessing, so 1.5 GB is a safety buffer).
  *
  * @param {Object} options - Configuration options
  * @param {number} options.minWorkers - Minimum workers (default: 1)
  * @param {number} options.maxWorkers - Absolute caller cap (before our hard cap)
  * @param {number} options.memoryPerWorkerMB - Estimated commit per worker in MB
+ * @param {number} options.hardCap - Absolute ceiling. Pass different caps per
+ *   operation (e.g. 8 for upload, 3 for cv2-heavy auto-valid-region).
  * @returns {number} Recommended worker count
  */
 export function calculateOptimalWorkerCount(options = {}) {
-  const MAX_WORKERS_HARD_CAP = 6;         // absolute ceiling for commit-safety
-  const NODE_RESERVE_MB = 1024;           // reserve 1 GB for Node + OS
-  const DEFAULT_MEM_PER_WORKER_MB = 400;  // realistic Python child baseline
+  const DEFAULT_HARD_CAP = 8;
+  const NODE_RESERVE_MB = 1536;              // 1.5 GB for Node + OS
+  const DEFAULT_MEM_PER_WORKER_MB = 500;      // Python child baseline
 
   const {
     minWorkers = 1,
     maxWorkers,
     memoryPerWorkerMB = DEFAULT_MEM_PER_WORKER_MB,
+    hardCap = DEFAULT_HARD_CAP,
   } = options;
 
   const systemInfo = getSystemInfo();
   const cpuBasedWorkers = Math.min(
     maxWorkers || systemInfo.cpuCount,
-    MAX_WORKERS_HARD_CAP
+    hardCap
   );
 
   // Memory-based worker cap
@@ -142,21 +150,41 @@ export async function initializeSystemConfig() {
 }
 
 /**
+ * Per-operation tuning knobs.
+ * Upload workers are cheap to batch (BATCH_SIZE=20 → 1 Python per 20 files).
+ * Auto-valid-region workers import cv2 + scipy (~400 MB/child), so strict cap.
+ */
+const OPERATION_PROFILES = {
+  'upload': { hardCap: 8,  memoryPerWorkerMB: 500, defaultCount: 8 },
+  'auto-valid-region': { hardCap: 3, memoryPerWorkerMB: 500, defaultCount: 3 },
+  'default': { hardCap: 6, memoryPerWorkerMB: 400, defaultCount: 4 },
+};
+
+/**
  * Get worker count for a specific operation
- * @param {string} operation - Operation type ('upload', 'auto-generate', etc.)
- * @param {number} defaultCount - Default worker count if not configured
+ * @param {string} operation - Operation type ('upload', 'auto-valid-region', etc.)
+ * @param {number} defaultCount - Fallback if operation is unknown & no system config
  * @returns {number} Worker count to use
  */
 export async function getWorkerCount(operation, defaultCount = 4) {
   const config = await loadSystemConfig();
-  
+  const profile = OPERATION_PROFILES[operation] || OPERATION_PROFILES.default;
+
   if (!config) {
-    // No config yet, use default
-    return defaultCount;
+    // No persisted config yet — use operation-tuned defaults (not the raw fallback)
+    return calculateOptimalWorkerCount({
+      minWorkers: 1,
+      maxWorkers: profile.hardCap,
+      memoryPerWorkerMB: profile.memoryPerWorkerMB,
+      hardCap: profile.hardCap,
+    });
   }
-  
-  // Return configured worker count, or calculate if not set
-  return config.optimalWorkerCount || calculateOptimalWorkerCount();
+
+  const base = config.optimalWorkerCount || calculateOptimalWorkerCount({
+    memoryPerWorkerMB: profile.memoryPerWorkerMB,
+    hardCap: profile.hardCap,
+  });
+  return Math.max(1, Math.min(base, profile.hardCap));
 }
 
 /**

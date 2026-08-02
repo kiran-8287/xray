@@ -137,18 +137,18 @@ function acquireLock(filePath) {
 }
 
 async function writeJSONFileAtomic(filePath, data) {
-  // Acquire lock with a 15-second timeout to prevent permanent hangs
+  // Acquire lock with a 60-second timeout for very large payloads
+  // (100k saved layouts can take several seconds to JSON-serialize + write).
   let release;
   const lockPromise = acquireLock(filePath);
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`[storage] Lock timeout for ${filePath}`)), 15000)
+    setTimeout(() => reject(new Error(`[storage] Lock timeout for ${filePath}`)), 60000)
   );
 
   try {
     release = await Promise.race([lockPromise, timeoutPromise]);
   } catch (err) {
     console.error(err.message);
-    // Force-clear the stale lock so future writes can proceed
     writeLocks.delete(filePath);
     throw err;
   }
@@ -160,29 +160,122 @@ async function writeJSONFileAtomic(filePath, data) {
     const tmpPath = path.join(dir, `${base}_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}.tmp`);
 
     const jsonStr = JSON.stringify(data, null, 2);
+    const expectedBytes = Buffer.byteLength(jsonStr, 'utf8');
+
+    // If the payload is absurdly large for a JSON file (>= 1.5GB stringified),
+    // fail loudly instead of silently producing a truncated/0-byte file.
+    if (expectedBytes >= 1.5 * 1024 * 1024 * 1024) {
+      throw new Error(
+        `[storage] Refusing to write ${(expectedBytes / 1024 / 1024 / 1024).toFixed(2)} GB JSON to ${filePath}. Use partitioning.`
+      );
+    }
+
     await fs.writeFile(tmpPath, jsonStr, 'utf8');
+
+    // --- Guards against the "0-byte JSON" bug we hit on 2026-08-02 ---
+    // 1. fsync the tmp file so Windows actually flushes bytes to disk BEFORE rename.
+    //    On Windows, rename() can return before the NTFS metadata is committed,
+    //    and a concurrent read (or power loss / process crash mid-commit) can
+    //    leave the target file with 0 bytes even though tmp had content.
+    //    Node fs.writeFile does NOT implicitly call fsync.
+    const tmpHandle = await fs.open(tmpPath, 'r+');
+    try {
+      await tmpHandle.datasync();
+    } finally {
+      await tmpHandle.close();
+    }
+
+    // 2. Stat the tmp file after fsync and verify byte size actually matches.
+    //    Prevents: partial writes (disk full / quota / RAM pressure during
+    //    serialization that produced truncated buffers).
+    let stat;
+    try {
+      stat = await fs.stat(tmpPath);
+    } catch (statErr) {
+      throw new Error(`[storage] tmp file vanished after write+fsync: ${tmpPath}: ${statErr.message}`);
+    }
+    if (stat.size === 0) {
+      try { await fs.unlink(tmpPath); } catch (_) { /* ignore */ }
+      throw new Error(
+        `[storage] writeJSONFileAtomic aborted for ${filePath}: tmp file is 0 bytes. expected_bytes=${expectedBytes}.`
+      );
+    }
+    if (Math.abs(stat.size - expectedBytes) > Math.max(4, Math.floor(expectedBytes * 0.01))) {
+      // >1% off is suspicious — could be a BOM / whitespace diff, but if the
+      // delta is big we refuse to rename a clearly-truncated tmp.
+      try { await fs.unlink(tmpPath); } catch (_) { /* ignore */ }
+      throw new Error(
+        `[storage] writeJSONFileAtomic aborted for ${filePath}: tmp size=${stat.size} vs expected=${expectedBytes} (${(100 * Math.abs(stat.size - expectedBytes) / Math.max(1, expectedBytes)).toFixed(1)}% off).`
+      );
+    }
+
+    // 3. Best-effort pre-emptive preserve: keep a sidecar ".bak" copy of
+    //    whatever currently exists at the target, so we can heal on the
+    //    next read if rename somehow still produces corruption.
+    try {
+      const existing = await fs.stat(filePath);
+      if (existing && existing.size > 0) {
+        await fs.copyFile(filePath, `${filePath}.bak`);
+      }
+    } catch (_) {
+      // best-effort only; don't fail the write if .bak can't be made
+    }
+
     await fs.rename(tmpPath, filePath);
+
+    // 4. fsync the *directory* too on POSIX. On Windows this is a no-op
+    //    (fsync is per-file, directory handles reject it). We try and swallow.
+    try {
+      const dirHandle = await fs.open(dir, 'r');
+      try {
+        await dirHandle.datasync();
+      } catch (_) { /* expected on Windows */ }
+      finally {
+        await dirHandle.close();
+      }
+    } catch (_) { /* also fine */ }
   } finally {
     if (release) release();
   }
 }
 
 async function readJSONFile(filePath, defaultValue = []) {
-  try {
-    const raw = await fs.readFile(filePath, 'utf8');
+  const tryOpen = async (p) => {
+    const raw = await fs.readFile(p, 'utf8');
     const trimmed = raw.trim();
     if (!trimmed) {
-      // File exists but is empty — treat as default
-      return defaultValue;
+      throw new Error('EMPTY');
     }
     return JSON.parse(trimmed);
+  };
+
+  try {
+    return await tryOpen(filePath);
   } catch (err) {
     if (err.code === 'ENOENT') {
       return defaultValue;
     }
-    if (err instanceof SyntaxError) {
-      console.warn(`[storage] Corrupted JSON file: ${filePath}. Returning default.`);
-      return defaultValue;
+    if (err.message === 'EMPTY' || err instanceof SyntaxError) {
+      // Primary file is 0-byte or corrupted -> try the .bak sidecar that
+      // writeJSONFileAtomic keeps just before rename.
+      const bakPath = `${filePath}.bak`;
+      try {
+        const healed = await tryOpen(bakPath);
+        console.warn(
+          `[storage] Healed ${path.basename(filePath)} from .bak (${healed.length ?? healed.size ?? '?'} items) — previous atomic rename left 0-byte/corrupted primary.`
+        );
+        return healed;
+      } catch (bakErr) {
+        if (bakErr.code !== 'ENOENT') {
+          console.warn(`[storage] .bak also unreadable for ${filePath}: ${bakErr.message}`);
+        }
+        if (err.message === 'EMPTY') {
+          console.warn(`[storage] Empty JSON file: ${filePath}. Returning default.`);
+        } else {
+          console.warn(`[storage] Corrupted JSON file: ${filePath}. Returning default.`);
+        }
+        return defaultValue;
+      }
     }
     throw err;
   }
