@@ -2,6 +2,7 @@ import request from 'supertest';
 import path from 'node:path';
 import fsPromises from 'node:fs/promises';
 import app from '../src/server.js';
+import config from '../src/lib/config.js';
 import { createTestPng } from './helpers.js';
 
 describe('API Tests', () => {
@@ -160,6 +161,32 @@ describe('API Tests', () => {
         .timeout({ deadline: 30000 });
 
       expect(res.status).toBe(200);
+    });
+  });
+
+  describe('POST /api/temp-files/batch-delete', () => {
+    it('should delete temporary image and pixel-data files for preprocessed items', async () => {
+      const itemId = `cleanup-test-${Date.now()}`;
+      const imagePath = path.join(config.libraryImagesRoot, `${itemId}.png`);
+      const highEnergyPath = path.join(config.pixelDataRoot, 'highenergy', `${itemId}.npz`);
+      const lowEnergyPath = path.join(config.pixelDataRoot, 'lowenergy', `${itemId}.npz`);
+
+      await fsPromises.mkdir(path.dirname(imagePath), { recursive: true });
+      await fsPromises.mkdir(path.dirname(highEnergyPath), { recursive: true });
+      await fsPromises.mkdir(path.dirname(lowEnergyPath), { recursive: true });
+      await fsPromises.writeFile(imagePath, 'test-image');
+      await fsPromises.writeFile(highEnergyPath, 'test-high');
+      await fsPromises.writeFile(lowEnergyPath, 'test-low');
+
+      const res = await request(app)
+        .post('/api/temp-files/batch-delete')
+        .send({ itemIds: [itemId] });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      await expect(fsPromises.access(imagePath)).rejects.toBeDefined();
+      await expect(fsPromises.access(highEnergyPath)).rejects.toBeDefined();
+      await expect(fsPromises.access(lowEnergyPath)).rejects.toBeDefined();
     });
   });
 

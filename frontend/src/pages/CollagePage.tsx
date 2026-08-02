@@ -527,7 +527,7 @@ export default function CollagePage() {
             if (response.ok) savedCount++; else failedCount++;
           } catch { failedCount++; }
         }
-        await GenerationService.saveCurrentPage("annotations");
+        setCombinations(prev => prev.slice(batch.length));
         setBufferCount(GenerationService.getBufferCount());
         setBulkSaveState(prev => ({
           ...prev,
@@ -688,7 +688,7 @@ export default function CollagePage() {
             failedCount++;
           }
         }
-        await GenerationService.saveCurrentPage("both");
+        setCombinations(prev => prev.slice(batch.length));
         setBufferCount(GenerationService.getBufferCount());
         setBulkSaveState(prev => ({
           ...prev,
@@ -703,7 +703,6 @@ export default function CollagePage() {
         savedCount
       });
       GenerationService.clear();
-      setCombinations([]);
       setFailures([]);
       setSelectedBags([]);
       setSelectedThreats([]);
@@ -774,7 +773,7 @@ export default function CollagePage() {
   const totalRequested = generationProgress?.total || 0;
   const totalGenerated = generationProgress?.generated || 0;
   const showAutoSaveBanner = autoSaveStatus?.enabled && (
-    isGenerating || totalPending > 0 || generationProgress?.total > 0 || autoSaveStatus.queued > 0 || autoSaveStatus.pagesCompleted > 0
+    isGenerating || totalPending > 0 || (generationProgress?.total ?? 0) > 0 || autoSaveStatus.queued > 0 || autoSaveStatus.pagesCompleted > 0
   );
 
   return (

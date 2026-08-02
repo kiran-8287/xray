@@ -2,6 +2,9 @@
 node_modules
 npm-debug.log
 
+# Environment files
+.env
+
 # Version control
 .git
 .gitignore

@@ -609,9 +609,19 @@ async function createNonThreatItem(nonThreatData) {
 
 // ---- Saved layouts storage ----
 
+let savedLayoutsMutex = Promise.resolve();
+let savedLayoutsMemCache = null;
+let savedLayoutsCacheDirty = true;
+
 async function getSavedLayouts() {
   await ensureDataDir();
-  return await readJSONFile(SAVED_LAYOUTS_FILE, []);
+  if (!savedLayoutsCacheDirty && savedLayoutsMemCache) {
+    return savedLayoutsMemCache;
+  }
+  const layouts = await readJSONFile(SAVED_LAYOUTS_FILE, []);
+  savedLayoutsMemCache = layouts;
+  savedLayoutsCacheDirty = false;
+  return layouts;
 }
 
 async function getSavedLayoutById(id) {
@@ -620,34 +630,127 @@ async function getSavedLayoutById(id) {
 }
 
 async function createSavedLayout(layoutData) {
-  await ensureDataDir();
-  const layouts = await getSavedLayouts();
-  const newLayout = {
-    id: layoutData.id || crypto.randomUUID(),
-    created_at: new Date().toISOString(),
-    ...layoutData,
-  };
-  layouts.push(newLayout);
-  await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
-  return newLayout;
+  const prev = savedLayoutsMutex;
+  let resolveNext;
+  savedLayoutsMutex = new Promise(r => { resolveNext = r; });
+  await prev;
+  try {
+    await ensureDataDir();
+    const layouts = await getSavedLayouts();
+    const newLayout = {
+      id: layoutData.id || crypto.randomUUID(),
+      created_at: new Date().toISOString(),
+      ...layoutData,
+    };
+    layouts.push(newLayout);
+    await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
+    savedLayoutsMemCache = layouts;
+    savedLayoutsCacheDirty = false;
+    return newLayout;
+  } finally {
+    resolveNext();
+  }
+}
+
+async function createSavedLayoutsBatch(layoutDataList) {
+  const prev = savedLayoutsMutex;
+  let resolveNext;
+  savedLayoutsMutex = new Promise(r => { resolveNext = r; });
+  await prev;
+  try {
+    await ensureDataDir();
+    const layouts = await getSavedLayouts();
+    const now = new Date().toISOString();
+    const created = [];
+    for (const layoutData of layoutDataList) {
+      const newLayout = {
+        id: layoutData.id || crypto.randomUUID(),
+        created_at: layoutData.created_at || now,
+        ...layoutData,
+      };
+      layouts.push(newLayout);
+      created.push(newLayout);
+    }
+    await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
+    savedLayoutsMemCache = layouts;
+    savedLayoutsCacheDirty = false;
+    return created;
+  } finally {
+    resolveNext();
+  }
 }
 
 async function updateSavedLayout(id, layoutData) {
-  const layouts = await getSavedLayouts();
-  const index = layouts.findIndex(layout => layout.id === id);
-  if (index === -1) return null;
-  layouts[index] = { ...layouts[index], ...layoutData };
-  await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
-  return layouts[index];
+  const prev = savedLayoutsMutex;
+  let resolveNext;
+  savedLayoutsMutex = new Promise(r => { resolveNext = r; });
+  await prev;
+  try {
+    const layouts = await getSavedLayouts();
+    const index = layouts.findIndex(layout => layout.id === id);
+    if (index === -1) return null;
+    layouts[index] = { ...layouts[index], ...layoutData };
+    await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
+    savedLayoutsMemCache = layouts;
+    savedLayoutsCacheDirty = false;
+    return layouts[index];
+  } finally {
+    resolveNext();
+  }
 }
 
 async function deleteSavedLayout(id) {
-  const layouts = await getSavedLayouts();
-  const filteredLayouts = layouts.filter(layout => layout.id !== id);
-  await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, filteredLayouts);
+  const prev = savedLayoutsMutex;
+  let resolveNext;
+  savedLayoutsMutex = new Promise(r => { resolveNext = r; });
+  await prev;
+  try {
+    const layouts = await getSavedLayouts();
+    const filteredLayouts = layouts.filter(layout => layout.id !== id);
+    await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, filteredLayouts);
+    savedLayoutsMemCache = filteredLayouts;
+    savedLayoutsCacheDirty = false;
+  } finally {
+    resolveNext();
+  }
 }
 
 // ---- Custom subcategories storage ----
+
+const BUILTIN_SUBCATEGORIES_BY_CATEGORY = {
+  bags: [
+    "Backpack","Briefcase","Cabin Bag","Camera Bag","Cosmetic Bag","Duffel Bag",
+    "General","Gym Bag","Handbag","Hiking Backpack","Laptop Bag","Messenger Bag",
+    "Pouch","School Bag","Shoulder Bag","Sling Bag","Suitcase","Tote Bag",
+    "Travel Bag","Trolley Bag"
+  ],
+  threats: [
+    "Air Gun","Ammunition","Axe","Baton","Box Cutter","Brass Knuckles","Bullet",
+    "Cartridge","Combat Knife","Crowbar","Dagger","Detonator","Dynamite","Explosive",
+    "Explosive Charge","Firecracker","Folding Knife","General","Grenade","Gun","Hammer",
+    "Hand Grenade","Ice Pick","IED","Kitchen Knife","Knife","Machete","Magazine",
+    "Nunchaku","Pistol","Razor Blade","Revolver","Rifle","Scalpel","Shell","Shotgun",
+    "Shuriken","Submachine Gun","Sword","Taser"
+  ],
+  "non-threats": [
+    "Accessories","Belt","Beverage Can","Blanket","Board Game","Books","Camera","Cap",
+    "Charger","Clothes","Deodorant","Documents","Electronics","First Aid Kit","Food",
+    "Fruits","Gaming Console","General","Gloves","Hard Drive","Headphones","ID Card",
+    "Jacket","Jewelry","Keyboard","Keys","Laptop","Lock","Luggage Tag","Lunch Box",
+    "Magazine","Medical Equipment","Medication","Mobile Phone","Mouse","Notebook",
+    "Perfume","Power Bank","Purse","Scarf","Shampoo","Shoes","Smartwatch","Snacks",
+    "Soap","Socks","Sports Equipment","Stuffed Toy","Sunglasses","Tablet",
+    "Toiletries","Toothbrush","Toothpaste","Toys","Travel Pillow","Umbrella","USB Drive",
+    "Wallet","Watch","Water Bottle"
+  ]
+};
+
+function normalizeSubcategoryKey(name) {
+  return String(name || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, "");
+}
 
 async function getCustomSubcategories() {
   await ensureDataDir();
@@ -660,19 +763,46 @@ async function getCustomSubcategories() {
 
 async function addCustomSubcategory(category, name) {
   await ensureDataDir();
+  const trimmedName = String(name || "").trim();
+  if (!trimmedName) {
+    return { success: false, error: "Subcategory name is required" };
+  }
+
+  const normalizedKey = normalizeSubcategoryKey(trimmedName);
+  const slug = trimmedName
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+
+  const builtins = BUILTIN_SUBCATEGORIES_BY_CATEGORY[category] || [];
+  const builtinMatch = builtins.find(
+    (b) => normalizeSubcategoryKey(b) === normalizedKey
+  );
+  if (builtinMatch) {
+    return {
+      success: false,
+      error: `Subcategory already exists as built-in: "${builtinMatch}"`,
+    };
+  }
+
   const customSubs = await getCustomSubcategories();
-  const slug = name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-
   const categorySubs = customSubs[category] || [];
-  const exists = categorySubs.some(sub => sub.slug === slug || sub.name.toLowerCase() === name.toLowerCase());
-
-  if (exists) {
-    return { success: false, error: 'Subcategory already exists' };
+  const customMatch = categorySubs.find(
+    (sub) =>
+      sub.slug === slug ||
+      normalizeSubcategoryKey(sub.name) === normalizedKey
+  );
+  if (customMatch) {
+    return {
+      success: false,
+      error: `Subcategory already exists as custom: "${customMatch.name}"`,
+    };
   }
 
   const newSubcategory = {
     slug,
-    name,
+    name: trimmedName,
     createdAt: new Date().toISOString(),
   };
 
@@ -712,6 +842,7 @@ export {
   getSavedLayouts,
   getSavedLayoutById,
   createSavedLayout,
+  createSavedLayoutsBatch,
   updateSavedLayout,
   deleteSavedLayout,
   getCustomSubcategories,

@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
-import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check, CheckCircle2, Loader2, Trash2 } from "lucide-react";
+import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check, CheckCircle2, Loader2, Trash2, Download } from "lucide-react";
 import { getLibrarySubcategories } from "../config/categories";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
@@ -407,6 +407,9 @@ export default function SavedPage() {
   const [deleting, setDeleting] = useState(false);
   
   // Toast notifications
+  const [exporting, setExporting] = useState(false);
+  const [selectedForExport, setSelectedForExport] = useState<Set<string>>(new Set());
+  
   const [toasts, setToasts] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
   
   const showToast = (type: 'success' | 'error' | 'info', message: string) => {
@@ -636,6 +639,90 @@ export default function SavedPage() {
     setPage(1);
   };
 
+  // Toggle layout selection for mass export
+  const toggleLayoutSelection = (layoutId: string) => {
+    setSelectedForExport(prev => {
+      const next = new Set(prev);
+      if (next.has(layoutId)) {
+        next.delete(layoutId);
+      } else {
+        next.add(layoutId);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedForExport.size === layouts.length) {
+      setSelectedForExport(new Set());
+    } else {
+      setSelectedForExport(new Set(layouts.map(l => l.id)));
+    }
+  };
+
+  const clearExportSelection = () => setSelectedForExport(new Set());
+
+  // Export selected layouts as ZIP
+  const exportSelected = async () => {
+    if (selectedForExport.size === 0) {
+      showToast('error', 'No layouts selected for export');
+      return;
+    }
+    setExporting(true);
+    try {
+      const ids = Array.from(selectedForExport).join(',');
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `Export failed (HTTP ${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `saved-layouts-${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('success', `Exported ${selectedForExport.size} layout(s)`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      console.error('Error exporting layouts:', err);
+      showToast('error', `Failed to export layouts: ${errorMessage}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Export all layouts as ZIP
+  const exportAll = async () => {
+    setExporting(true);
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `Export failed (HTTP ${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `saved-layouts-${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('success', `Exported all layouts`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      console.error('Error exporting all layouts:', err);
+      showToast('error', `Failed to export layouts: ${errorMessage}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // Delete layout handler
   const handleDelete = async (layoutId: string) => {
     if (!deleteConfirm.layout || deleteConfirm.layout.id !== layoutId) return;
@@ -738,6 +825,36 @@ export default function SavedPage() {
           <FolderOpen size={18} />
           {pagination ? `${pagination.total} layouts` : '...'}
         </div>
+      </div>
+
+      {/* Export Actions */}
+      <div className="mb-4 flex items-center gap-2">
+        <button
+          onClick={exportAll}
+          disabled={exporting || !pagination || pagination.total === 0}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-white text-sm font-semibold text-ink hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Export all layouts as ZIP"
+        >
+          {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+          Save All
+        </button>
+        <button
+          onClick={exportSelected}
+          disabled={exporting || selectedForExport.size === 0}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-white text-sm font-semibold text-ink hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title={`Export ${selectedForExport.size} selected layout(s) as ZIP`}
+        >
+          {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+          Save Selected ({selectedForExport.size})
+        </button>
+        {selectedForExport.size > 0 && (
+          <button
+            onClick={clearExportSelection}
+            className="text-xs text-muted hover:text-ink underline"
+          >
+            Clear selection
+          </button>
+        )}
       </div>
 
       {/* Filter Bar */}
@@ -856,13 +973,22 @@ export default function SavedPage() {
               <table className="w-full divide-y divide-border">
                 <thead className="bg-surface/50">
                   <tr className="text-xs font-semibold text-muted uppercase tracking-wider">
+                    <th className="text-left py-3 px-4 w-10">
+                      <input
+                        type="checkbox"
+                        checked={selectedForExport.size === layouts.length && layouts.length > 0}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 rounded border-border"
+                        title="Select all for export"
+                      />
+                    </th>
                     <th className="text-left py-3 px-4 w-16">#</th>
                     <th className="text-left py-3 px-4 w-40">ID</th>
                     <th className="text-left py-3 px-4 w-48">Bag</th>
                     <th className="text-left py-3 px-4 w-64">Threats</th>
                     <th className="text-left py-3 px-4 w-56">Non-Threats</th>
                     <th className="text-left py-3 px-4 w-56">Tags</th>
-                    <th className="text-center py-3 px-4 w-20">Actions</th>
+                    <th className="text-center py-3 px-4 w-24">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -892,6 +1018,18 @@ export default function SavedPage() {
                           layoutIssues ? 'bg-amber-50/50' : ''
                         }`}
                       >
+                        <td className="py-3 px-4">
+                          <input
+                            type="checkbox"
+                            checked={selectedForExport.has(layout.id)}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              toggleLayoutSelection(layout.id);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-4 h-4 rounded border-border"
+                          />
+                        </td>
                         <td className="py-3 px-4 text-sm font-mono text-muted whitespace-nowrap">
                           {((pagination?.page || 1) - 1) * pageSize + idx + 1}
                         </td>
@@ -918,16 +1056,31 @@ export default function SavedPage() {
                           <span className="text-sm text-emerald-700">{tagsDisplay}</span>
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteConfirm({ show: true, layout });
-                            }}
-                            className="p-1.5 rounded-md bg-panel border border-border text-muted hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50 transition-colors"
-                            title="Delete layout"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // Export single layout
+                                const ids = [layout.id];
+                                const url = `${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids.join(','))}`;
+                                window.open(url, '_blank');
+                              }}
+                              className="p-1.5 rounded-md bg-panel border border-border text-muted hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                              title="Save this layout"
+                            >
+                              <Download size={14} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteConfirm({ show: true, layout });
+                              }}
+                              className="p-1.5 rounded-md bg-panel border border-border text-muted hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50 transition-colors"
+                              title="Delete layout"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

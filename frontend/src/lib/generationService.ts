@@ -173,54 +173,98 @@ function comboToLayout(combo: CombinatorialResult): any {
   };
 }
 
-async function saveOneCombo(combo: CombinatorialResult, mode: AutoSaveMode): Promise<boolean> {
+async function saveOneComboAnnotationOnly(combo: CombinatorialResult): Promise<boolean> {
   try {
     const res = await fetchWithTimeout(`${API_BASE_URL}/api/saved-layouts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(comboToLayout(combo)),
     }, LONG_REQUEST_TIMEOUT_MS, 1);
-    if (!res.ok) return false;
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
-    if (mode === "both") {
-      try {
-        await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ objects: combo.objects, name: combo.id }),
-        }, LONG_REQUEST_TIMEOUT_MS, 1);
-        if (state.autoSaveStatus) {
-          state.autoSaveStatus.imagesSaved++;
-        }
-      } catch { /* image failure non-fatal */ }
+async function saveComboAnnotationBatch(page: CombinatorialResult[]): Promise<Set<string>> {
+  const savedIds = new Set<string>();
+  if (page.length === 0) return savedIds;
+  try {
+    const payloads = page.map(comboToLayout);
+    const res = await fetchWithTimeout(`${API_BASE_URL}/api/saved-layouts/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ layouts: payloads }),
+    }, LONG_REQUEST_TIMEOUT_MS, 1);
+    if (!res.ok) return savedIds;
+    const data = await res.json();
+    if (!data || !Array.isArray(data.savedLayouts)) return savedIds;
+    for (const layout of data.savedLayouts) {
+      if (layout && layout.id) savedIds.add(layout.id);
     }
+  } catch {
+    // Fallback: save one-by-one so partial progress isn't lost.
+    for (const combo of page) {
+      if (await saveOneComboAnnotationOnly(combo) && combo.id) {
+        savedIds.add(combo.id);
+      }
+    }
+  }
+  return savedIds;
+}
+
+async function renderOneComboImage(combo: CombinatorialResult): Promise<boolean> {
+  try {
+    await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ objects: combo.objects, name: combo.id }),
+    }, LONG_REQUEST_TIMEOUT_MS, 1);
     return true;
   } catch {
     return false;
   }
 }
 
-async function savePage(page: CombinatorialResult[], mode: AutoSaveMode): Promise<number> {
-  let saved = 0;
-  for (const comb of page) {
-    if (await saveOneCombo(comb, mode)) saved++;
+async function savePage(page: CombinatorialResult[], mode: AutoSaveMode): Promise<{ savedAnnotations: number; savedImages: number; evictableIds: Set<string>; }> {
+  const evictableIds = await saveComboAnnotationBatch(page);
+  const savedAnnotations = evictableIds.size;
+  let savedImages = 0;
+  if (mode === "both") {
+    for (const comb of page) {
+      if (!comb.id || !evictableIds.has(comb.id)) continue;
+      if (await renderOneComboImage(comb)) {
+        savedImages++;
+        if (state.autoSaveStatus) state.autoSaveStatus.imagesSaved++;
+      }
+    }
   }
-  return saved;
+  return { savedAnnotations, savedImages, evictableIds };
+}
+
+function evictFromDisplayWindow(evictableIds: Set<string>) {
+  if (evictableIds.size === 0) return;
+  const remaining = [];
+  for (const c of state.combinations) {
+    if (c.id && evictableIds.has(c.id)) continue;
+    remaining.push(c);
+  }
+  state.combinations = remaining;
 }
 
 async function processNextAutoSavePage(): Promise<boolean> {
   const page = state.combinations.slice(0, ITEMS_PER_PAGE);
   if (page.length === 0) return false;
 
-  const saved = await savePage(page, autoSaveMode);
+  const { savedAnnotations, evictableIds } = await savePage(page, autoSaveMode);
 
   if (state.autoSaveStatus) {
-    state.autoSaveStatus.queued += saved;
+    state.autoSaveStatus.queued += savedAnnotations;
     state.autoSaveStatus.batchesSent++;
     state.autoSaveStatus.pagesCompleted++;
   }
 
-  state.combinations = state.combinations.slice(page.length);
+  evictFromDisplayWindow(evictableIds);
   refillDisplayWindow();
   notifySubscribers();
   persistToStorage();
@@ -502,18 +546,18 @@ export const GenerationService = {
       const page = state.combinations.slice(0, ITEMS_PER_PAGE);
       if (page.length === 0) return 0;
 
-      const saved = await savePage(page, mode);
+      const { savedAnnotations, evictableIds } = await savePage(page, mode);
 
       if (state.autoSaveStatus) {
-        state.autoSaveStatus.queued += saved;
+        state.autoSaveStatus.queued += savedAnnotations;
         state.autoSaveStatus.batchesSent++;
         state.autoSaveStatus.pagesCompleted++;
         if (mode === "both") {
-          state.autoSaveStatus.imagesSaved += saved;
+          // imagesSaved counter is already updated inside savePage
         }
       }
 
-      state.combinations = state.combinations.slice(page.length);
+      evictFromDisplayWindow(evictableIds);
       refillDisplayWindow();
 
       if (!state.hasGeneratedResults && (state.combinations.length > 0 || generatedBuffer.length > 0)) {
@@ -522,7 +566,7 @@ export const GenerationService = {
       notifySubscribers();
       persistToStorage();
       wakeLoopNow();
-      return saved;
+      return savedAnnotations;
     } finally {
       pageSaveRunningRef = false;
       wakeLoopNow();

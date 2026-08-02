@@ -15,6 +15,12 @@ export interface StagedItem {
   width?: number;
   height?: number;
   pixelDataFilename?: string;
+
+  // Batch/pagination metadata (UploadPage-only)
+  pageNumber?: number;
+  globalIndex?: number;
+
+  filepath?: string;
 }
 
 interface UploadContextValue {

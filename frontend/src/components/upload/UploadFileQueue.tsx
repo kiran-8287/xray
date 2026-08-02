@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import ValidRegionEditor from "./ValidRegionEditor";
 import { Trash2, Edit3, CheckSquare, Sparkles, Loader2, X, Plus, Minus } from "lucide-react";
-import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName, clearCustomSubcategoriesCache } from "../../config/categories";
+import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName, clearCustomSubcategoriesCache, refreshCustomSubcategories, findDuplicateSubcategory } from "../../config/categories";
 import { API_BASE_URL } from "../../config/api";
 import AddSubcategoryModal from "../common/AddSubcategoryModal";
 import ConfirmModal from "../common/ConfirmModal";
@@ -187,78 +187,17 @@ function ScrollableSelect({ value, options, onChange, disabled, placeholder, onA
 
 export default function UploadFileQueue({ files, staged, setStaged, setFiles, uploading, processing = false, handleUpload, selectedForMass, onToggleSelect, onSelectAll }: UploadFileQueueProps) {
   console.log(`[UploadFileQueue] render called. files=${files.length}, staged=${staged.length}`);
-  if (files.length === 0) {
-    console.log(`[UploadFileQueue] returning null because files.length === 0`);
+  if (staged.length === 0) {
+    console.log(`[UploadFileQueue] returning null because staged.length === 0`);
     return null;
   }
 
-  // Show all 100 items per batch without inner pagination
-  const [page, setPage] = useState(0);
-  const PER_PAGE = 100;
-  const totalPages = Math.max(1, Math.ceil(staged.length / PER_PAGE));
-  const safePage = Math.min(page, totalPages - 1);
-  const startIdx = safePage * PER_PAGE;
-  const endIdx = Math.min(startIdx + PER_PAGE, staged.length);
-  const currentStaged = staged.slice(startIdx, endIdx);
-  
-  console.log(`[UploadFileQueue] Pagination: page ${safePage + 1}/${totalPages}, showing ${currentStaged.length} items (${startIdx + 1}-${endIdx} of ${staged.length})`);
-  
-  // Map a page-local index to the global staged index
-  const globalIdx = (pageIdx: number) => startIdx + pageIdx;
-  
-  // Page-local toggle select
-  const handleToggleSelect = (pageIdx: number) => onToggleSelect(globalIdx(pageIdx));
-  
-  // Page-local select all
-  const handleSelectAllPage = () => {
-    const allGlobalOnPage = currentStaged.map((_, i) => globalIdx(i));
-    const allSelectedOnPage = allGlobalOnPage.every(i => selectedForMass.has(i));
-    if (allSelectedOnPage) {
-      // Deselect all on this page
-      allGlobalOnPage.forEach(i => {
-        if (selectedForMass.has(i)) onToggleSelect(i);
-      });
-    } else {
-      // Select all on this page
-      allGlobalOnPage.forEach(i => {
-        if (!selectedForMass.has(i)) onToggleSelect(i);
-      });
-    }
-  };
-  
-  // Pagination controls
-  const goToPage = (p: number) => {
-    setPage(Math.max(0, Math.min(p, totalPages - 1)));
-  };
-  
-  // Reset to page 0 when staged changes significantly (e.g., after upload)
-  useEffect(() => {
-    if (page >= totalPages) {
-      setPage(Math.max(0, totalPages - 1));
-    }
-  }, [staged.length]);
-  
-  // Override the child's table rendering to use paginated data
-  const renderStaged = currentStaged;
-  
-  // Helper to compute page-local selected set
-  const pageLocalSelected = new Set<number>();
-  for (let i = 0; i < currentStaged.length; i++) {
-    if (selectedForMass.has(globalIdx(i))) pageLocalSelected.add(i);
-  }
-  
-  // Override handleMassAutoGenerateRegion to work with global indices
-  // (the function already uses the full staged array)
-  
-  // Override handleAutoGenerateRegion to work with global indices
-  // (the function already uses staged[idx] directly)
-  
-  // Paginated removeIndex - called by JSX with page-local indices
-  const removeIndex = (pageIdx: number) => {
+  const handleToggleSelect = (idx: number) => onToggleSelect(idx);
+
+  const removeIndex = (idx: number) => {
     const copy = [...staged];
-    const targetIdx = globalIdx(pageIdx);
-    const removedItem = copy[targetIdx];
-    copy.splice(targetIdx, 1);
+    const removedItem = copy[idx];
+    copy.splice(idx, 1);
     setStaged(copy);
 
     const filesCopy = [...files];
@@ -270,23 +209,17 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
       if (idxInFiles !== -1) {
         filesCopy.splice(idxInFiles, 1);
       }
-    } else if (targetIdx < filesCopy.length) {
-      filesCopy.splice(targetIdx, 1);
     }
     setFiles(filesCopy);
   };
-  
-  // Override handleInlineValidRegion to work with global indices
-  const handleInlineValidRegion = (pageIdx: number) => {
-    const idx = globalIdx(pageIdx);
+
+  const handleInlineValidRegion = (idx: number) => {
     setEditingIndex(idx);
     setEditDraft({ ...staged[idx] });
     setIsValidRegionEditorOpen(true);
   };
-  
-  // Override handleInlineCategoryChange to work with global indices
-  const handleInlineCategoryChange = (pageIdx: number, categoryValue: string) => {
-    const idx = globalIdx(pageIdx);
+
+  const handleInlineCategoryChange = (idx: number, categoryValue: string) => {
     const copy = [...staged];
     if (!categoryValue) {
       copy[idx] = { ...copy[idx], category: "", subcategory: "" };
@@ -300,24 +233,16 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
     }
     setStaged(copy);
   };
-  
-  // Override handleInlineSubcategoryChange to work with global indices
-  const handleInlineSubcategoryChange = (pageIdx: number, subcategoryValue: string) => {
-    const idx = globalIdx(pageIdx);
+
+  const handleInlineSubcategoryChange = (idx: number, subcategoryValue: string) => {
     const copy = [...staged];
     copy[idx] = { ...copy[idx], subcategory: subcategoryValue };
     setStaged(copy);
   };
-  
-  // Override handleAutoGenerateRegion to work with global indices
-  const handleAutoGenerateRegionPage = (pageIdx: number) => {
-    handleAutoGenerateRegion(globalIdx(pageIdx));
+
+  const handleAutoGenerateRegionPage = (idx: number) => {
+    handleAutoGenerateRegion(idx);
   };
-  
-  // Override removeIndex (old one below will be replaced)
-  // Note: The original removeIndex, handleInlineValidRegion, handleInlineCategoryChange,
-  // and handleInlineSubcategoryChange functions below are replaced by the paginated versions above.
-  // We keep the old names to avoid changing all the JSX references, but they now use page-local logic.
 
   // Modal/editing state
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -337,6 +262,11 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   // Add subcategory modal state
   const [isAddSubcategoryModalOpen, setIsAddSubcategoryModalOpen] = useState(false);
   const [addingSubcategoryFor, setAddingSubcategoryFor] = useState<string>("");
+
+  // Revision counter bumped every time the custom subcategories list is mutated
+  // (add/remove). useMemo hooks that compute subcategory options depend on this
+  // counter to guarantee they recompute against the freshly-refreshed cache.
+  const [subcategoriesRev, setSubcategoriesRev] = useState<number>(0);
 
   // Tag selection state for inline editing
   const [activeTagRow, setActiveTagRow] = useState<number | null>(null);
@@ -409,7 +339,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   const massSubcategoryOptions = useMemo(() => {
     if (!massCategory) return [];
     return getLibrarySubcategories(massCategory);
-  }, [massCategory]);
+  }, [massCategory, subcategoriesRev]);
 
   const handleMassApplyToAll = () => {
     if (!massCategory) return;
@@ -521,7 +451,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
   const subcategoryOptions = useMemo(() => {
     if (!selectedCategory) return [];
     return getLibrarySubcategories(selectedCategory.slug);
-  }, [selectedCategory]);
+  }, [selectedCategory, subcategoriesRev]);
 
   const categoryOptions = useMemo(() => {
     return LIBRARIES;
@@ -1012,20 +942,41 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
 
   const handleAddCustomSubcategory = async (name: string): Promise<void> => {
     if (!addingSubcategoryFor) return;
-    
+
+    const trimmedName = String(name || "").trim();
+    if (!trimmedName) {
+      throw new Error("Subcategory name is required");
+    }
+
+    // ---- Frontend duplicate pre-check with same normalization as backend ----
+    // Avoids a round-trip for known-duplicate cases and catches the same
+    // fuzziness ("School Bag" / "school bag" / "SchoolBag" / "school-bag").
+    const dup = findDuplicateSubcategory(addingSubcategoryFor, trimmedName);
+    if (dup) {
+      const where = dup.kind === "built-in" ? "built-in list" : "custom subcategories";
+      throw new Error(`Subcategory already exists in ${where}: "${dup.name}"`);
+    }
+
     const res = await fetch(`${API_BASE_URL}/api/custom-subcategories`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category: addingSubcategoryFor, name }),
+      body: JSON.stringify({ category: addingSubcategoryFor, name: trimmedName }),
     });
-    
+
     if (!res.ok) {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ error: "Failed to add subcategory" }));
       throw new Error(data.error || 'Failed to add subcategory');
     }
-    
-    // Clear cache to reload subcategories
-    clearCustomSubcategoriesCache();
+
+    // ---- Clear cache + re-fetch from server so custom subcategories are up-to-date ----
+    // We must `await` this so we don't bump rev before the cache has the new entry.
+    await refreshCustomSubcategories();
+
+    // ---- Bump the revision counter to force every dropdown to re-render ----
+    // All useMemo hooks that compute subcategory options (mass assign dropdown,
+    // edit modal dropdown) depend on `subcategoriesRev`. Inline per-row subcategory
+    // dropdowns re-evaluate each render, so the state bump is sufficient for them too.
+    setSubcategoriesRev((prev) => prev + 1);
   };
 
   const openAddSubcategoryModal = (categorySlug: string) => {
@@ -1410,34 +1361,34 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {currentStaged.map((s, pageLocalIdx) => {
-              const actualGlobalIdx = globalIdx(pageLocalIdx);
+            {staged.map((s, idx) => {
               const file = s.file as File;
               const preview = s.preProcessed
                 ? `${API_BASE_URL}/data/library_images/${s.filepath}`
                 : URL.createObjectURL(file);
               const isBags = s.category === "bags";
               const inlineSubOptions = getInlineSubcategoryOptions(s.category);
+              const displayRowNumber = typeof s.globalIndex === "number" ? s.globalIndex + 1 : idx + 1;
 
               return (
-                <tr key={actualGlobalIdx} className="even:bg-surface/20">
+                <tr key={idx} className="even:bg-surface/20">
                   <td className="py-3 px-3 align-top">
                     <input
                       type="checkbox"
-                      checked={selectedForMass.has(actualGlobalIdx)}
-                      onChange={() => handleToggleSelect(pageLocalIdx)}
+                      checked={selectedForMass.has(idx)}
+                      onChange={() => handleToggleSelect(idx)}
                       className="rounded border-gray-300"
                     />
                   </td>
                   <td className="py-3 px-3 align-top text-sm font-mono text-muted text-center">
-                    {actualGlobalIdx + 1}
+                    {displayRowNumber}
                   </td>
                   <td className="py-3 px-3 align-top">
                     <button
                       onClick={() => {
                         setPreviewImage(preview);
                         setPreviewFileName(file.name);
-                        setPreviewIndex(actualGlobalIdx);
+                        setPreviewIndex(idx);
                       }}
                       className="cursor-pointer hover:opacity-80 transition-opacity"
                       title="Click to enlarge"
@@ -1454,7 +1405,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       <select
                         className="w-32 p-1.5 border border-border rounded-lg text-xs bg-white"
                         value={s.category || ""}
-                        onChange={(e) => handleInlineCategoryChange(pageLocalIdx, e.target.value)}
+                        onChange={(e) => handleInlineCategoryChange(idx, e.target.value)}
                         disabled={uploading}
                       >
                         <option value="">NONE</option>
@@ -1462,14 +1413,13 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                           <option key={cat.slug} value={cat.slug}>{cat.name}</option>
                         ))}
                       </select>
-                      
-                      {/* Tags Section - Below the category dropdown */}
+
                       {isBags && (
                         <div>
                           <button
                             type="button"
                             onClick={() => {
-                              setActiveTagRow(activeTagRow === actualGlobalIdx ? null : actualGlobalIdx);
+                              setActiveTagRow(activeTagRow === idx ? null : idx);
                             }}
                             className="text-[11px] px-2 py-1 rounded border border-border bg-surface hover:bg-emerald-50 hover:border-emerald-300 flex items-center gap-1"
                           >
@@ -1484,8 +1434,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                               <span>+ Tags</span>
                             )}
                           </button>
-                          
-                          {activeTagRow === actualGlobalIdx && (
+
+                          {activeTagRow === idx && (
                             <div ref={tagSelectorRef} className="mt-1 p-2 border border-border rounded-lg bg-white shadow-lg z-20 relative" style={{ maxHeight: "220px", overflowY: "auto" }}>
                               <div className="text-[10px] text-muted mb-1.5 font-medium sticky top-0 bg-white pb-1 z-10">Select non-threat items:</div>
                               <div className="space-y-0.5">
@@ -1505,11 +1455,11 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                                         checked={isSelected}
                                         onChange={(e) => {
                                           const copy = [...staged];
-                                          const currentTags = copy[actualGlobalIdx].tags || [];
+                                          const currentTags = copy[idx].tags || [];
                                           const newTags = e.target.checked
                                             ? [...currentTags, sub.slug]
                                             : currentTags.filter((t: string) => t !== sub.slug);
-                                          copy[actualGlobalIdx] = { ...copy[actualGlobalIdx], tags: newTags };
+                                          copy[idx] = { ...copy[idx], tags: newTags };
                                           setStaged(copy);
                                         }}
                                         className="rounded border-gray-300"
@@ -1528,7 +1478,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                               </button>
                             </div>
                           )}
-                          
+
                           {s.tags && s.tags.length > 0 && (
                             <div className="flex flex-wrap gap-0.5 mt-1">
                               {s.tags.slice(0, 3).map((tagSlug: string) => {
@@ -1545,8 +1495,8 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         const copy = [...staged];
-                                        const newTags = copy[actualGlobalIdx].tags?.filter((t: string) => t !== tagSlug) || [];
-                                        copy[actualGlobalIdx] = { ...copy[actualGlobalIdx], tags: newTags };
+                                        const newTags = copy[idx].tags?.filter((t: string) => t !== tagSlug) || [];
+                                        copy[idx] = { ...copy[idx], tags: newTags };
                                         setStaged(copy);
                                       }}
                                       className="hover:text-rose-600 transition-colors"
@@ -1569,7 +1519,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                     <ScrollableSelect
                       value={s.subcategory || ""}
                       options={inlineSubOptions}
-                      onChange={(val) => handleInlineSubcategoryChange(pageLocalIdx, val)}
+                      onChange={(val) => handleInlineSubcategoryChange(idx, val)}
                       disabled={uploading || !s.category}
                       placeholder="NONE"
                       onAddNew={s.category ? () => openAddSubcategoryModal(s.category) : undefined}
@@ -1581,12 +1531,12 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => handleAutoGenerateRegion(actualGlobalIdx)}
-                          disabled={autoGeneratingIndices.has(actualGlobalIdx)}
+                          onClick={() => handleAutoGenerateRegion(idx)}
+                          disabled={autoGeneratingIndices.has(idx)}
                           className="text-xs px-3 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                           title="Auto-generate valid region from pixel data"
                         >
-                          {autoGeneratingIndices.has(actualGlobalIdx) ? (
+                          {autoGeneratingIndices.has(idx) ? (
                             <Loader2 size={12} className="animate-spin" />
                           ) : (
                             <Sparkles size={12} />
@@ -1595,7 +1545,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleInlineValidRegion(pageLocalIdx)}
+                          onClick={() => handleInlineValidRegion(idx)}
                           className="text-xs px-3 py-1.5 rounded-lg border border-border bg-surface flex items-center gap-1.5"
                         >
                           <Edit3 size={12} />
@@ -1608,7 +1558,7 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                   </td>
                   <td className="py-3 px-3 align-top">
                     <button
-                      onClick={() => removeIndex(pageLocalIdx)}
+                      onClick={() => removeIndex(idx)}
                       className="p-1.5 rounded-lg text-rose-500"
                       title="Remove"
                       disabled={uploading}
@@ -1621,77 +1571,41 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
             })}
           </tbody>
         </table>
-        
-        {/* Pagination Controls - Only show when more than 1 page */}
-        {totalPages > 1 && (
-          <div className="px-5 py-2 bg-surface/30 border-t border-border flex items-center justify-center gap-2">
-            <button
-              onClick={() => goToPage(0)}
-              disabled={safePage === 0}
-              className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-30 disabled:cursor-not-allowed"
-              title="First page"
-            >
-              ⟪
-            </button>
-            <button
-              onClick={() => goToPage(safePage - 1)}
-              disabled={safePage === 0}
-              className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Previous page"
-            >
-              ⟨
-            </button>
-            <span className="text-xs text-muted px-3">
-              Page {safePage + 1} of {totalPages} ({staged.length} items)
-            </span>
-            <button
-              onClick={() => goToPage(safePage + 1)}
-              disabled={safePage === totalPages - 1}
-              className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Next page"
-            >
-              ⟩
-            </button>
-            <button
-              onClick={() => goToPage(totalPages - 1)}
-              disabled={safePage === totalPages - 1}
-              className="px-2 py-1 text-xs rounded border border-border bg-white disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Last page"
-            >
-              ⟫
-            </button>
-          </div>
-        )}
       </div>
 
       <div className="px-5 py-3 bg-nav border-t border-border flex-shrink-0 flex justify-between items-center">
         <button
           onClick={() => {
-            const selectedSet = new Set<number>();
-            staged.forEach((_, idx) => {
-              if (selectedForMass.has(idx)) selectedSet.add(idx);
-            });
-            if (selectedSet.size === 0) return;
-            
-            // Clean up pre-processed items being deleted
+            if (selectedForMass.size === 0) return;
+
+            const selectedLocalIndices = Array.from(selectedForMass).filter(i => i >= 0 && i < staged.length);
+            if (selectedLocalIndices.length === 0) return;
+
             const orphanedItems = JSON.parse(sessionStorage.getItem('orphanedPreprocessedItems') || '[]');
-            const itemsToDelete = staged.filter((_, idx) => selectedSet.has(idx));
+            const itemsToDelete = staged.filter((_, idx) => selectedForMass.has(idx));
             const preProcessedIds = itemsToDelete
               .filter(item => item.preProcessed && item.itemId)
               .map(item => item.itemId);
-            
-            // Clean up files and update session storage
+
             preProcessedIds.forEach(itemId => {
               fetch(`${API_BASE_URL}/api/temp-files/${itemId}`, {
                 method: 'DELETE',
               }).catch(err => console.error('Failed to delete temp files:', err));
             });
-            
+
             const updatedOrphanedItems = orphanedItems.filter((id: string) => !preProcessedIds.includes(id));
             sessionStorage.setItem('orphanedPreprocessedItems', JSON.stringify(updatedOrphanedItems));
-            
-            const newStaged = staged.filter((_, idx) => !selectedSet.has(idx));
-            const newFiles = files.filter((_, idx) => !selectedSet.has(idx));
+
+            const deletedItemFiles = itemsToDelete
+              .map(item => item.file)
+              .filter(Boolean);
+
+            const newStaged = staged.filter((_, idx) => !selectedForMass.has(idx));
+
+            const newFiles = files.filter((f) => {
+              return !deletedItemFiles.some((sf: File) => sf === f || sf.name === f.name);
+            });
+
             setStaged(newStaged);
             setFiles(newFiles);
           }}

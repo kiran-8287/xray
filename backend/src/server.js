@@ -4,12 +4,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import multer from "multer";
-import { generateValidRegion } from "./lib/autoValidRegion.js";
+import archiver from "archiver";
+import { generateValidRegion, generateValidRegionBatch, BATCH_FILES_PER_PROCESS } from "./lib/autoValidRegion.js";
 import { renderSceneAsync } from "./lib/renderCanvas.js";
 import Jimp from "jimp";
 import sharp from "sharp";
 import WorkerPool from "./lib/workerPool.js";
 import pino from 'pino';
+import { createWriteStream } from 'node:fs';
 import client from 'prom-client';
 import config from './lib/config.js';
 import { requireAuth, protectWriteRoutes } from './lib/auth.js';
@@ -32,6 +34,7 @@ import {
     getSavedLayouts,
     getSavedLayoutById,
     createSavedLayout,
+    createSavedLayoutsBatch,
     updateSavedLayout,
     deleteSavedLayout,
     getCustomSubcategories,
@@ -41,6 +44,7 @@ import {
 } from "./lib/storage.js";
 import { PipelineTimer, PIPELINE_STAGES, generateOperationId } from "./lib/instrumentation.js";
 import { initializeSystemConfig, getWorkerCount, checkMemoryAvailability } from "./lib/systemInfo.js";
+import { Semaphore, chunked, withSemaphore } from "./lib/concurrency.js";
 import { enqueue as enqueueDiskWrite, getDiskWriteQueueStatus, drain as drainDiskQueue } from './lib/diskWriteQueue.js';
 
 const app = express();
@@ -68,26 +72,202 @@ const uploadFileDuration = new client.Histogram({
     buckets: [0.01, 0.05, 0.1, 0.3, 0.5, 1, 2, 5]
 });
 
-// Request timing middleware
+// ---- Structured monitoring / request tracing middleware ----
+//
+// Writes newline-delimited JSON entries to <dataDir>/monitoring.log.
+// Every request produces TWO events (consumed by the Streamlit dashboard):
+//   { type: "request_started", ... }  → logged synchronously when the request begins
+//   { type: "request_finished", ... } → logged on res.finish (when the last byte is written)
+//
+// Fields written on BOTH events (so the dashboard can still show rich data on in-flight rows):
+//   - timestamp / startedAt / requestId / method / path / route
+//   - page_hint         (best-effort SPA page name from Referer path or x-spa-page header)
+//   - rss_mb / heap_mb  (Node.js memory snapshot at the time the event is emitted)
+//   - in_flight         (exact instantaneous concurrent-in-flight count after ++ or --)
+//
+// request_finished additionally carries: status, duration_ms, duration_s, content_length
+
+const LOG_PATH = path.join(config.dataDir, 'monitoring.log');
+const logStream = createWriteStream(LOG_PATH, { flags: 'a' });
+let inFlightCounter = 0;
+
+function classifyPageHint(req) {
+    const explicit = req.headers['x-spa-page'];
+    if (typeof explicit === 'string' && explicit.trim().length > 0) {
+        return explicit.trim().slice(0, 80);
+    }
+    const referer = req.headers['referer'] || '';
+    try {
+        const pathname = referer.startsWith('http') ? new URL(referer).pathname : referer;
+        const p = (pathname || '').toLowerCase();
+        if (!p || p === '/' || p === '/home') return 'home';
+        if (p.startsWith('/upload')) return 'upload';
+        if (p.startsWith('/library')) return 'library';
+        if (p.startsWith('/collage') || p.startsWith('/generate')) return 'collage';
+        if (p.startsWith('/benchmark') || p.startsWith('/bench')) return 'benchmark';
+        if (p.startsWith('/settings')) return 'settings';
+        if (p.startsWith('/analysis')) return 'analysis';
+        // strip leading / and first slug only
+        const first = p.split('/').filter(Boolean)[0];
+        return first || 'unknown';
+    } catch {
+        return 'unknown';
+    }
+}
+
+function memorySnapshot() {
+    try {
+        const mem = process.memoryUsage();
+        return {
+            rss_mb: Number((mem.rss / (1024 * 1024)).toFixed(2)),
+            heap_total_mb: Number((mem.heapTotal / (1024 * 1024)).toFixed(2)),
+            heap_used_mb: Number((mem.heapUsed / (1024 * 1024)).toFixed(2)),
+            external_mb: Number((mem.external / (1024 * 1024)).toFixed(2)),
+        };
+    } catch {
+        return { rss_mb: 0, heap_total_mb: 0, heap_used_mb: 0, external_mb: 0 };
+    }
+}
+
+function shouldMonitorRequest(req, res) {
+    if (req.path.startsWith('/data/')) return false;
+    if (/\.(png|jpe?g|gif|svg|webp|ico|css|js|map|woff2?|ttf|npz|json)$/i.test(req.path)) {
+        // /api/*.json endpoints are business logic; only skip truly-static path suffixes
+        if (req.path.startsWith('/api/')) return true;
+        return false;
+    }
+    if (res && res.statusCode === 304) return false;
+    if (req.path === '/favicon.ico') return false;
+    return true;
+}
+
 app.use((req, res, next) => {
+    if (!shouldMonitorRequest(req, null)) {
+        next();
+        return;
+    }
+
     const start = process.hrtime.bigint();
-    res.on('finish', () => {
-        const durationSec = Number(process.hrtime.bigint() - start) / 1e9;
+    const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const startedAt = new Date().toISOString();
+    const routeTemplate = req.route && req.route.path ? req.route.path : req.path;
+    const page_hint = classifyPageHint(req);
+
+    inFlightCounter += 1;
+    const inFlightAtStart = inFlightCounter;
+    const mem0 = memorySnapshot();
+
+    const startEntry = {
+        type: 'request_started',
+        timestamp: startedAt,
+        startedAt,
+        requestId,
+        method: req.method,
+        path: req.path,
+        route: routeTemplate,
+        page_hint,
+        referer: req.headers['referer'] || '',
+        user_agent: req.get('user-agent') || '',
+        content_length: Number(req.headers['content-length'] || 0) || 0,
+        in_flight: inFlightAtStart,
+        ...mem0,
+    };
+    try {
+        logStream.write(`${JSON.stringify(startEntry)}\n`);
+    } catch {
+        /* swallow: logger must never break request flow */
+    }
+    try {
+        logger.info(
+            { requestId, method: req.method, path: req.path, route: routeTemplate, page_hint, in_flight: inFlightAtStart },
+            'request_started'
+        );
+    } catch {
+        /* ignore */
+    }
+
+    function finishHandler() {
+        res.removeListener('finish', finishHandler);
+        res.removeListener('close', finishHandler);
+
+        const durationNs = Number(process.hrtime.bigint() - start);
+        const durationSec = durationNs / 1e9;
+        const durationMs = Number((durationSec * 1000).toFixed(3));
+        const endAt = new Date().toISOString();
+        const routeTemplateNow = req.route && req.route.path ? req.route.path : req.path;
+        const inFlightAtEnd = Math.max(0, inFlightCounter - 1);
+        inFlightCounter = inFlightAtEnd;
+        const mem1 = memorySnapshot();
+
         try {
-            httpRequestDuration.labels(req.method, req.route && req.route.path ? req.route.path : req.path, String(res.statusCode)).observe(durationSec);
-        } catch (e) {
-            // ignore metric labeling errors
+            httpRequestDuration
+                .labels(req.method, routeTemplateNow, String(res.statusCode))
+                .observe(durationSec);
+        } catch {
+            /* ignore metric labeling errors */
         }
-        // Skip verbose logging for static asset requests and 304 cache revalidations.
-        // These dominate the log output when browsing the library (every thumbnail
-        // image triggers a request, and browsers re-validate cached resources with 304s).
-        const isStaticAsset = req.path.startsWith('/data/') || /\.(png|jpe?g|gif|svg|webp|ico|css|js|map|woff2?|ttf|npz|json)$/i.test(req.path);
-        const isCacheRevalidation = res.statusCode === 304;
-        if (!isStaticAsset && !isCacheRevalidation) {
-            logger.info({ method: req.method, path: req.path, status: res.statusCode, duration_s: durationSec }, 'request_finished');
+
+        if (!shouldMonitorRequest(req, res)) return;
+
+        const finishEntry = {
+            type: 'request_finished',
+            timestamp: endAt,
+            startedAt,
+            finishedAt: endAt,
+            requestId,
+            method: req.method,
+            path: req.path,
+            route: routeTemplateNow,
+            status: res.statusCode,
+            ok: res.statusCode >= 200 && res.statusCode < 400,
+            duration_s: Number(durationSec.toFixed(6)),
+            duration_ms: durationMs,
+            page_hint,
+            referer: req.headers['referer'] || '',
+            user_agent: req.get('user-agent') || '',
+            content_length: Number(res.getHeader('content-length') || 0) || 0,
+            in_flight: inFlightAtEnd,
+            ...mem1,
+        };
+        try {
+            logStream.write(`${JSON.stringify(finishEntry)}\n`);
+        } catch {
+            /* ignore */
         }
-    });
+        try {
+            logger.info(
+                {
+                    requestId,
+                    method: req.method,
+                    path: req.path,
+                    status: res.statusCode,
+                    duration_s: finishEntry.duration_s,
+                    page_hint,
+                    in_flight: inFlightAtEnd,
+                    rss_mb: mem1.rss_mb,
+                },
+                'request_finished'
+            );
+        } catch {
+            /* ignore */
+        }
+    }
+
+    res.on('finish', finishHandler);
+    res.on('close', finishHandler);
     next();
+});
+
+// Expose the in-flight counter + log path on /metrics alongside Prometheus text,
+// so external scrapers can also read the instantaneous value.
+app.get('/metrics/live', (_req, res) => {
+    const mem = memorySnapshot();
+    res.json({
+        in_flight_requests: inFlightCounter,
+        monitoring_log: LOG_PATH,
+        memory_mb: mem,
+        server_time_utc: new Date().toISOString(),
+    });
 });
 
 const __filename = fileURLToPath(import.meta.url);
@@ -236,13 +416,13 @@ app.get('/metrics', async (_req, res) => {
     }
 });
 
-// Clean up temp files older than 1 hour (runs on server startup and can be called periodically)
+// Clean up temp files older than 4 hours (runs on server startup and periodically)
 async function cleanupOldTempFiles() {
   try {
     await fs.mkdir(tempDir, { recursive: true });
     const files = await fs.readdir(tempDir);
     const now = Date.now();
-    const maxAge = 60 * 60 * 1000; // 1 hour
+    const maxAge = 4 * 60 * 60 * 1000; // 4 hours
 
     let cleaned = 0;
     for (const file of files) {
@@ -268,6 +448,11 @@ async function cleanupOldTempFiles() {
 
 // Run cleanup on startup
 await cleanupOldTempFiles();
+
+// Run cleanup every 30 minutes to prune temp files older than 4 hours
+setInterval(() => {
+  void cleanupOldTempFiles();
+}, 30 * 60 * 1000).unref?.();
 
 // Initialize system configuration (detect CPU cores, etc.)
 await initializeSystemConfig();
@@ -342,6 +527,7 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
 
         const nonDuplicates = [];
         let duplicateCount = 0;
+        const duplicateFilenames = [];
 
         console.log(`[process-raw-files] Received ${files.length} files from multer`);
         const skippedFiles = [];
@@ -357,6 +543,7 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
             if (existingIds.has(itemId)) {
                 console.log(`[process-raw-files] Duplicate: ${itemId}`);
                 duplicateCount++;
+                duplicateFilenames.push(file.originalname);
             } else {
                 nonDuplicates.push({ file, itemId, fileType });
             }
@@ -374,6 +561,14 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
                 status: "skipped",
                 filename: skipped.filename,
                 reason: skipped.reason,
+            }) + "\n");
+        }
+
+        for (const dupFilename of duplicateFilenames) {
+            res.write(JSON.stringify({
+                status: "duplicate",
+                filename: dupFilename,
+                itemId: deriveItemId(dupFilename),
             }) + "\n");
         }
 
@@ -423,6 +618,12 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
         await fs.mkdir(tempDir, { recursive: true });
         
         const preprocessingStart = process.hrtime.bigint();
+
+        const originalFilenameByItemId = new Map();
+        for (const f of files) {
+          const itId = deriveItemId(f.originalname);
+          originalFilenameByItemId.set(itId, f.originalname);
+        }
         
         for (const { file, itemId, fileType } of nonDuplicates) {
             const tempPath = path.join(tempDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
@@ -436,7 +637,18 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
                     pixelDataDir: pixelDataRoot,
                     libraryImagesDir: libraryImagesRoot,
                 },
-                async (result) => {
+                async (rawResult) => {
+                    const originalName = originalFilenameByItemId.get(rawResult.id) || (rawResult.id || "unknown");
+                    let result = { ...rawResult, filename: originalName };
+                    if (result.status === "error") {
+                        let reason = result.reason;
+                        if (!reason || typeof reason !== "string") {
+                            reason = "Unknown processing error (worker returned no details)";
+                        }
+                        reason = reason.replace(/\s+/g, " ").trim();
+                        if (reason.length > 300) reason = reason.slice(0, 300) + "...";
+                        result.reason = reason;
+                    }
                     const line = JSON.stringify(result);
                     res.write(line + "\n");
 
@@ -787,6 +999,58 @@ app.post('/api/saved-layouts', requireAuth, async (req, res) => {
     }
 });
 
+app.post('/api/saved-layouts/batch', requireAuth, async (req, res) => {
+    const { layouts } = req.body;
+    if (!Array.isArray(layouts)) {
+        return res.status(400).json({ ok: false, error: 'layouts must be an array' });
+    }
+    if (layouts.length === 0) {
+        return res.json({ ok: true, saved: 0, savedLayouts: [] });
+    }
+    const normalized = [];
+    for (let i = 0; i < layouts.length; i++) {
+        const raw = layouts[i];
+        if (!raw || typeof raw !== 'object') {
+            return res.status(400).json({ ok: false, error: `Entry at index ${i} is not a valid object` });
+        }
+        const name = raw.name;
+        const layout_json = raw.layout_json;
+        if (!name || !layout_json) {
+            return res.status(400).json({ ok: false, error: `Entry at index ${i} is missing name or layout_json` });
+        }
+        try {
+            if (!layout_json.objects || typeof layout_json.objects !== 'object') {
+                return res.status(400).json({ ok: false, error: `Entry ${i}: invalid layout_json.objects` });
+            }
+            const obj = layout_json.objects;
+            if (!obj.bag && !obj.threats && !obj['non-threats']) {
+                return res.status(400).json({ ok: false, error: `Entry ${i}: objects must contain bag, threats, or non-threats` });
+            }
+            if (obj.threats && !Array.isArray(obj.threats)) {
+                return res.status(400).json({ ok: false, error: `Entry ${i}: threats must be an array` });
+            }
+            if (obj['non-threats'] && !Array.isArray(obj['non-threats'])) {
+                return res.status(400).json({ ok: false, error: `Entry ${i}: non-threats must be an array` });
+            }
+        } catch (err) {
+            return res.status(400).json({ ok: false, error: `Entry ${i}: layout_json validation failed: ${err.message}` });
+        }
+        normalized.push({
+            id: raw.id,
+            name,
+            filepath: raw.filepath ?? null,
+            layout_json,
+        });
+    }
+    try {
+        const saved = await createSavedLayoutsBatch(normalized);
+        res.json({ ok: true, saved: saved.length, savedLayouts: saved });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err), saved: 0 });
+    }
+});
+
 // ---- Batch-bulk save endpoint (MUST be registered before /:id route) ----
 
 // POST /api/saved-layouts/batch-bulk
@@ -849,6 +1113,180 @@ app.post('/api/saved-layouts/batch-bulk/drain', requireAuth, async (_req, res) =
     } catch (err) {
         res.status(500).json({ ok: false, error: String(err) });
     }
+});
+
+// Export saved layout images as a ZIP archive (MUST be before /:id route)
+app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
+    try {
+        const layoutIds = req.query.ids;
+        let targetLayouts = [];
+        
+        if (layoutIds && typeof layoutIds === 'string') {
+            const ids = layoutIds.split(',').map(id => id.trim()).filter(Boolean);
+            const allLayouts = await getSavedLayouts();
+            targetLayouts = allLayouts.filter(l => ids.includes(l.id));
+        } else {
+            targetLayouts = await getSavedLayouts();
+        }
+        
+        if (targetLayouts.length === 0) {
+            return res.status(404).json({ ok: false, error: 'No layouts found to export' });
+        }
+        
+        const zipFilename = `saved-layouts-${new Date().toISOString().slice(0, 10)}.zip`;
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+        
+        const archive = archiver('zip', { zlib: { level: 6 } });
+        archive.pipe(res);
+        
+        for (const layout of targetLayouts) {
+            try {
+                const objects = layout.layout_json?.objects || {};
+                const flatObjects = [];
+                
+                if (objects.bag) {
+                    flatObjects.push({
+                        id: objects.bag.id,
+                        filepath: objects.bag.filepath,
+                        pixel_data_path: objects.bag.pixel_data_path,
+                        transform: {
+                            x: objects.bag.center?.x || 0,
+                            y: objects.bag.center?.y || 0,
+                            width: objects.bag.size?.width || 800,
+                            height: objects.bag.size?.height || 600,
+                            rotation: 0,
+                        },
+                        layer: objects.bag.layer || 0,
+                    });
+                }
+                
+                if (Array.isArray(objects.threats)) {
+                    for (const obj of objects.threats) {
+                        flatObjects.push({
+                            id: obj.id,
+                            filepath: obj.filepath,
+                            pixel_data_path: obj.pixel_data_path,
+                            transform: {
+                                x: obj.center?.x || 0,
+                                y: obj.center?.y || 0,
+                                width: obj.size?.width || 100,
+                                height: obj.size?.height || 100,
+                                rotation: obj.rotation || 0,
+                            },
+                            layer: obj.layer || 1,
+                        });
+                    }
+                }
+                
+                if (Array.isArray(objects['non-threats'])) {
+                    for (const obj of objects['non-threats']) {
+                        flatObjects.push({
+                            id: obj.id,
+                            filepath: obj.filepath,
+                            pixel_data_path: obj.pixel_data_path,
+                            transform: {
+                                x: obj.center?.x || 0,
+                                y: obj.center?.y || 0,
+                                width: obj.size?.width || 100,
+                                height: obj.size?.height || 100,
+                                rotation: obj.rotation || 0,
+                            },
+                            layer: obj.layer || 2,
+                        });
+                    }
+                }
+                
+                if (flatObjects.length > 0) {
+                    const enrichedObjects = await enrichObjectsWithPixelData(flatObjects);
+                    const pngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "highenergy");
+                    
+                    const safeName = layout.name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+                    archive.append(pngBuffer, { name: `${safeName}.png` });
+                }
+            } catch (err) {
+                console.error(`[export] Failed to render layout ${layout.id}:`, err);
+            }
+        }
+        
+        await archive.finalize();
+        
+    } catch (err) {
+        console.error('[export] Error:', err);
+        if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: String(err) });
+        }
+    }
+});
+
+// Check data integrity of saved layouts (MUST be before /:id route)
+app.get('/api/saved-layouts/integrity', async (_req, res) => {
+  try {
+    const [layouts, items] = await Promise.all([
+      getSavedLayouts(),
+      getItems()
+    ]);
+    
+    const itemMap = new Map(items.map(i => [i.id, i]));
+    const results = [];
+    
+    for (const layout of layouts) {
+      const issues = [];
+      const objects = layout.layout_json?.objects || {};
+      const allObjects = [
+        objects.bag && { ...objects.bag, library: 'bag' },
+        ...(objects.threats || []).map(t => ({ ...t, library: 'threat' })),
+        ...(objects['non-threats'] || []).map(n => ({ ...n, library: 'non-threat' }))
+      ].filter(Boolean);
+      
+      for (const obj of allObjects) {
+        const item = itemMap.get(obj.id);
+        if (!item) {
+          issues.push({
+            objectId: obj.id,
+            objectLibrary: obj.library,
+            issue: 'item_deleted',
+            message: `Item ${obj.id} not found in library`
+          });
+        } else {
+          const pixelDataPath = await resolvePixelDataPath(obj.id, item.pixel_data_path);
+          if (!pixelDataPath) {
+            issues.push({
+              objectId: obj.id,
+              objectLibrary: obj.library,
+              issue: 'no_pixel_data',
+              message: `Item ${obj.id} has no pixel data`
+            });
+          } else {
+            const highEnergyPath = path.join(pixelDataRoot, pixelDataPath);
+            try {
+              await fs.access(highEnergyPath);
+            } catch {
+              issues.push({
+                objectId: obj.id,
+                objectLibrary: obj.library,
+                issue: 'pixel_data_missing',
+                message: `Pixel data file not found: ${pixelDataPath}`
+              });
+            }
+          }
+        }
+      }
+      
+      results.push({
+        layoutId: layout.id,
+        layoutName: layout.name,
+        hasIssues: issues.length > 0,
+        issues,
+        objectCount: allObjects.length
+      });
+    }
+    
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error('[integrity] Error:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
 });
 
 app.get('/api/saved-layouts/:id', async (req, res) => {
@@ -1291,53 +1729,70 @@ app.post("/api/items/bulk-delete", requireAuth, async (req, res) => {
     }
 });
 
+async function deleteTempFilesForItem(itemId) {
+    const safeItemId = sanitizeFilename(itemId);
+    const errors = [];
+
+    const targets = [
+        { path: safeJoin(libraryImagesRoot, `${safeItemId}.png`), label: 'image' },
+        { path: safeJoin(pixelDataRoot, path.join('highenergy', `${safeItemId}.npz`)), label: 'high energy pixel data' },
+        { path: safeJoin(pixelDataRoot, path.join('lowenergy', `${safeItemId}.npz`)), label: 'low energy pixel data' },
+    ];
+
+    for (const target of targets) {
+        if (!target.path.safe) continue;
+        try {
+            const stat = await fs.stat(target.path.fullPath);
+            if (!stat.isFile()) continue;
+            await fs.unlink(target.path.fullPath);
+        } catch (err) {
+            if (err && err.code !== 'ENOENT' && err.code !== 'EPERM') {
+                errors.push(`Failed to delete ${target.label}: ${err}`);
+            }
+        }
+    }
+
+    return errors;
+}
+
 // Delete temporary files for pre-processed items (before they're uploaded to library)
 app.delete("/api/temp-files/:itemId", requireAuth, async (req, res) => {
     try {
         const { itemId } = req.params;
-        const safeItemId = sanitizeFilename(itemId);
-        const errors = [];
-        
-        // Use safe path resolution for all file operations
-        const imageResult = safeJoin(libraryImagesRoot, `${safeItemId}.png`);
-        if (imageResult.safe) {
-            try {
-                await fs.unlink(imageResult.fullPath);
-            } catch (err) {
-                if (err.code !== 'ENOENT') {
-                    errors.push(`Failed to delete image: ${err}`);
-                }
-            }
-        }
-        
-        const highEnergyResult = safeJoin(pixelDataRoot, 'highenergy', `${safeItemId}.npz`);
-        if (highEnergyResult.safe) {
-            try {
-                await fs.unlink(highEnergyResult.fullPath);
-            } catch (err) {
-                if (err.code !== 'ENOENT') {
-                    errors.push(`Failed to delete high energy pixel data: ${err}`);
-                }
-            }
-        }
-        
-        const lowEnergyResult = safeJoin(pixelDataRoot, 'lowenergy', `${safeItemId}.npz`);
-        if (lowEnergyResult.safe) {
-            try {
-                await fs.unlink(lowEnergyResult.fullPath);
-            } catch (err) {
-                if (err.code !== 'ENOENT') {
-                    errors.push(`Failed to delete low energy pixel data: ${err}`);
-                }
-            }
-        }
-        
+        const errors = await deleteTempFilesForItem(itemId);
+
         if (errors.length > 0) {
             console.error("Errors during temp file cleanup:", errors);
             return res.status(500).json({ ok: false, error: errors.join(", ") });
         }
-        
+
         res.json({ ok: true, message: "Temporary files deleted successfully" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+app.post('/api/temp-files/batch-delete', requireAuth, async (req, res) => {
+    try {
+        const itemIds = Array.isArray(req.body?.itemIds) ? req.body.itemIds : [];
+        if (itemIds.length === 0) {
+            return res.status(400).json({ ok: false, error: 'itemIds array is required' });
+        }
+
+        const errors = [];
+        for (const itemId of itemIds) {
+            if (typeof itemId !== 'string' || !itemId.trim()) continue;
+            const itemErrors = await deleteTempFilesForItem(itemId);
+            errors.push(...itemErrors.map(err => `${itemId}: ${err}`));
+        }
+
+        if (errors.length > 0) {
+            console.error('Errors during batch temp file cleanup:', errors);
+            return res.status(500).json({ ok: false, error: errors.join(', ') });
+        }
+
+        res.json({ ok: true, deletedCount: itemIds.filter(Boolean).length, message: 'Temporary files deleted successfully' });
     } catch (err) {
         console.error(err);
         res.status(500).json({ ok: false, error: String(err) });
@@ -1390,11 +1845,27 @@ app.post("/api/auto-valid-region", requireAuth, async (req, res) => {
     }
 });
 
-// Batch auto-generate valid regions for multiple items in parallel
+// Batch auto-generate valid regions for multiple items.
+//
+// MEMORY BEHAVIOUR (critical):
+//   The per-item API spawned one Python-per-file, which imports scipy + cv2
+//   (~300–500 MB commit per child). For 50 files that's 15–25 GB of commit
+//   demand and reliably blew past Windows' commit-charge limit, causing the
+//   upstream raw-file pipeline to fail with "Unable to allocate 1.29 MiB".
+//
+// Strategy now:
+//   1. Validate paths / existence first (no child processes needed).
+//   2. For the remaining items, batch BATCH_FILES_PER_PROCESS into a single
+//      python --batch invocation, amortising scipy + cv2 import cost across
+//      ~20 files with one child.
+//   3. Run those child batches through a global Semaphore with concurrency
+//      sized by the same getWorkerCount() logic as the upload pipeline, so
+//      total commit across upload + auto-valid-region stays bounded.
 app.post("/api/auto-valid-region-batch", requireAuth, async (req, res) => {
+    const operationId = generateOperationId();
     try {
         const { items } = req.body;
-        
+
         if (!Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ ok: false, error: "Missing or empty items array" });
         }
@@ -1403,85 +1874,151 @@ app.post("/api/auto-valid-region-batch", requireAuth, async (req, res) => {
             return res.status(400).json({ ok: false, error: "Maximum 50 items per batch request" });
         }
 
-        const results = await Promise.allSettled(
-            items.map(async (item) => {
-                const { itemId, pixelDataPath } = item;
-                
-                if (!itemId || !pixelDataPath) {
-                    return {
-                        itemId,
-                        ok: false,
-                        error: "Missing itemId or pixelDataPath"
-                    };
-                }
+        // Step 1 — path validation + file existence (synchronous, no Python)
+        const prechecks = items.map((item) => {
+            const { itemId, pixelDataPath } = item;
 
-                // Validate pixelDataPath
-                const validation = validatePathComponent(pixelDataPath);
-                if (!validation.valid) {
-                    return {
-                        itemId,
-                        ok: false,
-                        error: `Invalid pixelDataPath: ${validation.error}`
-                    };
-                }
+            if (!itemId || !pixelDataPath) {
+                return {
+                    itemId,
+                    ok: false,
+                    error: "Missing itemId or pixelDataPath",
+                    _skip: true,
+                };
+            }
 
-                const safePathResult = safeJoin(pixelDataRoot, validation.cleaned);
-                if (!safePathResult.safe) {
-                    return {
-                        itemId,
-                        ok: false,
-                        error: `Invalid pixel data path: ${safePathResult.error}`
-                    };
-                }
+            const validation = validatePathComponent(pixelDataPath);
+            if (!validation.valid) {
+                return {
+                    itemId,
+                    ok: false,
+                    error: `Invalid pixelDataPath: ${validation.error}`,
+                    _skip: true,
+                };
+            }
 
-                const fullPath = safePathResult.fullPath;
-                
+            const safePathResult = safeJoin(pixelDataRoot, validation.cleaned);
+            if (!safePathResult.safe) {
+                return {
+                    itemId,
+                    ok: false,
+                    error: `Invalid pixel data path: ${safePathResult.error}`,
+                    _skip: true,
+                };
+            }
+
+            return {
+                itemId,
+                ok: null, // undecided until file check + python
+                fullPath: safePathResult.fullPath,
+                _skip: false,
+            };
+        });
+
+        // Existence check — any missing file errors immediately (no point spawning python)
+        const finalPrechecks = await Promise.all(
+            prechecks.map(async (pc) => {
+                if (pc._skip) return pc;
                 try {
-                    await fs.access(fullPath);
+                    await fs.access(pc.fullPath);
+                    return pc;
                 } catch {
                     return {
-                        itemId,
+                        itemId: pc.itemId,
                         ok: false,
-                        error: `Pixel data file not found: ${pixelDataPath}`
-                    };
-                }
-
-                try {
-                    const result = await generateValidRegion(fullPath);
-                    return {
-                        itemId,
-                        ok: true,
-                        data: {
-                            points: result.points,
-                            width: result.width,
-                            height: result.height,
-                            pixelCount: result.pixelCount
-                        }
-                    };
-                } catch (error) {
-                    return {
-                        itemId,
-                        ok: false,
-                        error: error.message || "Failed to generate valid region"
+                        error: `Pixel data file not found: ${items.find(i => i.itemId === pc.itemId)?.pixelDataPath ?? pc.fullPath}`,
+                        _skip: true,
                     };
                 }
             })
         );
 
-        const processedResults = results.map((result, index) => {
-            if (result.status === 'fulfilled') {
-                return result.value;
-            } else {
+        // Step 2 — chunk work that actually needs a Python run
+        const todoTasks = finalPrechecks
+            .filter((pc) => !pc._skip)
+            .map((pc) => ({ itemId: pc.itemId, npzPath: pc.fullPath }));
+
+        // Rough sizing: max 3 concurrent Python child batches for auto-valid-
+        // region regardless of what getWorkerCount returns, since each child
+        // is scipy+cv2 heavy (commit expensive).
+        const suggestedWorkers = Math.min(
+            Math.max(1, await getWorkerCount('auto-valid-region', 3)),
+            3
+        );
+        const concurrency = Math.min(suggestedWorkers, todoTasks.length || 1);
+        logger.info(
+            { operationId, items: items.length, todo: todoTasks.length, concurrency, batchSize: BATCH_FILES_PER_PROCESS },
+            'auto_valid_region_batch_started'
+        );
+
+        const taskChunks = chunked(todoTasks, BATCH_FILES_PER_PROCESS);
+
+        // Step 3 — run each Python batch under the semaphore. Use the raw
+        // semaphore (not withSemaphore) because each Promise represents a
+        // chunk returning many results, not one item's result.
+        const pythonSemaphore = new Semaphore(concurrency);
+        const chunkResults = await Promise.allSettled(
+            taskChunks.map((chunk) =>
+                pythonSemaphore.run(() => generateValidRegionBatch(chunk))
+            )
+        );
+
+        // Step 4 — flatten all per-chunk result arrays into a map by itemId
+        const resultById = new Map();
+        for (const settled of chunkResults) {
+            if (settled.status === 'rejected') {
+                // Entire python batch crashed — tag each chunk item with the error
+                continue;
+            }
+            for (const r of settled.value) {
+                if (r && r.itemId) {
+                    resultById.set(r.itemId, r);
+                }
+            }
+        }
+
+        // Step 5 — assemble final response in original input order
+        const processedResults = finalPrechecks.map((pc, idx) => {
+            if (pc.ok === false) {
+                // Precheck already failed
                 return {
-                    itemId: items[index].itemId,
+                    itemId: pc.itemId,
                     ok: false,
-                    error: result.reason?.message || "Processing failed"
+                    error: pc.error,
                 };
             }
+
+            const resObj = resultById.get(pc.itemId);
+            if (!resObj) {
+                // Didn't come back from Python at all (e.g. the whole chunk's
+                // process crashed before emitting NDJSON lines for it)
+                return {
+                    itemId: pc.itemId,
+                    ok: false,
+                    error: "auto-valid-region batch worker did not return a result for this item",
+                };
+            }
+            if (!resObj.ok) {
+                return {
+                    itemId: pc.itemId,
+                    ok: false,
+                    error: resObj.error,
+                };
+            }
+            return {
+                itemId: pc.itemId,
+                ok: true,
+                data: resObj.data,
+            };
         });
 
-        const succeeded = processedResults.filter(r => r.ok).length;
-        const failed = processedResults.filter(r => !r.ok).length;
+        const succeeded = processedResults.filter((r) => r.ok).length;
+        const failed = processedResults.length - succeeded;
+
+        logger.info(
+            { operationId, succeeded, failed, items: items.length },
+            'auto_valid_region_batch_complete'
+        );
 
         res.json({
             ok: true,
@@ -1490,8 +2027,8 @@ app.post("/api/auto-valid-region-batch", requireAuth, async (req, res) => {
             summary: {
                 total: items.length,
                 succeeded,
-                failed
-            }
+                failed,
+            },
         });
     } catch (error) {
         console.error(`[auto-valid-region-batch] Error:`, error);
@@ -1748,6 +2285,120 @@ app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
     } catch (err) {
         console.error("[render-and-save-collage-both] Error:", err);
         res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Export saved layout images as a ZIP archive
+app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
+    try {
+        const layoutIds = req.query.ids;
+        let targetLayouts = [];
+        
+        if (layoutIds && typeof layoutIds === 'string') {
+            // Export specific layouts by ID (comma-separated)
+            const ids = layoutIds.split(',').map(id => id.trim()).filter(Boolean);
+            const allLayouts = await getSavedLayouts();
+            targetLayouts = allLayouts.filter(l => ids.includes(l.id));
+        } else {
+            // Export all layouts
+            targetLayouts = await getSavedLayouts();
+        }
+        
+        if (targetLayouts.length === 0) {
+            return res.status(404).json({ ok: false, error: 'No layouts found to export' });
+        }
+        
+        // Set up ZIP response headers
+        const zipFilename = `saved-layouts-${new Date().toISOString().slice(0, 10)}.zip`;
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+        
+        // Create archiver instance
+        const archive = archiver('zip', { zlib: { level: 6 } });
+        
+        // Pipe archive data to response
+        archive.pipe(res);
+        
+        // Add each layout's rendered image to the ZIP
+        for (const layout of targetLayouts) {
+            try {
+                // Render the layout
+                const objects = layout.layout_json?.objects || {};
+                const flatObjects = [];
+                
+                if (objects.bag) {
+                    flatObjects.push({
+                        id: objects.bag.id,
+                        filepath: objects.bag.filepath,
+                        pixel_data_path: objects.bag.pixel_data_path,
+                        transform: {
+                            x: objects.bag.center?.x || 0,
+                            y: objects.bag.center?.y || 0,
+                            width: objects.bag.size?.width || 800,
+                            height: objects.bag.size?.height || 600,
+                            rotation: 0,
+                        },
+                        layer: objects.bag.layer || 0,
+                    });
+                }
+                
+                if (Array.isArray(objects.threats)) {
+                    for (const obj of objects.threats) {
+                        flatObjects.push({
+                            id: obj.id,
+                            filepath: obj.filepath,
+                            pixel_data_path: obj.pixel_data_path,
+                            transform: {
+                                x: obj.center?.x || 0,
+                                y: obj.center?.y || 0,
+                                width: obj.size?.width || 100,
+                                height: obj.size?.height || 100,
+                                rotation: obj.rotation || 0,
+                            },
+                            layer: obj.layer || 1,
+                        });
+                    }
+                }
+                
+                if (Array.isArray(objects['non-threats'])) {
+                    for (const obj of objects['non-threats']) {
+                        flatObjects.push({
+                            id: obj.id,
+                            filepath: obj.filepath,
+                            pixel_data_path: obj.pixel_data_path,
+                            transform: {
+                                x: obj.center?.x || 0,
+                                y: obj.center?.y || 0,
+                                width: obj.size?.width || 100,
+                                height: obj.size?.height || 100,
+                                rotation: obj.rotation || 0,
+                            },
+                            layer: obj.layer || 2,
+                        });
+                    }
+                }
+                
+                if (flatObjects.length > 0) {
+                    const enrichedObjects = await enrichObjectsWithPixelData(flatObjects);
+                    const pngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, "highenergy");
+                    
+                    const safeName = layout.name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+                    archive.append(pngBuffer, { name: `${safeName}.png` });
+                }
+            } catch (err) {
+                console.error(`[export] Failed to render layout ${layout.id}:`, err);
+                // Continue with other layouts even if one fails
+            }
+        }
+        
+// Finalize the ZIP archive
+        await archive.finalize();
+        
+    } catch (err) {
+        console.error('[export] Error:', err);
+        if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: String(err) });
+        }
     }
 });
 
