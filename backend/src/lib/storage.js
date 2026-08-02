@@ -22,10 +22,13 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = config.dataDir;
 const LEGACY_ITEMS_FILE = path.join(DATA_DIR, 'items.json');
 const CATALOG_FILE = path.join(DATA_DIR, 'catalog.json');
-const SAVED_LAYOUTS_FILE = path.join(DATA_DIR, 'savedLayouts.json');
+const SAVED_LAYOUTS_DIR = config.savedLayoutsDir;
+const SAVED_LAYOUTS_FILE = path.join(SAVED_LAYOUTS_DIR, 'savedLayouts.json');
+const SAVED_LAYOUTS_PARTITION_PREFIX = 'savedLayouts_';
 const CUSTOM_SUBCATEGORIES_FILE = path.join(DATA_DIR, 'customSubcategories.json');
 
 const DEFAULT_PARTITION_CAP = 5000;
+const SAVED_LAYOUTS_PARTITION_CAP = 5000; // Max 5k saved layouts per file
 
 // ---- Duplicate ID helpers ----
 
@@ -137,18 +140,18 @@ function acquireLock(filePath) {
 }
 
 async function writeJSONFileAtomic(filePath, data) {
-  // Acquire lock with a 15-second timeout to prevent permanent hangs
+  // Acquire lock with a 60-second timeout for very large payloads
+  // (100k saved layouts can take several seconds to JSON-serialize + write).
   let release;
   const lockPromise = acquireLock(filePath);
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`[storage] Lock timeout for ${filePath}`)), 15000)
+    setTimeout(() => reject(new Error(`[storage] Lock timeout for ${filePath}`)), 60000)
   );
 
   try {
     release = await Promise.race([lockPromise, timeoutPromise]);
   } catch (err) {
     console.error(err.message);
-    // Force-clear the stale lock so future writes can proceed
     writeLocks.delete(filePath);
     throw err;
   }
@@ -160,29 +163,131 @@ async function writeJSONFileAtomic(filePath, data) {
     const tmpPath = path.join(dir, `${base}_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}.tmp`);
 
     const jsonStr = JSON.stringify(data, null, 2);
+    const expectedBytes = Buffer.byteLength(jsonStr, 'utf8');
+
+    // If the payload is absurdly large for a JSON file (>= 1.5GB stringified),
+    // fail loudly instead of silently producing a truncated/0-byte file.
+    if (expectedBytes >= 1.5 * 1024 * 1024 * 1024) {
+      throw new Error(
+        `[storage] Refusing to write ${(expectedBytes / 1024 / 1024 / 1024).toFixed(2)} GB JSON to ${filePath}. Use partitioning.`
+      );
+    }
+
     await fs.writeFile(tmpPath, jsonStr, 'utf8');
+
+    // --- Guards against the "0-byte JSON" bug we hit on 2026-08-02 ---
+    // 1. fsync the tmp file so Windows actually flushes bytes to disk BEFORE rename.
+    //    On Windows, rename() can return before the NTFS metadata is committed,
+    //    and a concurrent read (or power loss / process crash mid-commit) can
+    //    leave the target file with 0 bytes even though tmp had content.
+    //    Node fs.writeFile does NOT implicitly call fsync.
+    const tmpHandle = await fs.open(tmpPath, 'r+');
+    try {
+      await tmpHandle.datasync();
+    } finally {
+      await tmpHandle.close();
+    }
+
+    // 2. Stat the tmp file after fsync and verify byte size actually matches.
+    //    Prevents: partial writes (disk full / quota / RAM pressure during
+    //    serialization that produced truncated buffers).
+    let stat;
+    try {
+      stat = await fs.stat(tmpPath);
+    } catch (statErr) {
+      throw new Error(`[storage] tmp file vanished after write+fsync: ${tmpPath}: ${statErr.message}`);
+    }
+    if (stat.size === 0) {
+      try { await fs.unlink(tmpPath); } catch (_) { /* ignore */ }
+      throw new Error(
+        `[storage] writeJSONFileAtomic aborted for ${filePath}: tmp file is 0 bytes. expected_bytes=${expectedBytes}.`
+      );
+    }
+    if (Math.abs(stat.size - expectedBytes) > Math.max(4, Math.floor(expectedBytes * 0.01))) {
+      // >1% off is suspicious — could be a BOM / whitespace diff, but if the
+      // delta is big we refuse to rename a clearly-truncated tmp.
+      try { await fs.unlink(tmpPath); } catch (_) { /* ignore */ }
+      throw new Error(
+        `[storage] writeJSONFileAtomic aborted for ${filePath}: tmp size=${stat.size} vs expected=${expectedBytes} (${(100 * Math.abs(stat.size - expectedBytes) / Math.max(1, expectedBytes)).toFixed(1)}% off).`
+      );
+    }
+
+    // 3. Best-effort pre-emptive preserve: keep a sidecar ".bak" copy of
+    //    whatever currently exists at the target, so we can heal on the
+    //    next read if rename somehow still produces corruption.
+    try {
+      const existing = await fs.stat(filePath);
+      if (existing && existing.size > 0) {
+        await fs.copyFile(filePath, `${filePath}.bak`);
+      }
+    } catch (_) {
+      // best-effort only; don't fail the write if .bak can't be made
+    }
+
     await fs.rename(tmpPath, filePath);
+
+    // 4. fsync the *directory* too on POSIX. On Windows this is a no-op
+    //    (fsync is per-file, directory handles reject it). We try and swallow.
+    try {
+      const dirHandle = await fs.open(dir, 'r');
+      try {
+        await dirHandle.datasync();
+      } catch (_) { /* expected on Windows */ }
+      finally {
+        await dirHandle.close();
+      }
+    } catch (_) { /* also fine */ }
   } finally {
     if (release) release();
   }
 }
 
 async function readJSONFile(filePath, defaultValue = []) {
-  try {
-    const raw = await fs.readFile(filePath, 'utf8');
+  const tryOpen = async (p) => {
+    const raw = await fs.readFile(p, 'utf8');
     const trimmed = raw.trim();
     if (!trimmed) {
-      // File exists but is empty — treat as default
-      return defaultValue;
+      throw new Error('EMPTY');
     }
     return JSON.parse(trimmed);
+  };
+
+  try {
+    return await tryOpen(filePath);
   } catch (err) {
     if (err.code === 'ENOENT') {
       return defaultValue;
     }
-    if (err instanceof SyntaxError) {
-      console.warn(`[storage] Corrupted JSON file: ${filePath}. Returning default.`);
-      return defaultValue;
+    if (err.message === 'EMPTY' || err instanceof SyntaxError) {
+      // Primary file is 0-byte or corrupted -> try the .bak sidecar that
+      // writeJSONFileAtomic keeps just before rename.
+      const bakPath = `${filePath}.bak`;
+      try {
+        const healed = await tryOpen(bakPath);
+        console.warn(
+          `[storage] Healed ${path.basename(filePath)} from .bak (${healed.length ?? healed.size ?? '?'} items) — previous atomic rename left 0-byte/corrupted primary.`
+        );
+        await writeJSONFileAtomic(filePath, healed);
+        return healed;
+      } catch (bakErr) {
+        if (bakErr.code !== 'ENOENT') {
+          console.warn(`[storage] .bak also unreadable for ${filePath}: ${bakErr.message}`);
+        }
+        if (err.message === 'EMPTY') {
+          console.warn(`[storage] Empty JSON file: ${filePath}. Returning default.`);
+        } else {
+          console.warn(`[storage] Corrupted JSON file: ${filePath}. Returning default.`);
+        }
+
+        try {
+          await writeJSONFileAtomic(filePath, defaultValue);
+          console.warn(`[storage] Rebuilt ${path.basename(filePath)} with safe default state.`);
+        } catch (writeErr) {
+          console.warn(`[storage] Failed to rebuild ${path.basename(filePath)} with default state: ${writeErr.message}`);
+        }
+
+        return defaultValue;
+      }
     }
     throw err;
   }
@@ -201,6 +306,10 @@ function getPartitionFilePath(categoryKey, partitionNum) {
   return path.join(DATA_DIR, `${categoryKey}_${partitionNum}.json`);
 }
 
+function getSavedLayoutsPartitionPath(partitionNum) {
+  return path.join(SAVED_LAYOUTS_DIR, `${SAVED_LAYOUTS_PARTITION_PREFIX}${partitionNum}.json`);
+}
+
 // ---- Catalog & Partition Initialization & Legacy Migration ----
 
 async function getCatalog() {
@@ -208,7 +317,8 @@ async function getCatalog() {
     categories: {
       bags: { activePartition: 1, partitionCap: DEFAULT_PARTITION_CAP, totalCount: 0, partitions: [1] },
       threats: { activePartition: 1, partitionCap: DEFAULT_PARTITION_CAP, totalCount: 0, partitions: [1] },
-      non_threats: { activePartition: 1, partitionCap: DEFAULT_PARTITION_CAP, totalCount: 0, partitions: [1] }
+      non_threats: { activePartition: 1, partitionCap: DEFAULT_PARTITION_CAP, totalCount: 0, partitions: [1] },
+      savedLayouts: { activePartition: 1, partitionCap: SAVED_LAYOUTS_PARTITION_CAP, totalCount: 0, partitions: [1] }
     }
   };
   return await readJSONFile(CATALOG_FILE, defaultCatalog);
@@ -223,6 +333,13 @@ async function ensureDataDir() {
     await fs.access(DATA_DIR);
   } catch {
     await fs.mkdir(DATA_DIR, { recursive: true });
+  }
+
+  // Ensure saved layouts directory exists
+  try {
+    await fs.access(SAVED_LAYOUTS_DIR);
+  } catch {
+    await fs.mkdir(SAVED_LAYOUTS_DIR, { recursive: true });
   }
 
   // Check if catalog exists
@@ -618,10 +735,23 @@ async function getSavedLayouts() {
   if (!savedLayoutsCacheDirty && savedLayoutsMemCache) {
     return savedLayoutsMemCache;
   }
-  const layouts = await readJSONFile(SAVED_LAYOUTS_FILE, []);
-  savedLayoutsMemCache = layouts;
+  
+  // Read from all partitions and merge
+  const catalog = await getCatalog();
+  const catMeta = catalog.categories.savedLayouts || { partitions: [1] };
+  const allLayouts = [];
+  
+  for (const pNum of catMeta.partitions) {
+    const partPath = getSavedLayoutsPartitionPath(pNum);
+    const layouts = await readJSONFile(partPath, []);
+    if (Array.isArray(layouts)) {
+      allLayouts.push(...layouts);
+    }
+  }
+  
+  savedLayoutsMemCache = allLayouts;
   savedLayoutsCacheDirty = false;
-  return layouts;
+  return allLayouts;
 }
 
 async function getSavedLayoutById(id) {
@@ -636,16 +766,54 @@ async function createSavedLayout(layoutData) {
   await prev;
   try {
     await ensureDataDir();
-    const layouts = await getSavedLayouts();
+    const catalog = await getCatalog();
+    const catMeta = catalog.categories.savedLayouts || { partitions: [1], activePartition: 1, partitionCap: SAVED_LAYOUTS_PARTITION_CAP };
+    
+    // Get current partition
+    const activePartition = catMeta.activePartition || 1;
+    const partPath = getSavedLayoutsPartitionPath(activePartition);
+    const layouts = await readJSONFile(partPath, []);
+    
     const newLayout = {
       id: layoutData.id || crypto.randomUUID(),
       created_at: new Date().toISOString(),
       ...layoutData,
     };
+    
     layouts.push(newLayout);
-    await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
-    savedLayoutsMemCache = layouts;
-    savedLayoutsCacheDirty = false;
+    
+    // Check if partition is full - if so, create new partition
+    if (layouts.length >= SAVED_LAYOUTS_PARTITION_CAP) {
+      console.log(`[storage] Saved layouts partition ${activePartition} full (${layouts.length}), creating partition ${activePartition + 1}`);
+      
+      // Write current partition
+      await writeJSONFileAtomic(partPath, layouts);
+      
+      // Create new partition
+      const newPartition = activePartition + 1;
+      const newPartPath = getSavedLayoutsPartitionPath(newPartition);
+      await writeJSONFileAtomic(newPartPath, []);
+      
+      // Update catalog
+      catMeta.activePartition = newPartition;
+      catMeta.partitions = [...(catMeta.partitions || [1]), newPartition];
+      catMeta.totalCount = (catMeta.totalCount || 0) + layouts.length;
+      await saveCatalog(catalog);
+      
+      // Invalidate cache
+      savedLayoutsMemCache = null;
+      savedLayoutsCacheDirty = true;
+    } else {
+      // Write to current partition
+      await writeJSONFileAtomic(partPath, layouts);
+      catMeta.totalCount = (catMeta.totalCount || 0) + 1;
+      await saveCatalog(catalog);
+      
+      // Update cache
+      savedLayoutsMemCache = layouts;
+      savedLayoutsCacheDirty = false;
+    }
+    
     return newLayout;
   } finally {
     resolveNext();
@@ -659,21 +827,68 @@ async function createSavedLayoutsBatch(layoutDataList) {
   await prev;
   try {
     await ensureDataDir();
-    const layouts = await getSavedLayouts();
+    
+    // Ensure saved layouts directory exists explicitly
+    try {
+      await fs.access(SAVED_LAYOUTS_DIR);
+    } catch {
+      console.log(`[storage] Creating saved layouts directory: ${SAVED_LAYOUTS_DIR}`);
+      await fs.mkdir(SAVED_LAYOUTS_DIR, { recursive: true });
+    }
+    
+    const catalog = await getCatalog();
+    const catMeta = catalog.categories.savedLayouts || { partitions: [1], activePartition: 1, partitionCap: SAVED_LAYOUTS_PARTITION_CAP };
+    
+    // Get current partition
+    let activePartition = catMeta.activePartition || 1;
+    let partPath = getSavedLayoutsPartitionPath(activePartition);
+    let layouts = await readJSONFile(partPath, []);
+    
     const now = new Date().toISOString();
     const created = [];
+    
     for (const layoutData of layoutDataList) {
+      if (layouts.length >= SAVED_LAYOUTS_PARTITION_CAP) {
+        console.log(`[storage] Saved layouts partition ${activePartition} full (${layouts.length}), creating partition ${activePartition + 1}`);
+        
+        // Write current partition
+        await writeJSONFileAtomic(partPath, layouts);
+        
+        // Create new partition
+        activePartition++;
+        partPath = getSavedLayoutsPartitionPath(activePartition);
+        
+        // Update catalog metadata in memory
+        if (!catMeta.partitions) catMeta.partitions = [1];
+        if (!catMeta.partitions.includes(activePartition)) {
+          catMeta.partitions.push(activePartition);
+        }
+        
+        // Reset for next partition
+        layouts = [];
+      }
+
       const newLayout = {
         id: layoutData.id || crypto.randomUUID(),
         created_at: layoutData.created_at || now,
         ...layoutData,
       };
+      
       layouts.push(newLayout);
       created.push(newLayout);
+      catMeta.totalCount = (catMeta.totalCount || 0) + 1;
     }
-    await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, layouts);
-    savedLayoutsMemCache = layouts;
-    savedLayoutsCacheDirty = false;
+    
+    // Write remaining layouts if any
+    await writeJSONFileAtomic(partPath, layouts);
+    catMeta.activePartition = activePartition;
+    catalog.categories.savedLayouts = catMeta;
+    await saveCatalog(catalog);
+    
+    // Invalidate cache
+    savedLayoutsMemCache = null;
+    savedLayoutsCacheDirty = true;
+    
     return created;
   } finally {
     resolveNext();
@@ -705,11 +920,30 @@ async function deleteSavedLayout(id) {
   savedLayoutsMutex = new Promise(r => { resolveNext = r; });
   await prev;
   try {
-    const layouts = await getSavedLayouts();
-    const filteredLayouts = layouts.filter(layout => layout.id !== id);
-    await writeJSONFileAtomic(SAVED_LAYOUTS_FILE, filteredLayouts);
-    savedLayoutsMemCache = filteredLayouts;
-    savedLayoutsCacheDirty = false;
+    const catalog = await getCatalog();
+    const catMeta = catalog.categories.savedLayouts || { partitions: [1] };
+    
+    // Find and delete from the correct partition
+    let found = false;
+    for (const pNum of catMeta.partitions) {
+      const partPath = getSavedLayoutsPartitionPath(pNum);
+      const layouts = await readJSONFile(partPath, []);
+      const filteredLayouts = layouts.filter(layout => layout.id !== id);
+      
+      if (filteredLayouts.length !== layouts.length) {
+        await writeJSONFileAtomic(partPath, filteredLayouts);
+        found = true;
+        catMeta.totalCount = Math.max(0, (catMeta.totalCount || 0) - 1);
+        await saveCatalog(catalog);
+        break;
+      }
+    }
+    
+    // Invalidate cache
+    savedLayoutsMemCache = null;
+    savedLayoutsCacheDirty = true;
+    
+    return found;
   } finally {
     resolveNext();
   }

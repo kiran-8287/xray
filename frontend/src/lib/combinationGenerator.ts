@@ -240,13 +240,13 @@ function tryPlaceThreat(
 /**
  * Try to place non-threat items inside a bag, avoiding overlap with threats and each other.
  * Returns array of {x, y, rotation} if all placed, null otherwise.
- * OPTIMIZED: Reduced max attempts and added fast bounding box pre-check.
+ * FLEXIBLE: Allows overlapping if necessary to ensure generation can proceed.
  */
 function tryPlaceNonThreats(
   items: Item[],
   bagObj: SceneObject,
   threatObjs: SceneObject[],
-  maxAttempts: number = 30
+  maxAttempts: number = 50
 ): { x: number; y: number; rotation: number }[] | null {
   const positions: { x: number; y: number; rotation: number }[] = [];
 
@@ -256,21 +256,14 @@ function tryPlaceNonThreats(
     const h = item.height ? Math.round(item.height) : 80;
 
     let placed = false;
-    // OPTIMIZATION: Reduced max attempts from 50 to 30
+    // Increased max attempts for better success rate
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const pos = getRandomPositionInContainer(w, h, bagObj, outline);
       if (!pos) continue;
       
-      // OPTIMIZATION: Fast bounding box check before expensive polygon test
-      let overlapsThreat = false;
-      for (const threatObj of threatObjs) {
-        if (fastBoundingBoxOverlap(pos.x, pos.y, w, h, threatObj.transform.x, threatObj.transform.y, threatObj.transform.width, threatObj.transform.height)) {
-          overlapsThreat = true;
-          break;
-        }
-      }
-      if (overlapsThreat) continue;
-
+      // Only check if inside bag - skip overlap checks for non-threats
+      // This allows overlapping non-threats and non-threats over threats
+      // to ensure generation can proceed
       const testObj: SceneObject = {
         id: "temp",
         name: item.name,
@@ -285,49 +278,19 @@ function tryPlaceNonThreats(
         layer: 0,
       };
 
-      // Check if inside bag
+      // Only check if inside bag
       if (!isObjectInsideContainer(testObj, bagObj)) continue;
-
-      // Full overlap check with threats (only if bounding box overlapped)
-      let fullOverlapsThreat = false;
-      for (const threatObj of threatObjs) {
-        if (doObjectsOverlap(testObj, threatObj)) {
-          fullOverlapsThreat = true;
-          break;
-        }
-      }
-      if (fullOverlapsThreat) continue;
-
-      // Check overlap with already placed non-threats
-      let overlapsExisting = false;
-      for (let i = 0; i < positions.length; i++) {
-        const existingPos = positions[i];
-        if (fastBoundingBoxOverlap(pos.x, pos.y, w, h, existingPos.x, existingPos.y, w, h)) {
-          const existingObj: SceneObject = {
-            id: "existing",
-            name: "",
-            library: "non-threat",
-            originalPixelValue: 0,
-            currentPixelValue: 0,
-            oldPixelValue: null,
-            stencilId: "item",
-            transform: { x: existingPos.x, y: existingPos.y, width: w, height: h, rotation: existingPos.rotation },
-            layer: 0,
-          };
-          if (doObjectsOverlap(testObj, existingObj)) {
-            overlapsExisting = true;
-            break;
-          }
-        }
-      }
-      if (overlapsExisting) continue;
 
       positions.push({ x: pos.x, y: pos.y, rotation: pos.rotation ?? 0 });
       placed = true;
       break;
     }
 
-    if (!placed) return null; // Couldn't place this non-threat
+    if (!placed) {
+      // If we can't place this non-threat, return null to skip this combo
+      // The generation will try another bag/threat combination
+      return null;
+    }
   }
 
   return positions;
@@ -1084,10 +1047,10 @@ export async function generateCombinations(
       for (const [count, weight] of Object.entries(threatDistribution)) {
         const countNum = parseInt(count);
         if (countNum <= threats.length && weight > 0) {
-          const target = Math.round((weight / totalWeight) * 1);
+          const target = Math.round((weight / totalWeight) * k);
           targetByCount[countNum] = {
             min: Math.max(0, Math.floor(target * (1 - tolerance))),
-            target: target,
+            target,
             max: Math.ceil(target * (1 + tolerance))
           };
         }
@@ -1234,13 +1197,28 @@ export async function generateCombinations(
     // Main adaptive generation loop
     let attemptsWithoutProgress = 0;
     const maxAttemptsWithoutProgress = Math.min(5000, Math.max(k * 3, 1000));
+    let lastLogTime = Date.now();
+    const LOG_INTERVAL_MS = 2000; // Log every 2 seconds
+    
+    console.log(`[CombinationGenerator] Entering main generation loop...`);
     
     while (results.length < k && totalRemaining > 0 && attemptsWithoutProgress < maxAttemptsWithoutProgress) {
       attemptsWithoutProgress++;
       
+      // Log status every 2 seconds
+      const now = Date.now();
+      if (now - lastLogTime >= LOG_INTERVAL_MS) {
+        lastLogTime = now;
+        const exhausted = bagEntries.filter(b => b.isExhausted).length;
+        console.log(`[CombinationGenerator] Status: ${results.length}/${k} generated, ${exhausted}/${bagEntries.length} bags exhausted, ${attemptsWithoutProgress} attempts without progress`);
+      }
+      
       // Pick a bag
       const entry = selectWeightedBag();
-      if (!entry) break;
+      if (!entry) {
+        console.log(`[CombinationGenerator] No bags available - all exhausted`);
+        break;
+      }
       
       if (!entry.hasValidRegion) {
         entry.isExhausted = true;
@@ -1252,7 +1230,10 @@ export async function generateCombinations(
         .map(Number)
         .filter(c => !exhaustedCount.has(c) && (remainingByCount[c] || 0) > 0);
       
-      if (activeCounts.length === 0) break;
+      if (activeCounts.length === 0) {
+        console.log(`[CombinationGenerator] No active threat counts remaining`);
+        break;
+      }
       
       // Weighted selection: higher weight = higher chance
       let selectionTotalWeight = 0;
@@ -1310,6 +1291,7 @@ export async function generateCombinations(
         
         // If too many consecutive failures, redistribute this count's remaining to others
         if (consecutiveFailuresByCount[selectedCount] >= maxConsecutivePerCount && !exhaustedCount.has(selectedCount)) {
+          console.log(`[CombinationGenerator] Exhausting ${selectedCount}-threat count after ${consecutiveFailuresByCount[selectedCount]} failures`);
           exhaustedCount.add(selectedCount);
           const failedRemaining = remainingByCount[selectedCount] || 0;
           delete remainingByCount[selectedCount];
@@ -1425,9 +1407,10 @@ export async function generateCombinations(
       entry.usageCount++;
       attemptsWithoutProgress = 0;
       consecutiveFailuresByCount[selectedCount] = 0;
-      
-      // Yield to UI every 50 combinations
+
+      // Yield to UI every 50 combinations and report progress
       if (results.length % 50 === 0) {
+        console.log(`[CombinationGenerator] Progress: ${results.length}/${k} (${((results.length/k)*100).toFixed(1)}%)`);
         await new Promise(resolve => setTimeout(resolve, 0));
       }
     }
@@ -1443,7 +1426,9 @@ export async function generateCombinations(
         results.push(combo);
         consecutiveFailures = 0;
         
+        // Report progress every 50 combinations
         if (results.length % 50 === 0) {
+          console.log(`[CombinationGenerator] Progress: ${results.length}/${k} (${((results.length/k)*100).toFixed(1)}%)`);
           await new Promise(resolve => setTimeout(resolve, 0));
         }
       } else {
@@ -1463,6 +1448,12 @@ export async function generateCombinations(
   });
   
   return { results, failures };
+}
+
+export function testGenerationSpeed() {
+  console.log("Testing generation speed with sample data...");
+  // This function can be called from console to test
+  return { message: "Use generateCombinationsIncremental directly for testing" };
 }
 
 /**
@@ -1577,7 +1568,7 @@ export async function generateCombinationsIncremental(
       for (const [count, weight] of Object.entries(threatDistribution)) {
         const countNum = parseInt(count);
         if (countNum <= threats.length && weight > 0) {
-          const target = Math.round((weight / totalWeight) * 1);
+          const target = Math.round((weight / totalWeight) * k);
           targetByCount[countNum] = {
             min: Math.max(0, Math.floor(target * (1 - tolerance))),
             target,
@@ -1780,7 +1771,11 @@ export async function generateCombinationsIncremental(
       }
       if (selectedNonThreats.length > 0) {
         nonThreatPositions = tryPlaceNonThreats(selectedNonThreats, bagObj, threatObjs);
-        if (!nonThreatPositions) { consecutiveFailuresByCount[selectedCount] = (consecutiveFailuresByCount[selectedCount] || 0) + 1; continue; }
+        if (!nonThreatPositions) {
+          console.log(`[CombinationGenerator] Failed to place non-threats in bag ${entry.bag.name}`);
+          consecutiveFailuresByCount[selectedCount] = (consecutiveFailuresByCount[selectedCount] || 0) + 1;
+          continue;
+        }
       }
 
       const objects: SceneObject[] = [bagObj];

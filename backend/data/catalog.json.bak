@@ -1,0 +1,38 @@
+{
+  "categories": {
+    "bags": {
+      "activePartition": 1,
+      "partitionCap": 5000,
+      "totalCount": 1000,
+      "partitions": [
+        1
+      ]
+    },
+    "threats": {
+      "activePartition": 1,
+      "partitionCap": 5000,
+      "totalCount": 400,
+      "partitions": [
+        1
+      ]
+    },
+    "non_threats": {
+      "activePartition": 1,
+      "partitionCap": 5000,
+      "totalCount": 600,
+      "partitions": [
+        1
+      ]
+    },
+    "savedLayouts": {
+      "partitions": [
+        1,
+        2,
+        3
+      ],
+      "activePartition": 3,
+      "partitionCap": 5000,
+      "totalCount": 11500
+    }
+  }
+}

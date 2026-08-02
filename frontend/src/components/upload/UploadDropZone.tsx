@@ -10,7 +10,14 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      onFilesSelected(Array.from(e.target.files));
+      let files = Array.from(e.target.files);
+      // If it's a folder upload, filter out unsupported files since we can't rely on the OS `accept` attribute
+      if (e.target.id === "folderInput") {
+        files = files.filter(f => isSupportedFile(f.name));
+      }
+      if (files.length > 0) {
+        onFilesSelected(files);
+      }
     }
   };
 
@@ -39,7 +46,10 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       lower.endsWith(".dump.pgm") ||
       lower.endsWith(".pgm") ||
       lower.endsWith(".tip") ||
-      lower.endsWith(".dump")
+      lower.endsWith(".dump") ||
+      lower.endsWith(".png") ||
+      lower.endsWith(".jpg") ||
+      lower.endsWith(".jpeg")
     );
   };
 
@@ -95,7 +105,10 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
     }
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      onFilesSelected(Array.from(e.dataTransfer.files));
+      const files = Array.from(e.dataTransfer.files).filter(f => isSupportedFile(f.name));
+      if (files.length > 0) {
+        onFilesSelected(files);
+      }
     }
   };
 
@@ -122,7 +135,7 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       <input
         id="fileInput"
         type="file"
-        accept=".pgm,.tip,.dump,.png,.jpg,.jpeg,*"
+        accept=".pgm,.tip,.dump,.png,.jpg,.jpeg"
         multiple
         className="hidden"
         onChange={handleFileChange}
@@ -130,14 +143,9 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       <input
         id="folderInput"
         type="file"
-        accept=".pgm,.tip,.dump,.png,.jpg,.jpeg,*"
         multiple
         // @ts-ignore webkitdirectory
-        webkitdirectory=""
-        // @ts-ignore directory
-        directory=""
-        // @ts-ignore mozdirectory
-        mozdirectory=""
+        webkitdirectory="true"
         className="hidden"
         onChange={handleFileChange}
       />

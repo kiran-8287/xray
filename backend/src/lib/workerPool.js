@@ -16,9 +16,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Resolve the worker script path
 const workerScriptPath = path.join(__dirname, "rawFileWorker.js");
 
-// Controls how many files are sent per Python process spawn
-// Set to 1 to process one file per Python process, preventing memory accumulation
-const BATCH_SIZE = 1;
+// Controls how many raw files are sent per Python process spawn.
+//
+// MEMORY / PERF TRADEOFF
+// ----------------------
+// Each Python child imports numpy + PIL (and dumpread/tipread modules) once,
+// costing ~200–350 MB of commit regardless of the number of files it then
+// processes.  Per-file work (reading bytes + png/npz save + small vectorized
+// numpy ops) adds only ~2 MB/child of transient peak.
+//
+// Therefore:
+//   * BATCH_SIZE=1  =>  pay the 200–350 MB import cost PER FILE.
+//                        100 files  →  100 spawns  →  ~20–35 GB commit transient
+//   * BATCH_SIZE=20 =>  pay import cost once per 20 files.
+//                        100 files  →    5 spawns  →  ~1–1.75 GB commit  (≈20× less!)
+//
+// The constant 20 keeps per-process runtime bounded (protects against any
+// minor leak within process_raw_file.py) while still giving ~20× reduction
+// in interpreter-spawn overhead and commit pressure.
+const BATCH_SIZE = 20;
 
 /**
  * WorkerPool - Manages a fixed pool of Worker Threads

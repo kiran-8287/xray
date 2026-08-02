@@ -14,13 +14,14 @@ import ConfirmModal from "../components/common/ConfirmModal";
 import type { GenerationProgress, GenerationState, AutoSaveStatus, AutoSaveMode } from "../types/generation";
 
 const ITEMS_PER_PAGE = GenerationService.ITEMS_PER_PAGE;
+const MAX_CONCURRENT_RENDERS = 2; // Limit concurrent image rendering to prevent backend overload
 
 const toastStyles = `
-  @keyframes slide-down {
-    from { transform: translate(-50%, -20px); opacity: 0; }
+  @keyframes slide-up {
+    from { transform: translate(-50%, 20px); opacity: 0; }
     to { transform: translate(-50%, 0); opacity: 1; }
   }
-  .animate-slide-down { animation: slide-down 0.25s ease-out; }
+  .animate-slide-up { animation: slide-up 0.25s ease-out; }
 `;
 
 type CollageToast = { id: string; type: "info"; message: string };
@@ -434,58 +435,82 @@ export default function CollagePage() {
     setSaveImageState({ status: "saving", message: "Rendering high & low energy images...", imageUrl: null });
 
     try {
-      if (dirHandle) {
-        const response = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            objects: selectedCombination.objects,
-            name: selectedCombination.id,
-          }),
-        }, LONG_REQUEST_TIMEOUT_MS, 1);
-
-        if (!response.ok) {
-          throw new Error("Failed to render images");
+      // Concurrency-limited image rendering
+      const semaphore = { current: 0, queue: [] as (() => void)[] };
+      const acquire = () => new Promise<void>((resolve) => {
+        if (semaphore.current < MAX_CONCURRENT_RENDERS) {
+          semaphore.current++;
+          resolve();
+        } else {
+          semaphore.queue.push(resolve);
         }
-
-        const data = await response.json();
-        const safeName = selectedCombination.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
-        const filename = `${safeName}.png`;
-
-        const highUrl = `${API_BASE_URL}${data.high_url}`;
-        const lowUrl = `${API_BASE_URL}${data.low_url}`;
-
-        const [highRes, lowRes] = await Promise.all([fetch(highUrl), fetch(lowUrl)]);
-        const [highBlob, lowBlob] = await Promise.all([highRes.blob(), lowRes.blob()]);
-
-        await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
-
-        setSaveImageState({
-          status: "success",
-          message: `High & low energy images saved to selected folder!`,
-          imageUrl: data.high_url,
-        });
-      } else {
-        const response = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            objects: selectedCombination.objects,
-            name: selectedCombination.id,
-            outputPath: outputPath || undefined,
-          }),
-        }, LONG_REQUEST_TIMEOUT_MS, 1);
-
-        if (!response.ok) {
-          throw new Error("Failed to render images");
+      });
+      const release = () => {
+        semaphore.current--;
+        if (semaphore.queue.length > 0 && semaphore.current < MAX_CONCURRENT_RENDERS) {
+          const next = semaphore.queue.shift()!;
+          semaphore.current++;
+          next();
         }
+      };
 
-        const data = await response.json();
-        setSaveImageState({
-          status: "success",
-          message: `High & low energy images saved!`,
-          imageUrl: data.high_url,
-        });
+      await acquire();
+      try {
+        if (dirHandle) {
+          const response = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              objects: selectedCombination.objects,
+              name: selectedCombination.id,
+            }),
+          }, LONG_REQUEST_TIMEOUT_MS, 1);
+
+          if (!response.ok) {
+            throw new Error("Failed to render images");
+          }
+
+          const data = await response.json();
+          const safeName = selectedCombination.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+          const filename = `${safeName}.png`;
+
+          const highUrl = `${API_BASE_URL}${data.high_url}`;
+          const lowUrl = `${API_BASE_URL}${data.low_url}`;
+
+          const [highRes, lowRes] = await Promise.all([fetch(highUrl), fetch(lowUrl)]);
+          const [highBlob, lowBlob] = await Promise.all([highRes.blob(), lowRes.blob()]);
+
+          await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
+
+          setSaveImageState({
+            status: "success",
+            message: `High & low energy images saved to selected folder!`,
+            imageUrl: data.high_url,
+          });
+        } else {
+          const response = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              objects: selectedCombination.objects,
+              name: selectedCombination.id,
+              outputPath: outputPath || undefined,
+            }),
+          }, LONG_REQUEST_TIMEOUT_MS, 1);
+
+          if (!response.ok) {
+            throw new Error("Failed to render images");
+          }
+
+          const data = await response.json();
+          setSaveImageState({
+            status: "success",
+            message: `High & low energy images saved!`,
+            imageUrl: data.high_url,
+          });
+        }
+      } finally {
+        release();
       }
     } catch (err) {
       console.error("Error saving images:", err);
@@ -549,6 +574,7 @@ export default function CollagePage() {
         setSelectedThreats([]);
         setSelectedOthers([]);
         setBufferCount(0);
+        setSavedCount(0);
         try {
           sessionStorage.removeItem("collageCombinations");
           sessionStorage.removeItem("collageFailures");
@@ -558,6 +584,11 @@ export default function CollagePage() {
         } catch (e) {
           console.error("Error clearing storage after bulk save:", e);
         }
+        
+        // Reset bulk save state to idle after showing success message
+        setTimeout(() => {
+          setBulkSaveState({ status: "idle", message: "", savedCount: 0 });
+        }, 3000);
       } else {
         setBulkSaveState({
           status: "error",
@@ -582,6 +613,25 @@ export default function CollagePage() {
     setBulkSaveState({ status: "saving", message: "Saving all workspaces...", savedCount: 0 });
     let savedCount = 0;
     let failedCount = 0;
+
+    // Concurrency limiter for image rendering
+    const semaphore = { current: 0, queue: [] as (() => void)[] };
+    const acquire = () => new Promise<void>((resolve) => {
+      if (semaphore.current < MAX_CONCURRENT_RENDERS) {
+        semaphore.current++;
+        resolve();
+      } else {
+        semaphore.queue.push(resolve);
+      }
+    });
+    const release = () => {
+      semaphore.current--;
+      if (semaphore.queue.length > 0 && semaphore.current < MAX_CONCURRENT_RENDERS) {
+        const next = semaphore.queue.shift()!;
+        semaphore.current++;
+        next();
+      }
+    };
 
     try {
       while (combinations.length > 0 || bufferCount > 0 || isGenerating) {
@@ -660,29 +710,35 @@ export default function CollagePage() {
           }, LONG_REQUEST_TIMEOUT_MS, 1);
           if (response.ok) {
             savedCount++;
-            try {
-              const renderRes = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  objects: comb.objects,
-                  name: comb.id,
-                  outputPath: dirHandle ? undefined : (outputPath || undefined),
-                }),
-              }, LONG_REQUEST_TIMEOUT_MS, 1);
-              if (dirHandle && renderRes.ok) {
-                const renderData = await renderRes.json();
-                const safeName = comb.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
-                const filename = `${safeName}.png`;
-                const [highRes, lowRes] = await Promise.all([
-                  fetch(`${API_BASE_URL}${renderData.high_url}`),
-                  fetch(`${API_BASE_URL}${renderData.low_url}`)
-                ]);
-                const [highBlob, lowBlob] = await Promise.all([highRes.blob(), lowRes.blob()]);
-                await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
+            // Render images with concurrency limit
+            if (pendingSaveAction.saveImages) {
+              await acquire();
+              try {
+                const renderRes = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    objects: comb.objects,
+                    name: comb.id,
+                    outputPath: dirHandle ? undefined : (outputPath || undefined),
+                  }),
+                }, LONG_REQUEST_TIMEOUT_MS, 1);
+                if (dirHandle && renderRes.ok) {
+                  const renderData = await renderRes.json();
+                  const safeName = comb.id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+                  const filename = `${safeName}.png`;
+                  const [highRes, lowRes] = await Promise.all([
+                    fetch(`${API_BASE_URL}${renderData.high_url}`),
+                    fetch(`${API_BASE_URL}${renderData.low_url}`)
+                  ]);
+                  const [highBlob, lowBlob] = await Promise.all([highRes.blob(), lowRes.blob()]);
+                  await saveBlobsToFolder(highBlob, lowBlob, filename, dirHandle);
+                }
+              } catch (err) {
+                console.error(`Error saving images for ${comb.id}:`, err);
+              } finally {
+                release();
               }
-            } catch (err) {
-              console.error(`Error saving images for ${comb.id}:`, err);
             }
           } else {
             failedCount++;
@@ -708,6 +764,7 @@ export default function CollagePage() {
       setSelectedThreats([]);
       setSelectedOthers([]);
       setBufferCount(0);
+      setSavedCount(0);
       try {
         sessionStorage.removeItem("collageCombinations");
         sessionStorage.removeItem("collageFailures");
@@ -717,6 +774,11 @@ export default function CollagePage() {
       } catch (e) {
         console.error("Error clearing storage after bulk save:", e);
       }
+      
+      // Reset bulk save state to idle after showing success message
+      setTimeout(() => {
+        setBulkSaveState({ status: "idle", message: "", savedCount: 0 });
+      }, 3000);
     } catch (err) {
       console.error(err);
       setBulkSaveState({
@@ -772,8 +834,9 @@ export default function CollagePage() {
   const totalPending = combinations.length + bufferCount;
   const totalRequested = generationProgress?.total || 0;
   const totalGenerated = generationProgress?.generated || 0;
+  // Only show auto-save banner while there are still combinations to process or generation is active
   const showAutoSaveBanner = autoSaveStatus?.enabled && (
-    isGenerating || totalPending > 0 || (generationProgress?.total ?? 0) > 0 || autoSaveStatus.queued > 0 || autoSaveStatus.pagesCompleted > 0
+    isGenerating || totalPending > 0
   );
 
   return (
@@ -1079,11 +1142,15 @@ export default function CollagePage() {
       {combinations.length === 0 && failures.length === 0 && !isGenerating ? (
         <div className="text-center py-32 px-12 bg-panel rounded-2xl border border-border shadow-card">
           <div className="w-20 h-20 bg-surface rounded-full flex items-center justify-center mx-auto mb-5 border-2 border-border">
-            <Grid3X3 size={34} className="text-muted/30" />
+            <CheckCircle2 size={34} className="text-emerald-500" />
           </div>
-          <h3 className="text-xl font-bold text-ink mb-2 font-heading">No scanned bags selected</h3>
+          <h3 className="text-xl font-bold text-ink mb-2 font-heading">
+            {autoSaveStatus?.enabled ? "All combinations saved!" : "No scanned bags selected"}
+          </h3>
           <p className="text-base text-muted mb-8 max-w-md mx-auto leading-relaxed">
-            Please go to the Library page and select bags and objects to generate combinations.
+            {autoSaveStatus?.enabled
+              ? `All ${(autoSaveStatus.queued || totalRequested).toLocaleString()} combinations have been saved successfully.`
+              : "Please go to the Library page and select bags and objects to generate combinations."}
           </p>
           <button
             onClick={handleNavigateToLibrary}
@@ -1106,10 +1173,10 @@ export default function CollagePage() {
                 </p>
               )}
               <p>
-                {totalGenerated > 0
-                  ? `${combinations.length.toLocaleString()} showing now${bufferCount > 0 ? ` · ${bufferCount.toLocaleString()} in buffer` : ""}${savedCount > 0 ? ` · ${savedCount.toLocaleString()} already saved` : ""}${isGenerating ? ` · generating ${totalGenerated.toLocaleString()}/${totalRequested.toLocaleString()}` : ""}`
-                  : isGenerating
-                  ? `Generating ${generationProgress?.generated || 0} / ${generationProgress?.total || 0} combinations...`
+                {isGenerating
+                  ? `Generating ${totalGenerated.toLocaleString()}/${totalRequested.toLocaleString()} combinations...`
+                  : totalGenerated > 0
+                  ? `${combinations.length.toLocaleString()} showing now${bufferCount > 0 ? ` · ${bufferCount.toLocaleString()} in buffer` : ""}${savedCount > 0 ? ` · ${savedCount.toLocaleString()} saved` : (autoSaveStatus?.queued ?? 0) > 0 ? ` · ${autoSaveStatus!.queued.toLocaleString()} saved` : ""}`
                   : "0 combinations generated"}
               </p>
             </div>
@@ -1230,11 +1297,11 @@ export default function CollagePage() {
       )}
 
       {toasts.length > 0 && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 pointer-events-none">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 pointer-events-none">
           {toasts.map((t) => (
             <div
               key={t.id}
-              className="flex items-center gap-2 px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 shadow-lg text-sm font-medium animate-slide-down"
+              className="flex items-center gap-2 px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 shadow-lg text-sm font-medium animate-slide-up"
             >
               <span>{t.message}</span>
             </div>

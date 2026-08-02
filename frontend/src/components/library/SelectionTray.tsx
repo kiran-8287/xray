@@ -66,6 +66,31 @@ export default function SelectionTray({
   incompleteSelectionMessage,
   onDeleteSelected,
 }: SelectionTrayProps) {
+  // =========================================================================
+  // NOTE: All hooks MUST be declared at the TOP LEVEL of the component body
+  // (never inside conditionals, .map, inline IIFEs, or the `return` block).
+  // A previous version put useState/useRef/useEffect for the k-input inside
+  // an inline IIFE in the JSX — that caused React's internal "Expected
+  // static flag was missing" crash because hook positions shifted on
+  // re-renders when the short-circuit guard `if (selectedCount===0) return`
+  // hit differently.
+  // =========================================================================
+
+  const [kDraft, setKDraft] = useState<string>(String(kValue));
+  const kInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setKDraft(String(kValue));
+  }, [kValue]);
+
+  useEffect(() => {
+    const el = kInputRef.current;
+    if (!el) return;
+    const len = kDraft.length || 1;
+    const width = Math.min(18, 6 + len * 1);
+    el.style.width = `${width}ch`;
+  }, [kDraft]);
+
   if (selectedCount === 0) return null;
 
   const updateThreatDistribution = (key: number, raw: string) => {
@@ -80,18 +105,22 @@ export default function SelectionTray({
     setNonThreatDistribution({ ...nonThreatDistribution, [key]: Math.min(val, 100) });
   };
 
-  // Calculate total percentages
+  const commitKDraft = (raw: string) => {
+    const digits = raw.replace(/\D/g, "");
+    const val = digits === "" ? 1 : Math.min(1_000_000, Math.max(1, parseInt(digits, 10) || 1));
+    setKValue(val);
+    setKDraft(String(val));
+  };
+
   const threatDistributionTotal = Object.keys(threatDistribution).reduce((sum, k) => sum + (threatDistribution[parseInt(k)] || 0), 0);
   const nonThreatDistributionTotal = Object.keys(nonThreatDistribution).reduce((sum, k) => sum + (nonThreatDistribution[parseInt(k)] || 0), 0);
-  
-  // Check if distributions are valid (must total 100% when there are selected items)
+
   const hasValidThreatDistribution = selectedCount === 0 || threatDistributionTotal === 100;
   const hasValidNonThreatDistribution = selectedCount === 0 || selectedNonThreatCount === 0 || nonThreatDistributionTotal === 100;
   const hasValidDistribution = hasValidThreatDistribution && hasValidNonThreatDistribution;
 
   return (
     <div className="flex-shrink-0 bg-panel/95 backdrop-blur-sm border-t border-border px-6 py-3 flex items-center gap-4 shadow-[0_-4px_20px_rgba(27,35,51,0.08)] z-30">
-      {/* Left: Selection count and text */}
       <span className="bg-accent text-white text-xs font-bold px-2.5 py-1 rounded-full">
         {selectedCount}
       </span>
@@ -99,76 +128,43 @@ export default function SelectionTray({
         item{selectedCount !== 1 ? "s" : ""} selected
       </span>
 
-      {/* Middle: Controls */}
       <div className="flex items-center gap-3 ml-auto flex-wrap">
-        {/* K value input */}
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-muted uppercase tracking-wider">Generate</span>
         </div>
-        {(() => {
-          const [draft, setDraft] = useState(String(kValue));
-          const inputRef = useRef<HTMLInputElement>(null);
-
-          // Keep draft in sync when kValue changes externally (e.g., localStorage init)
-          useEffect(() => {
-            setDraft(String(kValue));
-          }, [kValue]);
-
-          // Auto-resize input width based on content length
-          useEffect(() => {
-            const el = inputRef.current;
-            if (!el) return;
-            const len = draft.length || 1;
-            // Base width ~6ch, grow ~1ch per digit, capped at ~18ch
-            const width = Math.min(18, 6 + len * 1);
-            el.style.width = `${width}ch`;
-          }, [draft]);
-
-          const commit = (raw: string) => {
-            const digits = raw.replace(/\D/g, "");
-            const val = digits === "" ? 1 : Math.min(1_000_000, Math.max(1, parseInt(digits, 10) || 1));
-            setKValue(val);
-            setDraft(String(val));
-          };
-
-          return (
-            <input
-              ref={inputRef}
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={draft}
-              onChange={(e) => {
-                // Strip non-digits immediately so user can only type numbers
-                const sanitized = e.target.value.replace(/\D/g, "");
-                // Enforce 1,000,000 cap immediately while typing
-                if (sanitized === "") {
-                  setDraft("");
-                } else {
-                  const num = parseInt(sanitized, 10);
-                  if (num > 1_000_000) {
-                    setDraft("1000000");
-                  } else {
-                    setDraft(sanitized);
-                  }
-                }
-              }}
-              onBlur={() => commit(draft)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  commit(draft);
-                  (e.target as HTMLInputElement).blur();
-                } else if (e.key === "Escape") {
-                  setDraft(String(kValue));
-                  (e.target as HTMLInputElement).blur();
-                }
-              }}
-              className="bg-surface border border-border rounded-xl px-3 py-1.5 text-sm text-ink font-mono text-center focus:outline-none focus:border-accent inline-block"
-              style={{ width: `${Math.min(18, 6 + (draft.length || 1) * 1)}ch` }}
-            />
-          );
-        })()}
+        <input
+          ref={kInputRef}
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={kDraft}
+          onChange={(e) => {
+            const sanitized = e.target.value.replace(/\D/g, "");
+            if (sanitized === "") {
+              setKDraft("");
+            } else {
+              const num = parseInt(sanitized, 10);
+              if (num > 1_000_000) {
+                setKDraft("1000000");
+              } else {
+                setKDraft(sanitized);
+              }
+            }
+          }}
+          onBlur={() => commitKDraft(kDraft)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitKDraft(kDraft);
+              (e.target as HTMLInputElement).blur();
+            } else if (e.key === "Escape") {
+              setKDraft(String(kValue));
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className="bg-surface border border-border rounded-xl px-3 py-1.5 text-sm text-ink font-mono text-center focus:outline-none focus:border-accent inline-block"
+          style={{ width: `${Math.min(18, 6 + (kDraft.length || 1) * 1)}ch` }}
+        />
         <span className="text-xs text-muted">unique combinations</span>
 
         <div className="w-px h-6 bg-border mx-1" />
