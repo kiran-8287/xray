@@ -1,5 +1,0 @@
-phase,chainsExecuted,chainsSuccessful,chainsFailed,breakingDetected,duration_ms
-warmup,285,0,285,false,30411
-ramp,4080,0,4080,false,120229
-sustained,6160,0,6160,false,182313
-breaking,140,0,140,true,5582
