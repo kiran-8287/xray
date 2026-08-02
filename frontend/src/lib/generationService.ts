@@ -54,6 +54,17 @@ let lastAutoSaveTime = 0; // Track when last auto-save completed
 let totalGeneratedCount = 0; // Total combinations generated so far
 let isGeneratingChunk = false; // Whether we're currently generating a chunk
 let currentGenerationParams: GenerationParams | null = null; // Store params for chunk requests
+// Bug #3 fix: circuit breaker — stop retrying after this many consecutive empty chunks
+const MAX_ZERO_CHUNKS = 3;
+let consecutiveZeroChunks = 0;
+// Track the total count when the current chunk was requested, so we can
+// accurately measure how many results the chunk produced (totalGeneratedCount
+// already includes this chunk's batches by the time chunkComplete arrives).
+let chunkStartGeneratedCount = 0;
+// All synthesized IDs generated so far across chunks — passed to subsequent
+// chunks so the ID counter continues from the highest sequence instead of
+// restarting (which would produce duplicate IDs).
+let generatedIds: string[] = [];
 
 let state: GenerationState = {
   isGenerating: false,
@@ -449,6 +460,7 @@ function requestNextChunk() {
   if (!params) return;
   
   isGeneratingChunk = true;
+  chunkStartGeneratedCount = totalGeneratedCount; // Track where this chunk starts
   
   const totalTarget = params.kValue;
   const remaining = totalTarget - totalGeneratedCount;
@@ -480,7 +492,7 @@ function requestNextChunk() {
     threatDistribution: effectiveThreatDist,
     nonThreatDistribution: effectiveNonThreatDist,
     requireAtLeastOneNonThreat: params.requireAtLeastOneNonThreat || false,
-    existingIds: params.existingIds || [],
+    existingIds: [...(params.existingIds || []), ...generatedIds],
     chunkSize: chunkSize,
     totalGenerated: totalGeneratedCount,
     batchSize: 5000,
@@ -504,6 +516,9 @@ export const GenerationService = {
     // Reset chunked generation state
     totalGeneratedCount = 0;
     isGeneratingChunk = false;
+    consecutiveZeroChunks = 0; // Bug #3 fix: reset circuit breaker on new generation
+    chunkStartGeneratedCount = 0;
+    generatedIds = []; // Reset accumulated IDs across chunks
     currentGenerationParams = params; // Store params for later chunk requests
 
     state = {
@@ -563,6 +578,13 @@ export const GenerationService = {
             generatedBuffer.push(...batch);
             totalGeneratedCount += batch.length;
             
+            // Accumulate generated IDs for subsequent chunks so the ID
+            // counter continues from the highest sequence instead of
+            // restarting (which would produce duplicate IDs).
+            for (const combo of batch) {
+              if (combo.id) generatedIds.push(combo.id);
+            }
+            
             // Refill display window from buffer
             refillDisplayWindow();
             
@@ -587,6 +609,36 @@ export const GenerationService = {
           
           if (response.failures) {
             state.failures.push(...response.failures);
+          }
+
+          // Bug #3 fix: circuit breaker — if this chunk produced 0 results,
+          // increment the consecutive-zero counter and bail out once the
+          // threshold is reached to avoid an infinite retry loop.
+          // Use the progress delta from the chunk start as the authoritative
+          // "produced" count (totalGeneratedCount already includes this
+          // chunk's batches by the time chunkComplete arrives).
+          const progressDelta = response.progress
+            ? response.progress.generated - chunkStartGeneratedCount
+            : 0;
+
+          if (progressDelta <= 0) {
+            consecutiveZeroChunks++;
+            console.warn(
+              `[GenerationService] Chunk produced 0 results (${consecutiveZeroChunks}/${MAX_ZERO_CHUNKS}). ` +
+              (consecutiveZeroChunks >= MAX_ZERO_CHUNKS ? 'Stopping generation.' : 'Will retry...')
+            );
+            if (consecutiveZeroChunks >= MAX_ZERO_CHUNKS) {
+              console.error('[GenerationService] Too many consecutive empty chunks — aborting generation.');
+              state.isGenerating = false;
+              state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
+              state.progress = response.progress || state.progress;
+              notifySubscribers();
+              persistToStorage();
+              if (worker) { worker.terminate(); worker = null; }
+              return;
+            }
+          } else {
+            consecutiveZeroChunks = 0; // reset on any successful chunk
           }
           
           // Check if we need to generate more
@@ -668,6 +720,7 @@ export const GenerationService = {
     state.isGenerating = false;
     state.progress = null;
     autoSaveEnabled = false;
+    generatedIds = [];
     notifySubscribers();
     try {
       sessionStorage.removeItem("generationProgress");
@@ -810,6 +863,8 @@ export const GenerationService = {
     }
     autoSaveEnabled = false;
     generatedBuffer = [];
+    generatedIds = [];
+    chunkStartGeneratedCount = 0;
     state = {
       isGenerating: false,
       combinations: [],
@@ -829,6 +884,7 @@ export const GenerationService = {
   setCombinations(combinations: CombinatorialResult[], failures: FailureLog[]) {
     if (state.isGenerating) return;
     generatedBuffer = combinations;
+    generatedIds = combinations.map(c => c.id).filter(Boolean);
     state.combinations = [];
     refillDisplayWindow();
     state.failures = failures;
@@ -863,6 +919,7 @@ export const GenerationService = {
       const failures = sessionStorage.getItem("collageFailures");
       if (combos) {
         generatedBuffer = JSON.parse(combos);
+        generatedIds = generatedBuffer.map(c => c.id).filter(Boolean);
         state.combinations = [];
         refillDisplayWindow();
         state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;

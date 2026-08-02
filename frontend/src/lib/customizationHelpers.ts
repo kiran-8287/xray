@@ -39,7 +39,8 @@ export const isObjectInsideContainer = (
         { x: obj.transform.x, y: obj.transform.y },
         { width: obj.transform.width, height: obj.transform.height },
         obj.transform.rotation,
-        obj.polygonOutline
+        // Normalize from [0,1] to [-0.5,0.5] range — same as getTransformedValidRegion
+        obj.polygonOutline.map(p => ({ x: p.x - 0.5, y: p.y - 0.5 }))
       )
     : getRectCorners(
         { x: obj.transform.x, y: obj.transform.y },

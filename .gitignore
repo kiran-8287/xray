@@ -34,6 +34,8 @@ Thumbs.db
 # Environment
 .env
 .env.local
+frontend/.env.development
+frontend/.env.docker
 
 # Saved layouts (user-specific data)
 backend/data/saved_layouts/
@@ -47,6 +49,9 @@ backend/data/monitoring.log
 new_data/
 dump and tip/
 
+# Test utility scripts
+scripts/generate-test-files.js
+
 # Performance test artifacts
 perf/reports/*.csv
 perf/reports/*.json
@@ -54,6 +59,11 @@ perf/reports/*.md
 perf/scenarios/
 perf/*.mjs
 perf/*.py
+
+# Monitoring scripts and reports
+perf/monitoring/
+perf/ANALYSIS_REPORT.md
+perf/HOW_TO_RUN.md
 
 # Temporary/diagnostic files
 *.tmp

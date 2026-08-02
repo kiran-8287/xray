@@ -1,5 +1,7 @@
 FROM node:20-alpine
 
+ENV LOG_LEVEL=warn
+
 # Install curl for Docker healthcheck, and Python3 + pip + Pillow for raw file processing
 RUN apk add --no-cache curl python3 py3-pip py3-numpy py3-pillow py3-scipy py3-opencv && ln -sf /usr/bin/python3 /usr/bin/python
 
