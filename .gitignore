@@ -34,3 +34,33 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Saved layouts (user-specific data)
+backend/data/saved_layouts/
+
+# Backup and temporary files
+backend/data/*.bak
+backend/data/.dedup_healed
+backend/data/monitoring.log
+
+# Test data files
+new_data/
+dump and tip/
+
+# Performance test artifacts
+perf/reports/*.csv
+perf/reports/*.json
+perf/reports/*.md
+perf/scenarios/
+perf/*.mjs
+perf/*.py
+
+# Temporary/diagnostic files
+*.tmp
+gen_before.txt
+gen_after.txt
+combo_*.txt
+tmp_combo_diag.py
+monitoring_dashboard.py
+run_monitoring_dashboard.py
+requirements-monitoring.txt

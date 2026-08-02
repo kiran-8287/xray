@@ -1,2 +1,0 @@
-runNumber,config,files,concurrency,passed,error,peakRSS_mb,memoryGrowth_mb,uploadDuration_ms,bulkOpsDuration_ms,totalDuration_ms,processedCount,failedCount,bulkOpsResults,memoryBefore,memoryAfter
-1,5 files x 2 concurrent,5,2,false,Upload timeout after 60000ms,57,-1,0,0,60035,0,0,"[]",8,7
