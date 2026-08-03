@@ -6,6 +6,7 @@ import CustomizationPage from "./pages/CustomizationPage";
 import LibraryPage from "./pages/LibraryPage";
 import SavedPage from "./pages/SavedPage";
 import { UploadProvider } from "./context/UploadContext";
+import { isUploadUnsaved } from "./lib/navigationGuard";
 import { loadCustomSubcategories } from "./config/categories";
 import { GenerationService } from "./lib/generationService";
 import { initializeCacheManager } from "./lib/cacheManager";
@@ -34,20 +35,28 @@ export function registerServiceWorker() {
 function NavigationGuard() {
   const [showDialog, setShowDialog] = useState(false);
   const [pendingLocation, setPendingLocation] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
   const location = useLocation();
-  
-  // Block navigation when there are generated results and user is on collage page
-  // Exception: allow navigation to/from /customize page (handled by CustomizationPage)
+
   const blocker = useBlocker(({ nextLocation }) => {
     const hasResults = GenerationService.hasGeneratedResults();
     const isOnCollagePage = location.pathname.startsWith("/collage");
     const isNavigatingToCustomize = nextLocation.pathname.startsWith("/customize");
-    
-    // Only block if:
-    // 1. Currently on collage page
-    // 2. Have generated results
-    // 3. NOT navigating to customize page (that's part of the workflow)
-    return isOnCollagePage && hasResults && !isNavigatingToCustomize;
+    const collageBlocked = isOnCollagePage && hasResults && !isNavigatingToCustomize;
+
+    const isOnUploadPage = location.pathname === "/" || location.pathname === "/library";
+    const uploadBlocked = isOnUploadPage && isUploadUnsaved();
+
+    const blocked = collageBlocked || uploadBlocked;
+
+    if (blocked && !showDialog) {
+      setMessage(collageBlocked
+        ? "You have generated combinations that haven't been saved. If you leave this page, they will be discarded."
+        : "You have staged files that haven't been saved. Leaving will discard unsaved items in this batch."
+      );
+    }
+
+    return blocked;
   });
 
   useEffect(() => {
@@ -58,7 +67,9 @@ function NavigationGuard() {
   }, [blocker.state, blocker.location]);
 
   const handleDiscard = () => {
-    GenerationService.clear();
+    if (location.pathname.startsWith("/collage")) {
+      GenerationService.clear();
+    }
     setShowDialog(false);
     if (pendingLocation) {
       (blocker as any).proceed();
@@ -77,10 +88,8 @@ function NavigationGuard() {
     <div className="fixed inset-0 z-[99999] flex items-center justify-center p-6">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div className="relative z-[100000] w-full max-w-md bg-white rounded-2xl shadow-2xl border border-border p-6">
-        <h3 className="text-lg font-bold text-ink mb-2 font-heading">Unsaved Combinations</h3>
-        <p className="text-sm text-muted mb-6">
-          You have generated combinations that haven't been saved. If you leave this page, they will be discarded.
-        </p>
+        <h3 className="text-lg font-bold text-ink mb-2 font-heading">Unsaved Changes</h3>
+        <p className="text-sm text-muted mb-6">{message}</p>
         <div className="flex gap-3">
           <button
             onClick={handleDiscard}

@@ -455,6 +455,23 @@ function checkAndRefillBuffer() {
 }
 
 /**
+ * Finish generation cleanly — marks the state as not generating and
+ * surfaces the final progress to subscribers.
+ */
+function finishGeneration(progress: { generated: number; total: number } | null) {
+  state.isGenerating = false;
+  isGeneratingChunk = false;
+  state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
+  state.progress = progress;
+  if (worker) {
+    worker.terminate();
+    worker = null;
+  }
+  notifySubscribers();
+  persistToStorage();
+}
+
+/**
  * Request next chunk of combinations from worker
  */
 function requestNextChunk() {
@@ -471,7 +488,11 @@ function requestNextChunk() {
   const chunkSize = Math.min(CHUNK_SIZE, remaining);
   
   if (chunkSize <= 0) {
+    // Already at/near the target — nothing left to generate. Finish cleanly
+    // instead of silently stalling.
     isGeneratingChunk = false;
+    console.log("[GenerationService] No more combos to request — finishing generation.");
+    finishGeneration({ generated: Math.min(totalGeneratedCount, totalTarget), total: totalTarget });
     return;
   }
   
@@ -598,13 +619,14 @@ export const GenerationService = {
             notifySubscribers();
             persistToStorage();
             
-            // Check if we need to generate more chunks
+            // In auto-save mode, let the auto-save loop handle refilling.
+            // We intentionally do NOT call checkAndRefillBuffer() here for
+            // manual mode — chunk requests are driven exclusively by
+            // chunkComplete. (isGeneratingChunk is set for the initial
+            // generate as well, so calling it here would be a no-op and
+            // could even race with the in-flight chunk.)
             if (autoSaveEnabled) {
-              // In auto-save mode, let auto-save loop handle refilling
               wakeLoopNow();
-            } else {
-              // In manual mode, check if we need more
-              checkAndRefillBuffer();
             }
           }
         } else if (response.type === "chunkComplete") {
@@ -622,7 +644,7 @@ export const GenerationService = {
           // "produced" count (totalGeneratedCount already includes this
           // chunk's batches by the time chunkComplete arrives).
           const progressDelta = response.progress
-            ? response.progress.generated - chunkStartGeneratedCount
+            ? Math.max(0, response.progress.generated - chunkStartGeneratedCount)
             : 0;
 
           if (progressDelta <= 0) {
@@ -633,30 +655,36 @@ export const GenerationService = {
             );
             if (consecutiveZeroChunks >= MAX_ZERO_CHUNKS) {
               console.error('[GenerationService] Too many consecutive empty chunks — aborting generation.');
-              state.isGenerating = false;
-              state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
-              state.progress = response.progress || state.progress;
-              notifySubscribers();
-              persistToStorage();
-              if (worker) { worker.terminate(); worker = null; }
+              finishGeneration(response.progress || state.progress);
               return;
             }
           } else {
             consecutiveZeroChunks = 0; // reset on any successful chunk
           }
           
-          // Check if we need to generate more
-          if (!response.isComplete && totalGeneratedCount < params.kValue) {
+          // Decide whether to request the next chunk or finish. We must
+          // consider totalGeneratedCount as well as response.isComplete:
+          // if the count has reached (or overshot) the target, the
+          // generation is done — otherwise the chunkComplete handler would
+          // deadlock (neither branch matching) and the UI would hang.
+          const reachedTarget = totalGeneratedCount >= params.kValue;
+          const bufferHasRoom = generatedBuffer.length < MAX_BUFFER_SIZE;
+          
+          if (!response.isComplete && !reachedTarget && bufferHasRoom) {
             console.log("[GenerationService] Requesting next chunk...");
             requestNextChunk();
-          } else if (response.isComplete) {
-            console.log("[GenerationService] All chunks complete");
-            state.isGenerating = false;
-            state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
-            state.progress = response.progress || null;
-            notifySubscribers();
-            persistToStorage();
-            worker = null;
+          } else {
+            // Either the worker says it's complete, we've hit the target,
+            // or the buffer is full (manual mode — resume via saveCurrentPage).
+            if (reachedTarget || response.isComplete) {
+              console.log("[GenerationService] All chunks complete", { totalGeneratedCount, isComplete: response.isComplete });
+              const finalProgress: { generated: number; total: number } = {
+                generated: Math.min(totalGeneratedCount, params.kValue),
+                total: params.kValue,
+              };
+              finishGeneration(finalProgress);
+            }
+            // else: buffer full in manual mode — pause and wait for a save.
           }
         } else if (response.type === "complete") {
           console.log("[GenerationService] Generation complete:", response.progress);
@@ -693,6 +721,13 @@ export const GenerationService = {
       for (let i = 1; i <= params.maxNonThreats; i++) {
         effectiveNonThreatDist[i] = (params.nonThreatDistribution && params.nonThreatDistribution[i]) ?? 0;
       }
+
+      // IMPORTANT: mark the initial generate as an in-flight "chunk" before
+      // sending it. This prevents the batch handler from firing a duplicate
+      // generateChunk request, and keeps the chunkComplete handler's
+      // progress-delta / zero-chunk accounting accurate for the first run.
+      isGeneratingChunk = true;
+      chunkStartGeneratedCount = 0;
 
       console.log("[GenerationService] Sending message to worker...");
       newWorker.postMessage({

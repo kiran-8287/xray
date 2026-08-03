@@ -30,14 +30,39 @@ export interface IncrementalWorkerResponse {
   isComplete?: boolean;
 }
 
-self.onmessage = async (event: MessageEvent<IncrementalWorkerRequest>) => {
-  const data = event.data;
+// ---------------------------------------------------------------------------
+// Serialization queue: the main thread may post a "generate" followed by
+// one or more "generateChunk" messages. The onmessage handler below is async,
+// so without serialization a new message could start processing while the
+// previous generation is still running. Because the generators rely on
+// module-level state (the synthesized-ID sequence in combinationGenerator.ts),
+// overlapping runs would interleave and corrupt the ID counter / progress.
+// ---------------------------------------------------------------------------
+let processing = false;
+const messageQueue: IncrementalWorkerRequest[] = [];
 
-  console.log("[Worker] Received message:", data.type, { 
-    k: data.kValue, 
+async function processQueue() {
+  if (processing) return;
+  processing = true;
+  try {
+    while (messageQueue.length > 0) {
+      const request = messageQueue.shift()!;
+      await handleRequest(request);
+      // Yield to the event loop between requests so progress/batch messages
+      // have a chance to flush to the main thread.
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  } finally {
+    processing = false;
+  }
+}
+
+async function handleRequest(data: IncrementalWorkerRequest) {
+  console.log("[Worker] Received message:", data.type, {
+    k: data.kValue,
     bags: data.selectedBags.length,
     chunkSize: data.chunkSize,
-    totalGenerated: data.totalGenerated 
+    totalGenerated: data.totalGenerated,
   });
 
   if (data.type !== "generate" && data.type !== "generateChunk") {
@@ -57,12 +82,12 @@ self.onmessage = async (event: MessageEvent<IncrementalWorkerRequest>) => {
       generateCount = Math.min(data.chunkSize, remaining);
     }
 
-    console.log("[Worker] Starting generation:", { 
-      total: data.kValue, 
+    console.log("[Worker] Starting generation:", {
+      total: data.kValue,
       generating: generateCount,
-      alreadyGenerated: data.totalGenerated || 0 
+      alreadyGenerated: data.totalGenerated || 0,
     });
-    
+
     // Send immediate progress update
     self.postMessage({
       type: "progress",
@@ -70,7 +95,7 @@ self.onmessage = async (event: MessageEvent<IncrementalWorkerRequest>) => {
     } as IncrementalWorkerResponse);
 
     console.log("[Worker] Calling generateCombinationsIncremental...");
-    
+
     // Run incremental generation with batch callback
     const { results, failures } = await generateCombinationsIncremental(
       data.selectedBags,
@@ -97,7 +122,7 @@ self.onmessage = async (event: MessageEvent<IncrementalWorkerRequest>) => {
 
     const totalGenerated = (data.totalGenerated || 0) + results.length;
     console.log("[Worker] Chunk complete:", results.length, "results, total:", totalGenerated);
-    
+
     // Send chunk complete message
     self.postMessage({
       type: "chunkComplete",
@@ -113,6 +138,18 @@ self.onmessage = async (event: MessageEvent<IncrementalWorkerRequest>) => {
       error: err instanceof Error ? err.message : "Unknown error",
     } as IncrementalWorkerResponse);
   }
+}
+
+self.onmessage = (event: MessageEvent<IncrementalWorkerRequest>) => {
+  const data = event.data;
+  messageQueue.push(data);
+  processQueue();
+};
+
+// Reset the serialization queue if a terminate/close is requested.
+self.onclose = () => {
+  messageQueue.length = 0;
+  processing = false;
 };
 
 export {};

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, AlertTriangle, X, Save } from "lucide-react";
-import { useBlocker } from "react-router-dom";
 import UploadDropZone from "../components/upload/UploadDropZone";
 import UploadFileQueue from "../components/upload/UploadFileQueue";
 import { useUploadContext } from "../context/UploadContext";
@@ -9,6 +8,7 @@ import { LIBRARIES_UI } from "../config/categories";
 import ConfirmModal from "../components/common/ConfirmModal";
 import { initializeConcurrencyPools, adjustConcurrencyForLoad } from "../lib/concurrencyController";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
+import { setUploadUnsaved } from "../lib/navigationGuard";
 
 const LIBRARIES = LIBRARIES_UI;
 const PAGE_SIZE = 100;
@@ -125,13 +125,13 @@ export default function UploadPage() {
   }, [staged.length, files.length]);
 
   const hasUnsavedChanges = staged.length > 0 || files.length > 0;
-  const routerBlocker = useBlocker(hasUnsavedChanges);
 
   useEffect(() => {
-    if (routerBlocker.state === "blocked" && !hasUnsavedChanges) {
-      routerBlocker.reset?.();
-    }
-  }, [routerBlocker.state, hasUnsavedChanges, routerBlocker]);
+    setUploadUnsaved(hasUnsavedChanges);
+    return () => {
+      setUploadUnsaved(false);
+    };
+  }, [hasUnsavedChanges]);
 
   const totalOriginalBatches = useMemo(
     () => Math.max(1, Math.ceil(originalTotalFilesRef.current / PAGE_SIZE)),
@@ -813,21 +813,7 @@ export default function UploadPage() {
           />
         )}
 
-        <ConfirmModal
-          isOpen={routerBlocker.state === "blocked"}
-          title="Unsaved Changes"
-          message="You have staged files that haven't been saved. Leaving will discard unsaved items in this batch."
-          confirmLabel="Discard & Leave"
-          cancelLabel="Cancel"
-          confirmVariant="danger"
-          onConfirm={() => {
-            (routerBlocker as any).proceed?.();
-          }}
-          onCancel={() => {
-            (routerBlocker as any).reset?.();
-          }}
-        />
-      </div>
+        </div>
 
       {uploadStatus === "success" && (
         <div className="fixed bottom-6 right-6 z-50 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-4 flex items-center gap-3 shadow-card animate-slide-up">
