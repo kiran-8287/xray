@@ -4,6 +4,12 @@
  * For long-running workflows such as uploads, collage rendering, and
  * bulk saves, we allow a larger timeout window and one automatic retry
  * after an abort so the user can recover without manually restarting.
+ *
+ * Supports an optional external AbortSignal passed via `options.signal`.
+ * When that external signal fires (e.g. a user clicked a "Stop Saving"
+ * button), the fetch is aborted immediately and the original DOMException
+ * "AbortError" is re-thrown so callers can distinguish a user-initiated
+ * cancellation from a network timeout.
  */
 
 export async function fetchWithTimeout(
@@ -16,19 +22,41 @@ export async function fetchWithTimeout(
   let attempt = 0;
   let lastError: unknown;
 
+  // The caller may pass their own AbortSignal (e.g. via AbortController)
+  // so they can cancel a long-running request programmatically.
+  const externalSignal = options.signal instanceof AbortSignal ? options.signal : null;
+
   while (attempt <= retries) {
     const controller = new AbortController();
+
+    // If the external signal aborts, propagate that abort to our controller.
+    const onExternalAbort = () => controller.abort(externalSignal?.reason);
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        // Already aborted before the request even started.
+        const err = new DOMException("The operation was aborted.", "AbortError");
+        throw err;
+      }
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(url, {
         ...options,
+        // Our internal controller is the source of truth for the timeout.
         signal: controller.signal,
       });
       return response;
     } catch (err: any) {
       lastError = err;
       if (err.name === "AbortError") {
+        // If the user explicitly aborted via the external signal, re-throw
+        // the original abort error instead of turning it into a timeout.
+        if (externalSignal?.aborted) {
+          throw err;
+        }
         if (attempt < retries) {
           await new Promise(resolve => setTimeout(resolve, retryDelayMs * (attempt + 1)));
           attempt += 1;
@@ -39,6 +67,9 @@ export async function fetchWithTimeout(
       throw err;
     } finally {
       clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
     }
   }
 
