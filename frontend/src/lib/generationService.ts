@@ -352,6 +352,10 @@ async function processNextAutoSavePage(): Promise<boolean> {
 
   evictFromDisplayWindow(evictableIds);
   refillDisplayWindow();
+  
+  // Update hasGeneratedResults flag based on remaining combinations and buffer
+  state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
+  
   notifySubscribers();
   persistToStorage();
   return state.combinations.length > 0 || generatedBuffer.length > 0;
@@ -837,9 +841,9 @@ export const GenerationService = {
       evictFromDisplayWindow(evictableIds);
       refillDisplayWindow();
 
-      if (!state.hasGeneratedResults && (state.combinations.length > 0 || generatedBuffer.length > 0)) {
-        state.hasGeneratedResults = true;
-      }
+      // Update hasGeneratedResults flag based on remaining combinations and buffer
+      state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
+      
       notifySubscribers();
       persistToStorage();
       
