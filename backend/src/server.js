@@ -528,7 +528,7 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
         
         // Stage 2: Validation
         timer.startStage(PIPELINE_STAGES.VALIDATION);
-        
+
         const items = await getItems();
         const existingIds = new Set(items.map(i => i.id));
 
@@ -556,11 +556,15 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
             }
         }
         logger.debug({ operationId, valid: nonDuplicates.length, duplicates: duplicateCount, skipped: skippedFiles.length }, 'Validation complete');
-        
-        timer.endStage(PIPELINE_STAGES.VALIDATION, { 
-            valid: nonDuplicates.length, 
-            duplicates: duplicateCount, 
-            skipped: skippedFiles.length 
+
+        // ✅ Clear large objects after validation to free memory
+        existingIds.clear();
+        items.length = 0;
+
+        timer.endStage(PIPELINE_STAGES.VALIDATION, {
+            valid: nonDuplicates.length,
+            duplicates: duplicateCount,
+            skipped: skippedFiles.length
         });
 
         for (const skipped of skippedFiles) {
@@ -635,6 +639,9 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
         for (const { file, itemId, fileType } of nonDuplicates) {
             const tempPath = path.join(tempDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
             await fs.writeFile(tempPath, file.buffer);
+
+            // ✅ Clear buffer after writing to disk to free memory immediately
+            file.buffer = null;
 
             pool.addTask(
                 {
@@ -1912,7 +1919,17 @@ app.delete("/api/temp-files/:itemId", requireAuth, async (req, res) => {
 
 app.post('/api/temp-files/batch-delete', requireAuth, async (req, res) => {
     try {
-        const itemIds = Array.isArray(req.body?.itemIds) ? req.body.itemIds : [];
+        let itemIds = [];
+        if (Array.isArray(req.body?.itemIds)) {
+            itemIds = req.body.itemIds;
+        } else if (typeof req.body === 'string') {
+            try {
+                const parsed = JSON.parse(req.body);
+                if (Array.isArray(parsed?.itemIds)) {
+                    itemIds = parsed.itemIds;
+                }
+            } catch {}
+        }
         if (itemIds.length === 0) {
             return res.status(400).json({ ok: false, error: 'itemIds array is required' });
         }
