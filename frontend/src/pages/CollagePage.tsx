@@ -157,16 +157,8 @@ export default function CollagePage() {
 
   useEffect(() => {
     GenerationService.restoreFromStorage();
-    const savedAuto = localStorage.getItem("libraryAutoSave");
-    const savedMode = localStorage.getItem("libraryAutoSaveMode");
     const serviceState = GenerationService.getState();
     const hasActiveResults = GenerationService.isGenerating() || serviceState.combinations.length > 0 || GenerationService.getBufferCount() > 0;
-    if (savedAuto && JSON.parse(savedAuto) === true && hasActiveResults) {
-      const mode = savedMode === "both" ? "both" : "annotations";
-      setAutoSave(true);
-      setAutoSaveLocalMode(mode);
-      GenerationService.enableAutoSave(mode);
-    }
 
     const unsub = GenerationService.subscribe((state) => {
       setIsGenerating(state.isGenerating);
@@ -349,9 +341,6 @@ export default function CollagePage() {
     } else {
       GenerationService.disableAutoSave();
       setAutoSave(false);
-      try {
-        localStorage.setItem("libraryAutoSave", JSON.stringify(false));
-      } catch { /* ignore */ }
       showToast("info", "Save as you go disabled");
     }
   };
@@ -360,10 +349,6 @@ export default function CollagePage() {
     setAutoSaveLocalMode(mode);
     setAutoSave(true);
     setShowAutoSaveModeDialog(false);
-    try {
-      localStorage.setItem("libraryAutoSave", JSON.stringify(true));
-      localStorage.setItem("libraryAutoSaveMode", mode);
-    } catch { /* ignore */ }
     GenerationService.enableAutoSave(mode);
     showToast(
       "info",

@@ -56,6 +56,11 @@ const logger = pino({
   level: config.logLevel === 'info' ? 'warn' : config.logLevel
 });
 
+// In-memory cancellation flags for long-running bulk export (Save All / Save Selected) jobs.
+// Keyed by a client-generated jobId so a Stop Saving request can abort a running export
+// at the next layout boundary.
+const exportCancellations = new Map();
+
 // Prometheus metrics
 const collectDefaultMetrics = client.collectDefaultMetrics;
 collectDefaultMetrics({ timeout: 5000 });
@@ -1171,7 +1176,14 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
 
 // Export saved layout images as a JSON summary and write PNG files to exports folder.
 // This route must be registered before /api/saved-layouts/:id so /export is not swallowed.
+// Supports optional ?jobId= query param so the client can cancel a running bulk
+// export (Save All / Save Selected) via POST /api/saved-layouts/export/cancel.
 app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
+    const jobId = typeof req.query.jobId === 'string' && req.query.jobId.trim()
+        ? req.query.jobId.trim()
+        : null;
+    let cancelled = false;
+
     try {
         const layoutIds = req.query.ids;
         let targetLayouts = [];
@@ -1184,12 +1196,17 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             targetLayouts = await getSavedLayouts();
         }
 
+        if (!jobId || exportCancellations.has(jobId)) {
+            cancelled = exportCancellations.has(jobId);
+        }
+
         if (targetLayouts.length === 0) {
             return res.json({
                 ok: true,
                 message: 'No layouts to export',
                 exported: [],
-                savedPaths: { high: [], low: [] }
+                savedPaths: { high: [], low: [] },
+                cancelled
             });
         }
 
@@ -1200,6 +1217,11 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
         const savedPaths = { high: [], low: [] };
 
         for (const layout of targetLayouts) {
+            // Stop at the next layout boundary if the client requested cancellation.
+            if (jobId && exportCancellations.has(jobId)) {
+                cancelled = true;
+                break;
+            }
             try {
                 const objects = layout.layout_json?.objects || {};
                 const flatObjects = [];
@@ -1302,6 +1324,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             message: `Exported ${exported.length} layout(s)`,
             exported,
             savedPaths,
+            cancelled,
             summary: {
                 total: targetLayouts.length,
                 success: exported.filter(e => !e.error).length,
@@ -1310,6 +1333,35 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
         });
     } catch (err) {
         console.error('[export] Error:', err);
+        if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: String(err) });
+        } else {
+            res.end();
+        }
+    } finally {
+        // Always release the cancellation flag so a fresh Save All / Save Selected
+        // with the same jobId (or any future job) is not accidentally short-circuited.
+        if (jobId) {
+            exportCancellations.delete(jobId);
+        }
+    }
+});
+
+// Cancel a running bulk export (Save All / Save Selected) job.
+// The running /api/saved-layouts/export handler checks this flag between layouts
+// and stops as soon as it reaches the next layout boundary.
+app.post('/api/saved-layouts/export/cancel', requireAuth, async (req, res) => {
+    try {
+        const { jobId } = req.body || {};
+        if (!jobId || typeof jobId !== 'string' || !jobId.trim()) {
+            return res.status(400).json({ ok: false, error: 'Missing jobId' });
+        }
+
+        exportCancellations.set(jobId.trim(), true);
+        console.log(`[export] Cancellation requested for job ${jobId.trim()}`);
+        res.json({ ok: true, cancelled: true });
+    } catch (err) {
+        console.error('[export/cancel] Error:', err);
         res.status(500).json({ ok: false, error: String(err) });
     }
 });

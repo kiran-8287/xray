@@ -408,7 +408,12 @@ export default function SavedPage() {
   
   // Toast notifications
   const [exporting, setExporting] = useState(false);
+  const [exportMode, setExportMode] = useState<'all' | 'selected' | 'single' | null>(null);
   const [selectedForExport, setSelectedForExport] = useState<Set<string>>(new Set());
+  
+  // References for cancelling a running bulk export (Save All / Save Selected)
+  const exportAbortRef = useRef<AbortController | null>(null);
+  const exportJobIdRef = useRef<string | null>(null);
   
   const [toasts, setToasts] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
   
@@ -733,13 +738,61 @@ export default function SavedPage() {
     }
   };
 
+  // Cancel a running bulk export (Save All / Save Selected).
+  // Aborts the client fetch immediately and notifies the backend so the
+  // running export loop stops at the next layout boundary.
+  const stopExport = async () => {
+    const jobId = exportJobIdRef.current;
+    const controller = exportAbortRef.current;
+
+    // Clear references first so double-clicks are safe and the Stop button
+    // is hidden immediately.
+    exportAbortRef.current = null;
+    exportJobIdRef.current = null;
+    setExporting(false);
+    setExportMode(null);
+
+    // Abort the client-side fetch so we stop waiting for the response.
+    if (controller) {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    }
+
+    // Notify the backend to stop processing remaining layouts.
+    if (jobId) {
+      try {
+        await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export/cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobId }),
+        }, 10000);
+      } catch (err) {
+        console.warn('Failed to notify backend of export cancellation:', err);
+      }
+    }
+
+    showToast('info', 'Save process stopped.');
+  };
+
   // Export selected layouts - saves to exports folder with high/low resolution
   const exportSelected = async () => {
     if (selectedForExport.size === 0) {
       showToast('error', 'No layouts selected for export');
       return;
     }
+    if (exporting) return;
+
+    const jobId = `exp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    exportJobIdRef.current = jobId;
+
     setExporting(true);
+    setExportMode('selected');
+
     try {
       const ids = Array.from(selectedForExport).join(',');
       
@@ -755,9 +808,10 @@ export default function SavedPage() {
         headers['X-API-Key'] = apiKey;
       }
       
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}`, {
         headers,
-      });
+        signal: controller.signal,
+      }, 300000);
       
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -772,7 +826,9 @@ export default function SavedPage() {
       if (result.ok) {
         // Show detailed success message
         const { summary, savedPaths } = result;
-        if (summary.failed > 0) {
+        if (result.cancelled) {
+          showToast('info', `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`);
+        } else if (summary.failed > 0) {
           showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)`);
         } else {
           showToast('success', `Successfully exported ${summary.success} layout(s)`);
@@ -790,28 +846,45 @@ export default function SavedPage() {
         throw new Error(result.error || 'Export failed');
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      console.error('Error exporting layouts:', err);
-      showToast('error', `Failed to export layouts: ${errorMessage}`);
+      // User-initiated cancellation via the Stop Saving button.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        console.log('Export cancelled by user.');
+      } else {
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        console.error('Error exporting layouts:', err);
+        showToast('error', `Failed to export layouts: ${errorMessage}`);
+      }
     } finally {
+      exportAbortRef.current = null;
+      exportJobIdRef.current = null;
       setExporting(false);
+      setExportMode(null);
     }
   };
 
-  // Export all layouts - saves to exports folder with high/low resolution
+  // Export all layouts - saves to exports folder with high/low resolution.
+  // Supports cancellation via the Stop Saving button (jobId + AbortController).
   const exportAll = async () => {
     if (!pagination || pagination.total === 0) {
       showToast('error', 'No layouts to export');
       return;
     }
+    if (exporting) return;
     
     const confirmed = window.confirm(
       `Export all ${pagination.total} layouts?\n\nThis will render and save high and low resolution images for each layout to the exports folder.`
     );
     
     if (!confirmed) return;
+
+    const jobId = `exp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    exportJobIdRef.current = jobId;
     
     setExporting(true);
+    setExportMode('all');
+
     try {
       // Get API key from localStorage
       const apiKey = localStorage.getItem('apiKey');
@@ -825,8 +898,9 @@ export default function SavedPage() {
         headers['X-API-Key'] = apiKey;
       }
       
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}`, {
         headers,
+        signal: controller.signal,
       }, 300000); // 5 minute timeout
       
       if (!res.ok) {
@@ -842,7 +916,9 @@ export default function SavedPage() {
       if (result.ok) {
         // Show detailed success message
         const { summary, savedPaths } = result;
-        if (summary.failed > 0) {
+        if (result.cancelled) {
+          showToast('info', `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`);
+        } else if (summary.failed > 0) {
           showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)`);
         } else {
           showToast('success', `Successfully exported all ${summary.success} layouts`);
@@ -860,11 +936,19 @@ export default function SavedPage() {
         throw new Error(result.error || 'Export failed');
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      console.error('Error exporting all layouts:', err);
-      showToast('error', `Failed to export layouts: ${errorMessage}`);
+      // User-initiated cancellation via the Stop Saving button.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        console.log('Export all cancelled by user.');
+      } else {
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        console.error('Error exporting all layouts:', err);
+        showToast('error', `Failed to export layouts: ${errorMessage}`);
+      }
     } finally {
+      exportAbortRef.current = null;
+      exportJobIdRef.current = null;
       setExporting(false);
+      setExportMode(null);
     }
   };
 
@@ -976,7 +1060,7 @@ export default function SavedPage() {
       </div>
 
       {/* Export Actions */}
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           onClick={exportAll}
           disabled={exporting || !pagination || pagination.total === 0}
@@ -995,6 +1079,17 @@ export default function SavedPage() {
           {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
           Save Selected ({selectedForExport.size})
         </button>
+        {/* Stop Saving button — shown only while a bulk save (Save All / Save Selected) is running */}
+        {exporting && (exportMode === 'all' || exportMode === 'selected') && (
+          <button
+            onClick={stopExport}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-rose-300 bg-rose-600 text-sm font-semibold text-white hover:bg-rose-700 transition-colors shadow-sm"
+            title="Stop the current save process"
+          >
+            <X size={16} />
+            Stop Saving
+          </button>
+        )}
         <button
           onClick={deleteSelected}
           disabled={deleting || selectedForExport.size === 0}
