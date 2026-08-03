@@ -38,7 +38,7 @@ if defined DOCKER_COMPOSE_CMD (
         echo Falling back to Node.js mode...
         echo ========================================
         echo.
-        goto :npm_install
+        goto :python_install
     )
     
     echo.
@@ -48,6 +48,31 @@ if defined DOCKER_COMPOSE_CMD (
     echo.
     echo To stop the app: %DOCKER_COMPOSE_CMD% down
     goto :eof
+)
+
+:python_install
+
+REM Check if Python is available
+where python >nul 2>nul
+if %errorlevel% == 0 (
+    echo Python found! Installing Python dependencies...
+    cd backend
+    pip install -r requirements.txt
+    if %errorlevel% neq 0 (
+        echo.
+        echo Warning: Failed to install Python dependencies.
+        echo The backend requires numpy, scipy, opencv-python, and Pillow.
+        echo Please install them manually: pip install -r backend/requirements.txt
+    )
+    cd ..
+) else (
+    echo.
+    echo Warning: Python not found! The backend requires Python 3 with:
+    echo   - numpy
+    echo   - scipy
+    echo   - opencv-python
+    echo   - Pillow
+    echo Please install Python 3 from https://www.python.org/ and rerun this script.
 )
 
 :npm_install

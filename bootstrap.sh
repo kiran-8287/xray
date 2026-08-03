@@ -27,40 +27,57 @@ if [ -n "$DOCKER_COMPOSE_CMD" ]; then
     echo "🔧 Backend: http://localhost:8080"
     echo ""
     echo "To stop the app: $DOCKER_COMPOSE_CMD down"
-elif command -v npm &> /dev/null; then
-    echo "npm found! Installing dependencies and starting..."
-    
-    # Disable npm audit and funding prompts
-    export npm_config_audit=false
-    export npm_config_fund=false
-    
-    # Install all dependencies (including concurrently)
-    echo "Installing root dependencies..."
-    npm install --no-audit --no-fund
-    
-    # Install backend dependencies
-    echo "Installing backend dependencies..."
+elif command -v python3 &> /dev/null || command -v python &> /dev/null; then
+    echo "Python found! Installing Python dependencies..."
     cd backend
-    npm install --no-audit --no-fund
+    if command -v pip3 &> /dev/null; then
+        pip3 install -r requirements.txt || echo "⚠️  Warning: Failed to install Python dependencies. Please run: pip install -r backend/requirements.txt"
+    else
+        pip install -r requirements.txt || echo "⚠️  Warning: Failed to install Python dependencies. Please run: pip install -r backend/requirements.txt"
+    fi
     cd ..
     
-    # Install frontend dependencies
-    echo "Installing frontend dependencies..."
-    cd frontend
-    npm install --no-audit --no-fund
-    cd ..
-    
-    echo ""
-    echo "✅ Dependencies installed!"
-    echo ""
-    echo "Starting frontend and backend in parallel..."
-    echo ""
-    npm run dev
+    if command -v npm &> /dev/null; then
+        echo "npm found! Installing dependencies and starting..."
+        
+        # Disable npm audit and funding prompts
+        export npm_config_audit=false
+        export npm_config_fund=false
+        
+        # Install all dependencies (including concurrently)
+        echo "Installing root dependencies..."
+        npm install --no-audit --no-fund
+        
+        # Install backend dependencies
+        echo "Installing backend dependencies..."
+        cd backend
+        npm install --no-audit --no-fund
+        cd ..
+        
+        # Install frontend dependencies
+        echo "Installing frontend dependencies..."
+        cd frontend
+        npm install --no-audit --no-fund
+        cd ..
+        
+        echo ""
+        echo "✅ Dependencies installed!"
+        echo ""
+        echo "Starting frontend and backend in parallel..."
+        echo ""
+        npm run dev
+    else
+        echo "❌ Error: npm not found!"
+        echo ""
+        echo "Please install Node.js (version 18+): https://nodejs.org/"
+        exit 1
+    fi
 else
-    echo "❌ Error: Neither Docker nor npm found!"
+    echo "❌ Error: Neither Docker, Python, nor npm found!"
     echo ""
     echo "Please install either:"
     echo "  1. Docker (recommended): https://www.docker.com/get-started"
     echo "  2. Node.js (version 18+): https://nodejs.org/"
+    echo "  3. Python 3: https://www.python.org/"
     exit 1
 fi
