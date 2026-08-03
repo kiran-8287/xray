@@ -208,6 +208,16 @@ describe('API Tests', () => {
     });
   });
 
+  describe('GET /api/saved-layouts/export', () => {
+    it('should not be swallowed by the /api/saved-layouts/:id route', async () => {
+      const res = await request(app).get('/api/saved-layouts/export?ids=missing-layout-id');
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('ok', true);
+      expect(res.body).toHaveProperty('message');
+      expect(res.body).toHaveProperty('savedPaths');
+    }, 5000);
+  });
+
   describe('GET /api/custom-subcategories', () => {
     it('should return a response', async () => {
       const res = await request(app).get('/api/custom-subcategories');

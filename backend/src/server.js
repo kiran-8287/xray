@@ -273,6 +273,11 @@ await fs.mkdir(collageLowRoot, { recursive: true });
 await fs.mkdir(pixelDataRoot, { recursive: true });
 await fs.mkdir(tempDir, { recursive: true });
 
+// Ensure exports subdirectories exist
+const { exportsHighRoot, exportsLowRoot } = config;
+await fs.mkdir(exportsHighRoot, { recursive: true });
+await fs.mkdir(exportsLowRoot, { recursive: true });
+
 // Fallback middleware: if a requested PNG is missing in libraryImagesRoot, generate it on-the-fly from pixel_data if available
 app.get('/data/library_images/:filename', async (req, res, next) => {
     const filename = req.params.filename;
@@ -302,6 +307,7 @@ app.get('/data/library_images/:filename', async (req, res, next) => {
 app.use('/data/library_images', express.static(libraryImagesRoot));
 app.use('/data/collage_images', express.static(collageImagesRoot));
 app.use('/data/pixel_data', express.static(pixelDataRoot));
+app.use('/data/exports', express.static(exportsRoot));
 app.use('/data', express.static(path.join(__dirname, '..', 'data')));
 
 // Helper: resolve pixel_data_path for an item, with disk-based fallback.
@@ -1161,6 +1167,151 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
     console.error('[integrity] Error:', err);
     res.status(500).json({ ok: false, error: String(err) });
   }
+});
+
+// Export saved layout images as a JSON summary and write PNG files to exports folder.
+// This route must be registered before /api/saved-layouts/:id so /export is not swallowed.
+app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
+    try {
+        const layoutIds = req.query.ids;
+        let targetLayouts = [];
+
+        if (layoutIds && typeof layoutIds === 'string') {
+            const ids = layoutIds.split(',').map(id => id.trim()).filter(Boolean);
+            const allLayouts = await getSavedLayouts();
+            targetLayouts = allLayouts.filter(l => ids.includes(l.id));
+        } else {
+            targetLayouts = await getSavedLayouts();
+        }
+
+        if (targetLayouts.length === 0) {
+            return res.json({
+                ok: true,
+                message: 'No layouts to export',
+                exported: [],
+                savedPaths: { high: [], low: [] }
+            });
+        }
+
+        await fs.mkdir(config.exportsHighRoot, { recursive: true });
+        await fs.mkdir(config.exportsLowRoot, { recursive: true });
+
+        const exported = [];
+        const savedPaths = { high: [], low: [] };
+
+        for (const layout of targetLayouts) {
+            try {
+                const objects = layout.layout_json?.objects || {};
+                const flatObjects = [];
+
+                if (objects.bag) {
+                    flatObjects.push({
+                        id: objects.bag.id,
+                        filepath: objects.bag.filepath,
+                        pixel_data_path: objects.bag.pixel_data_path,
+                        transform: {
+                            x: objects.bag.center?.x || 0,
+                            y: objects.bag.center?.y || 0,
+                            width: objects.bag.size?.width || 800,
+                            height: objects.bag.size?.height || 600,
+                            rotation: 0,
+                        },
+                        layer: objects.bag.layer || 0,
+                    });
+                }
+
+                if (Array.isArray(objects.threats)) {
+                    for (const obj of objects.threats) {
+                        flatObjects.push({
+                            id: obj.id,
+                            filepath: obj.filepath,
+                            pixel_data_path: obj.pixel_data_path,
+                            transform: {
+                                x: obj.center?.x || 0,
+                                y: obj.center?.y || 0,
+                                width: obj.size?.width || 100,
+                                height: obj.size?.height || 100,
+                                rotation: obj.rotation || 0,
+                            },
+                            layer: obj.layer || 1,
+                        });
+                    }
+                }
+
+                if (Array.isArray(objects['non-threats'])) {
+                    for (const obj of objects['non-threats']) {
+                        flatObjects.push({
+                            id: obj.id,
+                            filepath: obj.filepath,
+                            pixel_data_path: obj.pixel_data_path,
+                            transform: {
+                                x: obj.center?.x || 0,
+                                y: obj.center?.y || 0,
+                                width: obj.size?.width || 100,
+                                height: obj.size?.height || 100,
+                                rotation: obj.rotation || 0,
+                            },
+                            layer: obj.layer || 2,
+                        });
+                    }
+                }
+
+                if (flatObjects.length > 0) {
+                    const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
+                    const lowEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
+                    for (const obj of lowEnergyObjects) {
+                        if (obj.pixel_data_path) {
+                            obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
+                        }
+                    }
+                    
+                    const safeLayoutId = String(layout.id || 'layout').replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'layout';
+                    const baseName = `SB_${safeLayoutId}`;
+
+                    const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, 'highenergy');
+                    const highExportPath = path.join(config.exportsHighRoot, `${baseName}_high.png`);
+                    await fs.writeFile(highExportPath, highPngBuffer);
+                    savedPaths.high.push(highExportPath);
+
+                    const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, 'lowenergy');
+                    const lowExportPath = path.join(config.exportsLowRoot, `${baseName}_low.png`);
+                    await fs.writeFile(lowExportPath, lowPngBuffer);
+                    savedPaths.low.push(lowExportPath);
+
+                    exported.push({
+                        layoutId: layout.id,
+                        layoutName: layout.name,
+                        highEnergyPath: highExportPath,
+                        lowEnergyPath: lowExportPath,
+                        highEnergyFilename: `${baseName}_high.png`,
+                        lowEnergyFilename: `${baseName}_low.png`
+                    });
+                }
+            } catch (err) {
+                console.error(`[export] Failed to render layout ${layout.id}:`, err);
+                exported.push({
+                    layoutId: layout.id,
+                    layoutName: layout.name,
+                    error: err.message
+                });
+            }
+        }
+
+        res.json({
+            ok: true,
+            message: `Exported ${exported.length} layout(s)`,
+            exported,
+            savedPaths,
+            summary: {
+                total: targetLayouts.length,
+                success: exported.filter(e => !e.error).length,
+                failed: exported.filter(e => e.error).length
+            }
+        });
+    } catch (err) {
+        console.error('[export] Error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
 });
 
 app.get('/api/saved-layouts/:id', async (req, res) => {
@@ -2231,136 +2382,6 @@ app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
     } catch (err) {
         console.error("[render-and-save-collage-both] Error:", err);
         res.status(500).json({ ok: false, error: String(err) });
-    }
-});
-
-// Export saved layout images as a ZIP archive
-app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
-    try {
-        const layoutIds = req.query.ids;
-        let targetLayouts = [];
-
-        if (layoutIds && typeof layoutIds === 'string') {
-            // Export specific layouts by ID (comma-separated)
-            const ids = layoutIds.split(',').map(id => id.trim()).filter(Boolean);
-            const allLayouts = await getSavedLayouts();
-            targetLayouts = allLayouts.filter(l => ids.includes(l.id));
-        } else {
-            // Export all layouts
-            targetLayouts = await getSavedLayouts();
-        }
-
-        if (targetLayouts.length === 0) {
-            return res.status(404).json({ ok: false, error: 'No layouts found to export' });
-        }
-
-        // Set up ZIP response headers
-        const zipFilename = `saved-layouts-${new Date().toISOString().slice(0, 10)}.zip`;
-        res.setHeader('Content-Type', 'application/zip');
-        res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
-
-        // Create archiver instance
-        const archive = archiver('zip', { zlib: { level: 6 } });
-
-        // Pipe archive data to response
-        archive.pipe(res);
-
-        // Add each layout's rendered image to the ZIP (both high and low energy)
-        for (const layout of targetLayouts) {
-            try {
-                // Render the layout
-                const objects = layout.layout_json?.objects || {};
-                const flatObjects = [];
-
-                if (objects.bag) {
-                    flatObjects.push({
-                        id: objects.bag.id,
-                        filepath: objects.bag.filepath,
-                        pixel_data_path: objects.bag.pixel_data_path,
-                        transform: {
-                            x: objects.bag.center?.x || 0,
-                            y: objects.bag.center?.y || 0,
-                            width: objects.bag.size?.width || 800,
-                            height: objects.bag.size?.height || 600,
-                            rotation: 0,
-                        },
-                        layer: objects.bag.layer || 0,
-                    });
-                }
-
-                if (Array.isArray(objects.threats)) {
-                    for (const obj of objects.threats) {
-                        flatObjects.push({
-                            id: obj.id,
-                            filepath: obj.filepath,
-                            pixel_data_path: obj.pixel_data_path,
-                            transform: {
-                                x: obj.center?.x || 0,
-                                y: obj.center?.y || 0,
-                                width: obj.size?.width || 100,
-                                height: obj.size?.height || 100,
-                                rotation: obj.rotation || 0,
-                            },
-                            layer: obj.layer || 1,
-                        });
-                    }
-                }
-
-                if (Array.isArray(objects['non-threats'])) {
-                    for (const obj of objects['non-threats']) {
-                        flatObjects.push({
-                            id: obj.id,
-                            filepath: obj.filepath,
-                            pixel_data_path: obj.pixel_data_path,
-                            transform: {
-                                x: obj.center?.x || 0,
-                                y: obj.center?.y || 0,
-                                width: obj.size?.width || 100,
-                                height: obj.size?.height || 100,
-                                rotation: obj.rotation || 0,
-                            },
-                            layer: obj.layer || 2,
-                        });
-                    }
-                }
-
-                if (flatObjects.length > 0) {
-                    // Enrich objects separately for each energy type to ensure correct pixel data paths
-                    const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
-                    const lowEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
-                    
-                    // Update low energy objects to use lowenergy paths
-                    for (const obj of lowEnergyObjects) {
-                        if (obj.pixel_data_path) {
-                            obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, "lowenergy/");
-                        }
-                    }
-                    
-                    const safeLayoutId = String(layout.id || 'layout').replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'layout';
-                    const baseName = `SB_${safeLayoutId}`;
-
-                    // Render and add HIGH energy image
-                    const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, 'highenergy');
-                    archive.append(highPngBuffer, { name: `${baseName}_high.png` });
-
-                    // Render and add LOW energy image
-                    const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, 'lowenergy');
-                    archive.append(lowPngBuffer, { name: `${baseName}_low.png` });
-                }
-            } catch (err) {
-                console.error(`[export] Failed to render layout ${layout.id}:`, err);
-                // Continue with other layouts even if one fails
-            }
-        }
-
-        // Finalize the ZIP archive
-        await archive.finalize();
-
-    } catch (err) {
-        console.error('[export] Error:', err);
-        if (!res.headersSent) {
-            res.status(500).json({ ok: false, error: String(err) });
-        }
     }
 });
 

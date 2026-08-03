@@ -582,7 +582,7 @@ export default function SavedPage() {
 
   const handlePageInputBeforeInput = (e: React.FormEvent<HTMLInputElement>) => {
     const ev = e.nativeEvent as InputEvent;
-    if (ev.inputType.startsWith("delete") || ev.data === null) return;
+    if ((ev.inputType && ev.inputType.startsWith("delete")) || ev.data === null) return;
     if (!/^\d+$/.test(ev.data)) e.preventDefault();
   };
 
@@ -733,7 +733,7 @@ export default function SavedPage() {
     }
   };
 
-  // Export selected layouts as ZIP
+  // Export selected layouts - saves to exports folder with high/low resolution
   const exportSelected = async () => {
     if (selectedForExport.size === 0) {
       showToast('error', 'No layouts selected for export');
@@ -742,21 +742,53 @@ export default function SavedPage() {
     setExporting(true);
     try {
       const ids = Array.from(selectedForExport).join(',');
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}`);
+      
+      // Get API key from localStorage
+      const apiKey = localStorage.getItem('apiKey');
+      
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add API key header if available
+      if (apiKey) {
+        headers['X-API-Key'] = apiKey;
+      }
+      
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}`, {
+        headers,
+      });
+      
       if (!res.ok) {
         const data = await res.json().catch(() => null);
+        if (res.status === 401) {
+          throw new Error('Authentication required. Please configure your API key in Settings.');
+        }
         throw new Error(data?.error || `Export failed (HTTP ${res.status})`);
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `saved-layouts-${new Date().toISOString().slice(0, 10)}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast('success', `Exported ${selectedForExport.size} layout(s)`);
+      
+      const result = await res.json();
+      
+      if (result.ok) {
+        // Show detailed success message
+        const { summary, savedPaths } = result;
+        if (summary.failed > 0) {
+          showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)`);
+        } else {
+          showToast('success', `Successfully exported ${summary.success} layout(s)`);
+        }
+        
+        // Log the saved paths for debugging
+        console.log('Export completed:', {
+          summary,
+          savedPaths: {
+            high: savedPaths.high.length,
+            low: savedPaths.low.length
+          }
+        });
+      } else {
+        throw new Error(result.error || 'Export failed');
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error('Error exporting layouts:', err);
@@ -766,25 +798,67 @@ export default function SavedPage() {
     }
   };
 
-  // Export all layouts as ZIP
+  // Export all layouts - saves to exports folder with high/low resolution
   const exportAll = async () => {
+    if (!pagination || pagination.total === 0) {
+      showToast('error', 'No layouts to export');
+      return;
+    }
+    
+    const confirmed = window.confirm(
+      `Export all ${pagination.total} layouts?\n\nThis will render and save high and low resolution images for each layout to the exports folder.`
+    );
+    
+    if (!confirmed) return;
+    
     setExporting(true);
     try {
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export`);
+      // Get API key from localStorage
+      const apiKey = localStorage.getItem('apiKey');
+      
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add API key header if available
+      if (apiKey) {
+        headers['X-API-Key'] = apiKey;
+      }
+      
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export`, {
+        headers,
+      }, 300000); // 5 minute timeout
+      
       if (!res.ok) {
         const data = await res.json().catch(() => null);
+        if (res.status === 401) {
+          throw new Error('Authentication required. Please configure your API key in Settings.');
+        }
         throw new Error(data?.error || `Export failed (HTTP ${res.status})`);
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `saved-layouts-${new Date().toISOString().slice(0, 10)}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast('success', `Exported all layouts`);
+      
+      const result = await res.json();
+      
+      if (result.ok) {
+        // Show detailed success message
+        const { summary, savedPaths } = result;
+        if (summary.failed > 0) {
+          showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)`);
+        } else {
+          showToast('success', `Successfully exported all ${summary.success} layouts`);
+        }
+        
+        // Log the saved paths
+        console.log('Export all completed:', {
+          summary,
+          savedPaths: {
+            high: savedPaths.high.length,
+            low: savedPaths.low.length
+          }
+        });
+      } else {
+        throw new Error(result.error || 'Export failed');
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error('Error exporting all layouts:', err);
@@ -1140,19 +1214,57 @@ export default function SavedPage() {
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                // Export single layout
-                                const ids = [layout.id];
-                                const url = `${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids.join(','))}`;
-                                window.open(url, '_blank');
-                              }}
-                              className="p-1.5 rounded-md bg-panel border border-border text-muted hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors"
-                              title="Save this layout"
-                            >
-                              <Download size={14} />
-                            </button>
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  // Export single layout
+                                  try {
+                                    setExporting(true);
+
+                                    // Get API key from localStorage
+                                    const apiKey = localStorage.getItem('apiKey');
+
+                                    const headers: Record<string, string> = {
+                                      'Content-Type': 'application/json',
+                                    };
+
+                                    // Add API key header if available
+                                    if (apiKey) {
+                                      headers['X-API-Key'] = apiKey;
+                                    }
+
+                                    const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(layout.id)}`, {
+                                      headers,
+                                    });
+
+                                    if (!res.ok) {
+                                      const data = await res.json().catch(() => null);
+                                      if (res.status === 401) {
+                                        throw new Error('Authentication required. Please configure your API key in Settings.');
+                                      }
+                                      throw new Error(data?.error || `Export failed (HTTP ${res.status})`);
+                                    }
+                                    const result = await res.json();
+                                    if (result.ok) {
+                                      showToast('success', `Exported layout ${layout.id}`);
+                                      console.log('Single export completed:', result);
+                                    } else {
+                                      throw new Error(result.error || 'Export failed');
+                                    }
+                                  } catch (err) {
+                                    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+                                    console.error('Error exporting layout:', err);
+                                    showToast('error', `Failed to export: ${errorMessage}`);
+                                  } finally {
+                                    setExporting(false);
+                                  }
+                                }}
+                                disabled={exporting}
+                                className="p-1.5 rounded-md bg-panel border border-border text-muted hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Save this layout"
+                              >
+                                <Download size={14} />
+                              </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();

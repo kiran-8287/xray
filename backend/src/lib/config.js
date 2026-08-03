@@ -77,6 +77,12 @@ const config = {
   get pixelDataLowRoot() {
     return path.join(this.pixelDataRoot, 'lowenergy');
   },
+  get exportsHighRoot() {
+    return path.join(this.exportsRoot, 'high');
+  },
+  get exportsLowRoot() {
+    return path.join(this.exportsRoot, 'low');
+  },
 };
 
 export default config;
