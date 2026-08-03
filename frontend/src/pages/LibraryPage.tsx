@@ -252,29 +252,51 @@ export default function LibraryPage() {
         pageNumbers.push(i);
       }
 
-      // Fetch all remaining pages in parallel
-      const pageFetches = pageNumbers.slice(1).map(page =>
-        fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?page=${page}&limit=${BATCH_SIZE}`)
-          .then(res => res.json())
-      );
-
-      const allResponses = [firstData, ...(await Promise.all(pageFetches))];
-      
-      // Merge all categorized items
+      // Fetch pages in batches to avoid overwhelming the server with 100+ concurrent requests
+      const CONCURRENT_LIMIT = 5; // Max 5 concurrent requests
       const mergedCategorized: CategorizedItems = {};
-      for (const data of allResponses) {
-        if (!data.ok) continue;
-        const batchCategorized = normalizeCategorizedItems(data.categorized) as CategorizedItems;
-        for (const [category, subcats] of Object.entries(batchCategorized)) {
-          if (!mergedCategorized[category]) {
-            mergedCategorized[category] = {};
+      
+      // Process first page immediately
+      const batchCategorized = normalizeCategorizedItems(firstData.categorized) as CategorizedItems;
+      for (const [category, subcats] of Object.entries(batchCategorized)) {
+        if (!mergedCategorized[category]) {
+          mergedCategorized[category] = {};
+        }
+        const subcatsObj = subcats as Record<string, Item[]>;
+        for (const [subcat, items] of Object.entries(subcatsObj)) {
+          if (!mergedCategorized[category][subcat]) {
+            mergedCategorized[category][subcat] = [];
           }
-          const subcatsObj = subcats as Record<string, Item[]>;
-          for (const [subcat, items] of Object.entries(subcatsObj)) {
-            if (!mergedCategorized[category][subcat]) {
-              mergedCategorized[category][subcat] = [];
+          mergedCategorized[category][subcat].push(...items);
+        }
+      }
+
+      // Fetch remaining pages in batches
+      const remainingPages = pageNumbers.slice(1);
+      for (let i = 0; i < remainingPages.length; i += CONCURRENT_LIMIT) {
+        const batch = remainingPages.slice(i, i + CONCURRENT_LIMIT);
+        const pageFetches = batch.map(page =>
+          fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?page=${page}&limit=${BATCH_SIZE}`)
+            .then(res => res.json())
+        );
+
+        const batchResponses = await Promise.all(pageFetches);
+        
+        // Merge this batch
+        for (const data of batchResponses) {
+          if (!data.ok) continue;
+          const batchCategorized = normalizeCategorizedItems(data.categorized) as CategorizedItems;
+          for (const [category, subcats] of Object.entries(batchCategorized)) {
+            if (!mergedCategorized[category]) {
+              mergedCategorized[category] = {};
             }
-            mergedCategorized[category][subcat].push(...items);
+            const subcatsObj = subcats as Record<string, Item[]>;
+            for (const [subcat, items] of Object.entries(subcatsObj)) {
+              if (!mergedCategorized[category][subcat]) {
+                mergedCategorized[category][subcat] = [];
+              }
+              mergedCategorized[category][subcat].push(...items);
+            }
           }
         }
       }
