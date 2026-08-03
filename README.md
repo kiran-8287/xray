@@ -8,7 +8,26 @@ Before you start, install:
 
 - Git
 - Node.js 20+ and npm
+- Python 3 (required for backend image-processing scripts)
 - Docker Desktop (optional, for the Docker-based setup)
+
+### Python dependencies
+
+The backend spawns Python scripts that process raw pixel data. These require the
+following packages (also listed in `backend/requirements.txt`):
+
+```bash
+pip install -r backend/requirements.txt
+# or
+cd backend && pip install -r requirements.txt
+```
+
+Required packages:
+
+- `numpy` — array processing
+- `scipy` — connected-component labeling / morphology for valid-region extraction
+- `opencv-python` — polygon simplification and contour operations
+- `Pillow` — image conversion (`.npz` → `.png`)
 
 ## Clone the repository
 
@@ -94,3 +113,7 @@ From the repository root:
 - If the frontend cannot reach the backend, make sure the backend is running on port 8080.
 - If Docker is slow or fails to build on Windows, try the Node.js option instead.
 - If dependencies are missing, rerun the install commands above.
+- If you see `ModuleNotFoundError: No module named 'scipy'`, the Python packages
+  aren't installed. Run `pip install -r backend/requirements.txt`.
+- If multiple Python versions are installed, make sure the `python` command on
+  your PATH points to the installation where you ran `pip install`.
