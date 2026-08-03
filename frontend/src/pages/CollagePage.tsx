@@ -131,7 +131,6 @@ export default function CollagePage() {
     savedCount: number;
   }>({ status: "idle", message: "", savedCount: 0 });
 
-  const [savedCount, setSavedCount] = useState(0);
   const [isSavingPage, setIsSavingPage] = useState(false);
 
   const [showSaveThisPageDialog, setShowSaveThisPageDialog] = useState(false);
@@ -372,7 +371,6 @@ export default function CollagePage() {
     setIsSavingPage(true);
     const saved = await GenerationService.saveCurrentPage(mode);
     if (saved > 0) {
-      setSavedCount(prev => prev + saved);
       setBufferCount(GenerationService.getBufferCount());
       showToast("info", `✓ ${saved} combinations saved (${mode === "both" ? "Annotations + Images" : "Annotations Only"}) — next 100 loaded`);
     } else {
@@ -609,7 +607,6 @@ export default function CollagePage() {
         setSelectedThreats([]);
         setSelectedOthers([]);
         setBufferCount(0);
-        setSavedCount(0);
         try {
           sessionStorage.removeItem("collageCombinations");
           sessionStorage.removeItem("collageFailures");
@@ -799,7 +796,6 @@ export default function CollagePage() {
       setSelectedThreats([]);
       setSelectedOthers([]);
       setBufferCount(0);
-      setSavedCount(0);
       try {
         sessionStorage.removeItem("collageCombinations");
         sessionStorage.removeItem("collageFailures");
@@ -1228,7 +1224,7 @@ export default function CollagePage() {
                 {isGenerating
                   ? `Generating ${totalGenerated.toLocaleString()}/${totalRequested.toLocaleString()} combinations...`
                   : totalGenerated > 0
-                  ? `${combinations.length.toLocaleString()} showing now${bufferCount > 0 ? ` · ${bufferCount.toLocaleString()} in buffer` : ""}${savedCount > 0 ? ` · ${savedCount.toLocaleString()} saved` : (autoSaveStatus?.queued ?? 0) > 0 ? ` · ${autoSaveStatus!.queued.toLocaleString()} saved` : ""}`
+                  ? `${combinations.length.toLocaleString()} showing now${bufferCount > 0 ? ` · ${bufferCount.toLocaleString()} in buffer` : ""}${totalGenerated > totalPending ? ` · ${(totalGenerated - totalPending).toLocaleString()} saved` : ""}`
                   : "0 combinations generated"}
               </p>
             </div>

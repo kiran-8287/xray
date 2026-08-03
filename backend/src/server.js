@@ -107,7 +107,7 @@ function classifyPageHint(req) {
     try {
         const pathname = referer.startsWith('http') ? new URL(referer).pathname : referer;
         const p = (pathname || '').toLowerCase();
-        if (!p || p === '/' || p === '/home') return 'home';
+        if (!p || p === '/' || p === '/home') return 'upload';
         if (p.startsWith('/upload')) return 'upload';
         if (p.startsWith('/library')) return 'library';
         if (p.startsWith('/collage') || p.startsWith('/generate')) return 'collage';
@@ -409,12 +409,13 @@ app.get('/metrics', async (_req, res) => {
 async function cleanupOldTempFiles() {
   try {
     await fs.mkdir(tempDir, { recursive: true });
-    const files = await fs.readdir(tempDir);
     const now = Date.now();
     const maxAge = 4 * 60 * 60 * 1000; // 4 hours
-
     let cleaned = 0;
-    for (const file of files) {
+
+    // Clean tempDir
+    const tempFiles = await fs.readdir(tempDir);
+    for (const file of tempFiles) {
       if (!file.endsWith(".tmp")) continue;
       const filePath = path.join(tempDir, file);
       try {
@@ -427,6 +428,23 @@ async function cleanupOldTempFiles() {
         // Ignore individual file errors
       }
     }
+
+    // Clean orphaned .tmp files in dataDir (from writeJSONFileAtomic operations)
+    const dataFiles = await fs.readdir(config.dataDir);
+    for (const file of dataFiles) {
+      if (!file.endsWith(".tmp")) continue;
+      const filePath = path.join(config.dataDir, file);
+      try {
+        const stats = await fs.stat(filePath);
+        if (now - stats.mtimeMs > maxAge) {
+          await fs.unlink(filePath);
+          cleaned++;
+        }
+      } catch (err) {
+        // Ignore individual file errors
+      }
+    }
+
     if (cleaned > 0) {
       console.log(`[temp-cleanup] Cleaned up ${cleaned} old temp files`);
     }

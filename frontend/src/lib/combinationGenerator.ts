@@ -991,7 +991,8 @@ export async function generateCombinationsIncremental(
       if (selectedNonThreats.length > 0) {
         nonThreatPositions = tryPlaceNonThreats(selectedNonThreats, bagObj, threatObjs);
         if (!nonThreatPositions) {
-          console.log(`[CombinationGenerator] Failed to place non-threats in bag ${entry.bag.name}`);
+          const bagName = entry.bag?.name || 'undefined';
+          console.log(`[CombinationGenerator] Failed to place non-threats in bag ${bagName}`);
           consecutiveFailuresByCount[selectedCount] = (consecutiveFailuresByCount[selectedCount] || 0) + 1;
           continue;
         }
