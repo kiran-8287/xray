@@ -8,7 +8,7 @@ frontend/dist/
 __pycache__/
 
 # Generated data
-backend/data/*.json
+backend/data/storage/*.json
 backend/data/library_images/
 backend/data/exports/
 backend/data/collage_images/
@@ -21,7 +21,7 @@ backend/data/items_*.json
 backend/data/items_backup.json
 
 # User-specific data (should not be shared)
-backend/data/customSubcategories.json
+backend/data/storage/customSubcategories.json
 
 # IDE
 .vscode/
@@ -37,12 +37,12 @@ Thumbs.db
 frontend/.env.development
 frontend/.env.docker
 
-# Saved layouts (user-specific data)
-backend/data/saved_layouts/
+# Storage folder (all JSON data files)
+backend/data/storage/
 
 # Backup and temporary files
-backend/data/*.bak
-backend/data/.dedup_healed
+backend/data/storage/*.bak
+backend/data/storage/.dedup_healed
 backend/data/monitoring.log
 
 # Test data files
@@ -74,3 +74,10 @@ tmp_combo_diag.py
 monitoring_dashboard.py
 run_monitoring_dashboard.py
 requirements-monitoring.txt
+
+# Reports and generated docs (local only)
+PORTABILITY_REPORT.md
+PROJECT_REPORT.md
+
+# System configuration and runtime data
+backend/data/
