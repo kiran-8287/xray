@@ -839,7 +839,8 @@ export default function SavedPage() {
           summary,
           savedPaths: {
             high: savedPaths.high.length,
-            low: savedPaths.low.length
+            low: savedPaths.low.length,
+            annotations: savedPaths.annotations?.length || 0
           }
         });
       } else {
@@ -929,7 +930,8 @@ export default function SavedPage() {
           summary,
           savedPaths: {
             high: savedPaths.high.length,
-            low: savedPaths.low.length
+            low: savedPaths.low.length,
+            annotations: savedPaths.annotations?.length || 0
           }
         });
       } else {

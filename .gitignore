@@ -79,5 +79,19 @@ requirements-monitoring.txt
 PORTABILITY_REPORT.md
 PROJECT_REPORT.md
 
+# LaTeX files
+*.tex
+*.aux
+*.log
+*.pdf
+*.out
+*.toc
+
+# Test and experimental files
+vanguard*
+pset*
+rep*test*
+create*main*test*
+
 # System configuration and runtime data
 backend/data/

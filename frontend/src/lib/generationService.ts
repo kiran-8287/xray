@@ -31,8 +31,8 @@ const NOTIFY_THROTTLE_MS = 100; // Throttle subscriber notifications to every 10
 
 // Chunked generation constants
 const CHUNK_SIZE = 5000; // Generate 5k combinations per chunk
-const MAX_BUFFER_SIZE = 10000; // Max combinations in memory (2 chunks)
-const BUFFER_REFILL_THRESHOLD = 2000; // Request more when buffer drops below this
+const MAX_BUFFER_SIZE = 300; // Max combinations in memory (3 pages) - optimized for responsive UI
+const BUFFER_REFILL_THRESHOLD = 100; // Request more when buffer drops below 1 page
 
 // Auto-save timing constants
 const AUTO_SAVE_INITIAL_DELAY_MS = 5000; // Wait 5 seconds before starting auto-save
@@ -520,7 +520,7 @@ function requestNextChunk() {
     existingIds: [...(params.existingIds || []), ...generatedIds],
     chunkSize: chunkSize,
     totalGenerated: totalGeneratedCount,
-    batchSize: 5000,
+    batchSize: 200,
   });
 }
 
@@ -593,22 +593,23 @@ export const GenerationService = {
             state.failures.push(...response.failures);
           }
           
+          // Always count generated combos and accumulate IDs, even if buffer is full
+          totalGeneratedCount += batch.length;
+          for (const combo of batch) {
+            if (combo.id) generatedIds.push(combo.id);
+          }
+          
           // Enforce buffer size limit - if buffer is full, we need to pause generation
           if (generatedBuffer.length >= MAX_BUFFER_SIZE && !autoSaveEnabled) {
             console.log(`[GenerationService] Buffer full (${generatedBuffer.length}/${MAX_BUFFER_SIZE}), pausing generation...`);
             // Don't add to buffer, wait for user to save
             // The worker will naturally slow down as we don't request more chunks
+            // ALWAYS notify subscribers so progress counter updates in real-time
+            notifySubscribers();
+            persistToStorage();
           } else {
             // Add batch to buffer
             generatedBuffer.push(...batch);
-            totalGeneratedCount += batch.length;
-            
-            // Accumulate generated IDs for subsequent chunks so the ID
-            // counter continues from the highest sequence instead of
-            // restarting (which would produce duplicate IDs).
-            for (const combo of batch) {
-              if (combo.id) generatedIds.push(combo.id);
-            }
             
             // Refill display window from buffer
             refillDisplayWindow();
@@ -740,7 +741,7 @@ export const GenerationService = {
         nonThreatDistribution: effectiveNonThreatDist,
         requireAtLeastOneNonThreat: params.requireAtLeastOneNonThreat || false,
         existingIds: params.existingIds || [],
-        batchSize: params.batchSize ?? 5000,
+        batchSize: params.batchSize ?? 200,
       });
       console.log("[GenerationService] Message sent to worker");
     } catch (err) {

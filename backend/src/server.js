@@ -279,9 +279,10 @@ await fs.mkdir(pixelDataRoot, { recursive: true });
 await fs.mkdir(tempDir, { recursive: true });
 
 // Ensure exports subdirectories exist
-const { exportsHighRoot, exportsLowRoot } = config;
+const { exportsHighRoot, exportsLowRoot, exportsAnnotationsRoot } = config;
 await fs.mkdir(exportsHighRoot, { recursive: true });
 await fs.mkdir(exportsLowRoot, { recursive: true });
+await fs.mkdir(exportsAnnotationsRoot, { recursive: true });
 
 // Fallback middleware: if a requested PNG is missing in libraryImagesRoot, generate it on-the-fly from pixel_data if available
 app.get('/data/library_images/:filename', async (req, res, next) => {
@@ -1230,16 +1231,22 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                 ok: true,
                 message: 'No layouts to export',
                 exported: [],
-                savedPaths: { high: [], low: [] },
+                savedPaths: { high: [], low: [], annotations: [] },
                 cancelled
             });
         }
 
         await fs.mkdir(config.exportsHighRoot, { recursive: true });
         await fs.mkdir(config.exportsLowRoot, { recursive: true });
+        await fs.mkdir(config.exportsAnnotationsRoot, { recursive: true });
 
         const exported = [];
-        const savedPaths = { high: [], low: [] };
+        const savedPaths = { high: [], low: [], annotations: [] };
+        const annotationRecords = [];
+        const ANNOTATION_PARTITION_CAP = 5000;
+        let annotationPartitionNum = 1;
+        let currentAnnotationPartition = [];
+        const annotationPartitions = [];
 
         for (const layout of targetLayouts) {
             // Stop at the next layout boundary if the client requested cancellation.
@@ -1325,13 +1332,42 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     await fs.writeFile(lowExportPath, lowPngBuffer);
                     savedPaths.low.push(lowExportPath);
 
+                    // Build the annotation record for this layout (the full object data
+                    // from the saved layout, plus references to the rendered images).
+                    const annotation = {
+                        layoutId: layout.id,
+                        layoutName: layout.name,
+                        createdAt: layout.created_at || null,
+                        exportedAt: new Date().toISOString(),
+                        highEnergyImage: `${baseName}_high.png`,
+                        lowEnergyImage: `${baseName}_low.png`,
+                        objects: layout.layout_json?.objects || null
+                    };
+                    // Per-layout annotation file (always written for single/bulk)
+                    const annotationPath = path.join(config.exportsAnnotationsRoot, `${baseName}.json`);
+                    await fs.writeFile(annotationPath, JSON.stringify(annotation, null, 2));
+                    savedPaths.annotations.push(annotationPath);
+                    annotationRecords.push(annotation);
+
+                    // Also accumulate into partition buffer for bulk export manifest
+                    currentAnnotationPartition.push(annotation);
+                    if (currentAnnotationPartition.length >= ANNOTATION_PARTITION_CAP) {
+                        const partPath = path.join(config.exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
+                        await fs.writeFile(partPath, JSON.stringify(currentAnnotationPartition, null, 2));
+                        annotationPartitions.push(partPath);
+                        savedPaths.annotations.push(partPath);
+                        annotationPartitionNum++;
+                        currentAnnotationPartition = [];
+                    }
+
                     exported.push({
                         layoutId: layout.id,
                         layoutName: layout.name,
                         highEnergyPath: highExportPath,
                         lowEnergyPath: lowExportPath,
                         highEnergyFilename: `${baseName}_high.png`,
-                        lowEnergyFilename: `${baseName}_low.png`
+                        lowEnergyFilename: `${baseName}_low.png`,
+                        annotationPath
                     });
                 }
             } catch (err) {
@@ -1341,6 +1377,18 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     layoutName: layout.name,
                     error: err.message
                 });
+            }
+        }
+
+        // Flush remaining annotations in the partition buffer
+        if (currentAnnotationPartition.length > 0) {
+            try {
+                const partPath = path.join(config.exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
+                await fs.writeFile(partPath, JSON.stringify(currentAnnotationPartition, null, 2));
+                annotationPartitions.push(partPath);
+                savedPaths.annotations.push(partPath);
+            } catch (err) {
+                console.warn('[export] Failed to write annotation partition:', err);
             }
         }
 
@@ -2468,6 +2516,167 @@ app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
         });
     } catch (err) {
         console.error("[render-and-save-collage-both] Error:", err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Regenerate collage images from layout JSON (for portability - no need to carry image files)
+// Returns base64-encoded PNG images that can be used directly in the frontend
+app.post("/api/regenerate-collage-images", requireAuth, async (req, res) => {
+    try {
+        const { layout_json, layoutId, saveToDisk = false, outputPath } = req.body;
+
+        // Support both direct layout_json and layoutId lookup
+        let objects;
+        let layoutName;
+
+        if (layout_json?.objects) {
+            objects = layout_json.objects;
+            layoutName = layout_json.name || 'regenerated';
+        } else if (layoutId) {
+            // Fetch layout from database
+            const layout = await getSavedLayoutById(layoutId);
+            if (!layout) {
+                return res.status(404).json({ ok: false, error: "Layout not found" });
+            }
+            objects = layout.layout_json?.objects;
+            layoutName = layout.name || 'regenerated';
+        } else {
+            return res.status(400).json({ ok: false, error: "Missing layout_json or layoutId" });
+        }
+
+        if (!objects) {
+            return res.status(400).json({ ok: false, error: "No objects found in layout" });
+        }
+
+        // Flatten objects array (bag, threats, non-threats)
+        const flatObjects = [];
+        if (objects.bag) {
+            flatObjects.push({
+                ...objects.bag,
+                transform: {
+                    x: objects.bag.center?.x || 0,
+                    y: objects.bag.center?.y || 0,
+                    width: objects.bag.size?.width || 800,
+                    height: objects.bag.size?.height || 600,
+                    rotation: 0,
+                },
+                layer: objects.bag.layer || 0,
+            });
+        }
+        if (Array.isArray(objects.threats)) {
+            for (const t of objects.threats) {
+                flatObjects.push({
+                    ...t,
+                    transform: {
+                        x: t.center?.x || 0,
+                        y: t.center?.y || 0,
+                        width: t.size?.width || 120,
+                        height: t.size?.height || 60,
+                        rotation: t.rotation || 0,
+                    },
+                    layer: t.layer || 1,
+                });
+            }
+        }
+        if (Array.isArray(objects['non-threats'])) {
+            for (const nt of objects['non-threats']) {
+                flatObjects.push({
+                    ...nt,
+                    transform: {
+                        x: nt.center?.x || 0,
+                        y: nt.center?.y || 0,
+                        width: nt.size?.width || 80,
+                        height: nt.size?.height || 80,
+                        rotation: nt.rotation || 0,
+                    },
+                    layer: nt.layer || 1,
+                });
+            }
+        }
+
+        if (flatObjects.length === 0) {
+            return res.status(400).json({ ok: false, error: "No valid objects to render" });
+        }
+
+        // Enrich objects with pixel data paths
+        const enrichedObjects = await enrichObjectsWithPixelData(flatObjects);
+
+        // Prepare energy-specific object sets
+        const highEnergyObjects = enrichedObjects;
+        const lowEnergyObjects = enrichedObjects.map(obj => {
+            if (obj.pixel_data_path) {
+                return {
+                    ...obj,
+                    pixel_data_path: obj.pixel_data_path.replace(/^highenergy[\\/]/, "lowenergy/")
+                };
+            }
+            return obj;
+        });
+
+        // Render both energy types
+        const [highPngBuffer, lowPngBuffer] = await Promise.all([
+            renderSceneAsync(highEnergyObjects, 800, 600, "highenergy"),
+            renderSceneAsync(lowEnergyObjects, 800, 600, "lowenergy")
+        ]);
+
+        // Convert to base64 for easy transport
+        const highBase64 = highPngBuffer.toString('base64');
+        const lowBase64 = lowPngBuffer.toString('base64');
+
+        const response = {
+            ok: true,
+            layoutName,
+            high_image: `data:image/png;base64,${highBase64}`,
+            low_image: `data:image/png;base64,${lowBase64}`,
+        };
+
+        // Optionally save to disk
+        if (saveToDisk) {
+            const safeName = layoutName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+            const filename = `${safeName}.png`;
+
+            let highEnergyDir, lowEnergyDir;
+
+            if (outputPath && typeof outputPath === 'string') {
+                const sanitizedPath = outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '');
+
+                if (sanitizedPath.includes('..')) {
+                    return res.status(400).json({ ok: false, error: "Invalid output path" });
+                }
+
+                const resolvedProjectRoot = path.resolve(__dirname, '..');
+
+                if (!path.isAbsolute(sanitizedPath)) {
+                    const customCollageRoot = path.resolve(resolvedProjectRoot, 'data', sanitizedPath, 'collage_images');
+                    highEnergyDir = path.resolve(customCollageRoot, 'high');
+                    lowEnergyDir = path.resolve(customCollageRoot, 'low');
+                } else {
+                    const customCollageRoot = path.resolve(sanitizedPath, 'collage_images');
+                    highEnergyDir = path.resolve(customCollageRoot, 'high');
+                    lowEnergyDir = path.resolve(customCollageRoot, 'low');
+                }
+
+                await fs.mkdir(highEnergyDir, { recursive: true });
+                await fs.mkdir(lowEnergyDir, { recursive: true });
+            } else {
+                highEnergyDir = collageHighRoot;
+                lowEnergyDir = collageLowRoot;
+            }
+
+            await fs.writeFile(path.join(highEnergyDir, filename), highPngBuffer);
+            await fs.writeFile(path.join(lowEnergyDir, filename), lowPngBuffer);
+
+            response.savedTo = {
+                filename,
+                high_path: path.join(highEnergyDir, filename),
+                low_path: path.join(lowEnergyDir, filename),
+            };
+        }
+
+        res.json(response);
+    } catch (err) {
+        console.error("[regenerate-collage-images] Error:", err);
         res.status(500).json({ ok: false, error: String(err) });
     }
 });
