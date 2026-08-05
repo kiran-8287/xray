@@ -1,12 +1,15 @@
 import request from 'supertest';
 import path from 'node:path';
 import fsPromises from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import app from '../src/server.js';
 import config from '../src/lib/config.js';
 import { createTestPng } from './helpers.js';
 
 describe('API Tests', () => {
-  const tmpDir = path.join(process.cwd(), 'backend', 'tests', 'tmp');
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const tmpDir = path.join(__dirname, 'tmp');
 
   beforeAll(async () => {
     await fsPromises.mkdir(tmpDir, { recursive: true });

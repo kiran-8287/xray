@@ -44,8 +44,8 @@ const config = {
   libraryImagesRoot: process.env.LIBRARY_IMAGES_PATH || path.resolve(PROJECT_ROOT, 'data', 'library_images'),
   collageImagesRoot: process.env.COLLAGE_IMAGES_PATH || path.resolve(PROJECT_ROOT, 'data', 'collage_images'),
   pixelDataRoot: process.env.PIXEL_DATA_PATH || path.resolve(PROJECT_ROOT, 'data', 'pixel_data'),
-  dataDir: process.env.DATA_DIR || path.resolve(PROJECT_ROOT, 'data'),
-  savedLayoutsDir: process.env.SAVED_LAYOUTS_PATH || path.resolve(PROJECT_ROOT, 'data', 'saved_layouts'),
+  dataDir: process.env.DATA_DIR || path.resolve(PROJECT_ROOT, 'data', 'storage'),
+  savedLayoutsDir: process.env.SAVED_LAYOUTS_PATH || path.resolve(PROJECT_ROOT, 'data', 'storage'),
   exportsRoot: process.env.EXPORTS_PATH || path.resolve(PROJECT_ROOT, 'data', 'exports'),
   tempDir: process.env.TEMP_PATH || path.resolve(PROJECT_ROOT, 'data', 'temp'),
 
@@ -82,6 +82,9 @@ const config = {
   },
   get exportsLowRoot() {
     return path.join(this.exportsRoot, 'low');
+  },
+  get exportsAnnotationsRoot() {
+    return path.join(this.exportsRoot, 'annotations');
   },
 };
 

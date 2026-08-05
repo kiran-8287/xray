@@ -117,7 +117,7 @@ async function handleRequest(data: IncrementalWorkerRequest) {
       data.nonThreatDistribution,
       data.requireAtLeastOneNonThreat,
       data.existingIds,
-      data.batchSize ?? 5000
+      data.batchSize ?? 200
     );
 
     const totalGenerated = (data.totalGenerated || 0) + results.length;

@@ -2,13 +2,16 @@ import request from 'supertest';
 import app from '../src/server.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 describe('Load Tests', () => {
   const TEST_TIMEOUT = 60000; // 60 seconds for load tests
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
 
   beforeAll(async () => {
     // Ensure test directories exist
-    const testDir = path.join(process.cwd(), 'backend', 'tests', 'tmp');
+    const testDir = path.join(__dirname, 'tmp');
     await fs.mkdir(testDir, { recursive: true });
   });
 
@@ -17,7 +20,7 @@ describe('Load Tests', () => {
       const uploadPromises = [];
       
       for (let i = 0; i < 10; i++) {
-        const filePath = path.join(process.cwd(), 'backend', 'tests', 'tmp', `load-test-${Date.now()}-${i}.png`);
+        const filePath = path.join(__dirname, 'tmp', `load-test-${Date.now()}-${i}.png`);
         // Write a minimal valid PNG (1x1 pixel, 8-bit grayscale)
         const pngBuffer = Buffer.from([
           0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
@@ -53,7 +56,7 @@ describe('Load Tests', () => {
       const uploadPromises = [];
       
       for (let i = 0; i < 20; i++) {
-        const filePath = path.join(process.cwd(), 'backend', 'tests', 'tmp', `load-test-20-${Date.now()}-${i}.png`);
+        const filePath = path.join(__dirname, 'tmp', `load-test-20-${Date.now()}-${i}.png`);
         const pngBuffer = Buffer.from([
           0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
           0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
@@ -141,7 +144,7 @@ describe('Load Tests', () => {
       const uploadPromises = [];
       
       for (let i = 0; i < 10; i++) {
-        const filePath = path.join(process.cwd(), 'backend', 'tests', 'tmp', `mem-test-${Date.now()}-${i}.png`);
+        const filePath = path.join(__dirname, 'tmp', `mem-test-${Date.now()}-${i}.png`);
         const pngBuffer = Buffer.from([
           0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
           0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,

@@ -11,7 +11,8 @@ import type { Point } from "../types/geometry";
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
-const DEFAULT_BATCH_SIZE = 5000;
+const DEFAULT_BATCH_SIZE = 200;  // Emit every 200 combos (2 pages) for responsive UI
+const YIELD_INTERVAL = 10;       // Yield to event loop every 10 combos
 const validRegionCache = new Map<string, Point[]>();
 const CACHE_MAX_SIZE = 100;
 let _idBasePrefix = '';
@@ -145,7 +146,7 @@ function tryPlaceThreat(threat: Item, bagObj: SceneObject, x: number, y: number,
   return isObjectInsideContainer(testObj, bagObj);
 }
 
-function tryPlaceNonThreats(items: Item[], bagObj: SceneObject, threatObjs: SceneObject[], maxAttempts: number = 50): { x: number; y: number; rotation: number }[] | null {
+function tryPlaceNonThreats(items: Item[], bagObj: SceneObject, threatObjs: SceneObject[], maxAttempts: number = 25): { x: number; y: number; rotation: number }[] | null {
   const positions: { x: number; y: number; rotation: number }[] = [];
   for (const item of items) {
     const outline = parseOutline(item);
@@ -913,8 +914,19 @@ export async function generateCombinationsIncremental(
     const maxAttemptsWithoutProgress = Math.max(k * 10, 50_000);
     let attemptsWithoutProgress = 0;
     let lastBatchIndex = 0;
+    let lastProgressTime = Date.now();
+    const PROGRESS_INTERVAL_MS = 2000;
     while (results.length < k && totalRemaining > 0 && attemptsWithoutProgress < maxAttemptsWithoutProgress) {
       attemptsWithoutProgress++;
+      
+      // Send periodic progress updates even when no combos generated yet
+      const now = Date.now();
+      if (now - lastProgressTime >= PROGRESS_INTERVAL_MS) {
+        lastProgressTime = now;
+        onBatch([], { generated: results.length, total: k });
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      
       const entry = selectWeightedBag();
       if (!entry) break;
       if (!entry.hasValidRegion) { entry.isExhausted = true; continue; }
@@ -991,10 +1003,26 @@ export async function generateCombinationsIncremental(
       if (selectedNonThreats.length > 0) {
         nonThreatPositions = tryPlaceNonThreats(selectedNonThreats, bagObj, threatObjs);
         if (!nonThreatPositions) {
-          const bagName = entry.bag?.name || 'undefined';
-          console.log(`[CombinationGenerator] Failed to place non-threats in bag ${bagName}`);
-          consecutiveFailuresByCount[selectedCount] = (consecutiveFailuresByCount[selectedCount] || 0) + 1;
-          continue;
+          // Non-threat placement failed. Try a different non-threat selection
+          // instead of exhausting the threat count. If we can't place any
+          // non-threats after retries, fall back to generating without them.
+          let retried = false;
+          for (let retry = 0; retry < 3 && !retried; retry++) {
+            const retryCount = pickNonThreatCountByDistribution(nonThreatDistribution, nonThreats.length, false);
+            const retryNonThreats = pickRandomK(nonThreats, retryCount);
+            if (retryNonThreats.length === 0) { retried = true; break; }
+            const retryPositions = tryPlaceNonThreats(retryNonThreats, bagObj, threatObjs);
+            if (retryPositions) {
+              selectedNonThreats = retryNonThreats;
+              nonThreatPositions = retryPositions;
+              retried = true;
+            }
+          }
+          if (!retried) {
+            // Fall back to generating without non-threats
+            selectedNonThreats = [];
+            nonThreatPositions = [];
+          }
         }
       }
       const objects: SceneObject[] = [bagObj];
@@ -1011,6 +1039,13 @@ export async function generateCombinationsIncremental(
       entry.usageCount++;
       attemptsWithoutProgress = 0;
       consecutiveFailuresByCount[selectedCount] = 0;
+      
+      // Yield to event loop frequently to keep UI responsive
+      if (results.length % YIELD_INTERVAL === 0) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      
+      // Emit batch when reaching batch size
       if (results.length - lastBatchIndex >= effectiveBatchSize) {
         const batch = results.slice(lastBatchIndex);
         lastBatchIndex = results.length;

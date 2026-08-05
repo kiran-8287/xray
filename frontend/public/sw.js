@@ -74,6 +74,29 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Handle JS/worker files - network first, fallback to cache
+  if (request.destination === 'script' || request.destination === 'worker' || url.pathname.endsWith('.js')) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (!response || response.status !== 200) {
+            return caches.match(request);
+          }
+          // Cache the new version
+          const responseToCache = response.clone();
+          caches.open(STATIC_CACHE_NAME)
+            .then((cache) => {
+              cache.put(request, responseToCache);
+            });
+          return response;
+        })
+        .catch(() => {
+          return caches.match(request);
+        })
+    );
+    return;
+  }
+
   // Handle static assets - cache first
   event.respondWith(
     caches.match(request)
