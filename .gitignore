@@ -35,7 +35,6 @@ Thumbs.db
 .env
 .env.local
 frontend/.env.development
-frontend/.env.docker
 
 # Storage folder (all JSON data files)
 backend/data/storage/
