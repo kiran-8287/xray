@@ -33,6 +33,7 @@ const NOTIFY_THROTTLE_MS = 100; // Throttle subscriber notifications to every 10
 const CHUNK_SIZE = 5000; // Generate 5k combinations per chunk
 const MAX_BUFFER_SIZE = 300; // Max combinations in memory (3 pages) - optimized for responsive UI
 const BUFFER_REFILL_THRESHOLD = 100; // Request more when buffer drops below 1 page
+const MAX_BUFFER_GROWTH = 1000; // Allow buffer to grow up to this size before hard pause
 
 // Auto-save timing constants
 const AUTO_SAVE_INITIAL_DELAY_MS = 5000; // Wait 5 seconds before starting auto-save
@@ -593,42 +594,32 @@ export const GenerationService = {
             state.failures.push(...response.failures);
           }
           
-          // Always count generated combos and accumulate IDs, even if buffer is full
+          // Always count generated combos and accumulate IDs
           totalGeneratedCount += batch.length;
           for (const combo of batch) {
             if (combo.id) generatedIds.push(combo.id);
           }
           
-          // Enforce buffer size limit - if buffer is full, we need to pause generation
-          if (generatedBuffer.length >= MAX_BUFFER_SIZE && !autoSaveEnabled) {
-            console.log(`[GenerationService] Buffer full (${generatedBuffer.length}/${MAX_BUFFER_SIZE}), pausing generation...`);
-            // Don't add to buffer, wait for user to save
-            // The worker will naturally slow down as we don't request more chunks
-            // ALWAYS notify subscribers so progress counter updates in real-time
-            notifySubscribers();
-            persistToStorage();
-          } else {
-            // Add batch to buffer
-            generatedBuffer.push(...batch);
-            
-            // Refill display window from buffer
-            refillDisplayWindow();
-            
-            if (state.combinations.length > 0 || generatedBuffer.length > 0) {
-              state.hasGeneratedResults = true;
-            }
-            notifySubscribers();
-            persistToStorage();
-            
-            // In auto-save mode, let the auto-save loop handle refilling.
-            // We intentionally do NOT call checkAndRefillBuffer() here for
-            // manual mode — chunk requests are driven exclusively by
-            // chunkComplete. (isGeneratingChunk is set for the initial
-            // generate as well, so calling it here would be a no-op and
-            // could even race with the in-flight chunk.)
-            if (autoSaveEnabled) {
-              wakeLoopNow();
-            }
+          // Always add batch to buffer - never discard data
+          generatedBuffer.push(...batch);
+          
+          // Refill display window from buffer
+          refillDisplayWindow();
+          
+          if (state.combinations.length > 0 || generatedBuffer.length > 0) {
+            state.hasGeneratedResults = true;
+          }
+          notifySubscribers();
+          persistToStorage();
+          
+          // In auto-save mode, let the auto-save loop handle refilling.
+          // We intentionally do NOT call checkAndRefillBuffer() here for
+          // manual mode — chunk requests are driven exclusively by
+          // chunkComplete. (isGeneratingChunk is set for the initial
+          // generate as well, so calling it here would be a no-op and
+          // could even race with the in-flight chunk.)
+          if (autoSaveEnabled) {
+            wakeLoopNow();
           }
         } else if (response.type === "chunkComplete") {
           console.log("[GenerationService] Chunk complete:", response.progress, "isComplete:", response.isComplete);
@@ -669,7 +660,7 @@ export const GenerationService = {
           // generation is done — otherwise the chunkComplete handler would
           // deadlock (neither branch matching) and the UI would hang.
           const reachedTarget = totalGeneratedCount >= params.kValue;
-          const bufferHasRoom = generatedBuffer.length < MAX_BUFFER_SIZE;
+          const bufferHasRoom = generatedBuffer.length < MAX_BUFFER_GROWTH;
           
           if (!response.isComplete && !reachedTarget && bufferHasRoom) {
             console.log("[GenerationService] Requesting next chunk...");
@@ -684,8 +675,11 @@ export const GenerationService = {
                 total: params.kValue,
               };
               finishGeneration(finalProgress);
+            } else if (generatedBuffer.length >= MAX_BUFFER_SIZE) {
+              console.log(`[GenerationService] Buffer full (${generatedBuffer.length}/${MAX_BUFFER_GROWTH}), pausing generation. Save pages to free up space.`);
+              // Buffer is full - pause and wait for user to save pages
+              // checkAndRefillBuffer() will be called after saveCurrentPage()
             }
-            // else: buffer full in manual mode — pause and wait for a save.
           }
         } else if (response.type === "complete") {
           console.log("[GenerationService] Generation complete:", response.progress);

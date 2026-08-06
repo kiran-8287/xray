@@ -4,7 +4,7 @@
 import { generateCombinationsIncremental } from "../lib/combinationGenerator";
 
 export interface IncrementalWorkerRequest {
-  type: "generate" | "generateChunk";
+  type: "generate" | "generateChunk" | "pause" | "resume";
   selectedBags: any[];
   selectedThreats: any[];
   selectedOthers: any[];
