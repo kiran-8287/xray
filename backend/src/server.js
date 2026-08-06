@@ -94,6 +94,9 @@ const uploadFileDuration = new client.Histogram({
 //
 // request_finished additionally carries: status, duration_ms, duration_s, content_length
 
+// Ensure data directory exists before creating log stream
+await fs.mkdir(config.dataDir, { recursive: true });
+
 const LOG_PATH = path.join(config.dataDir, 'monitoring.log');
 const logStream = createWriteStream(LOG_PATH, { flags: 'a' });
 let inFlightCounter = 0;
