@@ -291,19 +291,21 @@ const ValidRegionEditor: React.FC<ValidRegionEditorProps> = ({
   const handleSave = async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
+
     console.log('handleSave: polygons:', polygons, 'tempPolygon:', tempPolygon, 'isDrawing:', isDrawing);
-    
+
     // Combine ALL polygon points into one polygon for saving
     let pointsToSave: Point[] = [];
     if (polygons.length > 0) {
       // Merge all polygon points together into one combined polygon
       pointsToSave = polygons.flatMap(p => p.points);
-    } else if (tempPolygon.length >= 3) {
-      // If user was still drawing, save the temp polygon
-      pointsToSave = tempPolygon;
     }
-    
+
+    // Also include temp polygon if it exists (regardless of whether polygons exist)
+    if (tempPolygon.length >= 3) {
+      pointsToSave = [...pointsToSave, ...tempPolygon];
+    }
+
     // Require at least 3 points for a valid region
     if (pointsToSave.length < 3) {
       showToast('warning', 'Please draw a valid region with at least 3 points before saving.');

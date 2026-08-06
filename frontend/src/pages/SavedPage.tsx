@@ -808,7 +808,7 @@ export default function SavedPage() {
         headers['X-API-Key'] = apiKey;
       }
       
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}&saveMode=selected`, {
         headers,
         signal: controller.signal,
       }, 300000);
@@ -826,12 +826,16 @@ export default function SavedPage() {
       if (result.ok) {
         // Show detailed success message
         const { summary, savedPaths } = result;
+        const fileCount = summary?.fileCount;
+        const fileCountMsg = fileCount
+          ? ` (${fileCount.high} high, ${fileCount.low} low${fileCount.annotations > 0 ? `, ${fileCount.annotations} annotations${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}` : ''})`
+          : '';
         if (result.cancelled) {
           showToast('info', `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`);
         } else if (summary.failed > 0) {
-          showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)`);
+          showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)${fileCountMsg}`);
         } else {
-          showToast('success', `Successfully exported ${summary.success} layout(s)`);
+          showToast('success', `Successfully exported ${summary.success} layout(s)${fileCountMsg}`);
         }
         
         // Log the saved paths for debugging
@@ -899,7 +903,7 @@ export default function SavedPage() {
         headers['X-API-Key'] = apiKey;
       }
       
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}&saveMode=all`, {
         headers,
         signal: controller.signal,
       }, 300000); // 5 minute timeout
@@ -917,12 +921,16 @@ export default function SavedPage() {
       if (result.ok) {
         // Show detailed success message
         const { summary, savedPaths } = result;
+        const fileCount = summary?.fileCount;
+        const fileCountMsg = fileCount
+          ? ` (${fileCount.high} high, ${fileCount.low} low${fileCount.annotations > 0 ? `, ${fileCount.annotations} annotations${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}` : ''})`
+          : '';
         if (result.cancelled) {
           showToast('info', `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`);
         } else if (summary.failed > 0) {
-          showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)`);
+          showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)${fileCountMsg}`);
         } else {
-          showToast('success', `Successfully exported all ${summary.success} layouts`);
+          showToast('success', `Successfully exported all ${summary.success} layouts${fileCountMsg}`);
         }
         
         // Log the saved paths
@@ -1330,7 +1338,7 @@ export default function SavedPage() {
                                       headers['X-API-Key'] = apiKey;
                                     }
 
-                                    const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(layout.id)}`, {
+                                    const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(layout.id)}&saveMode=individual`, {
                                       headers,
                                     });
 

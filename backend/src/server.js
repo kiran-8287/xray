@@ -1211,6 +1211,15 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
     const jobId = typeof req.query.jobId === 'string' && req.query.jobId.trim()
         ? req.query.jobId.trim()
         : null;
+    // saveMode: 'individual' = save images + per-layout JSON only (no batch annotations.json)
+    //           'selected' (default) = save images + per-layout JSON; if > BATCH_THRESHOLD,
+    //                                  also accumulate into batch annotations.json partitions
+    //           'all' = always save images + per-layout JSON + batch annotations.json partitions
+    const saveMode = typeof req.query.saveMode === 'string' && req.query.saveMode.trim()
+        ? req.query.saveMode.trim().toLowerCase()
+        : 'selected';
+    const BATCH_THRESHOLD = 50; // Save Selected uses batch strategy when count exceeds this
+    const useBatchAnnotations = saveMode === 'all';
     let cancelled = false;
 
     try {
@@ -1346,21 +1355,33 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                         lowEnergyImage: `${baseName}_low.png`,
                         objects: layout.layout_json?.objects || null
                     };
-                    // Per-layout annotation file (always written for single/bulk)
-                    const annotationPath = path.join(config.exportsAnnotationsRoot, `${baseName}.json`);
+                    // Per-layout annotation file — always written for all modes.
+                    // Individual and small Save Selected keep only per-layout JSONs;
+                    // batch annotations.json partitions are only created when:
+                    //   - saveMode === 'all', OR
+                    //   - saveMode === 'selected' and targetLayouts.length > BATCH_THRESHOLD
+                    const shouldCreateBatchAnnotations =
+                        saveMode === 'all' ||
+                        (saveMode === 'selected' && targetLayouts.length > BATCH_THRESHOLD);
+
+                    let annotationPath = null;
+                    annotationPath = path.join(config.exportsAnnotationsRoot, `${baseName}.json`);
                     await fs.writeFile(annotationPath, JSON.stringify(annotation, null, 2));
                     savedPaths.annotations.push(annotationPath);
                     annotationRecords.push(annotation);
 
-                    // Also accumulate into partition buffer for bulk export manifest
-                    currentAnnotationPartition.push(annotation);
-                    if (currentAnnotationPartition.length >= ANNOTATION_PARTITION_CAP) {
-                        const partPath = path.join(config.exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
-                        await fs.writeFile(partPath, JSON.stringify(currentAnnotationPartition, null, 2));
-                        annotationPartitions.push(partPath);
-                        savedPaths.annotations.push(partPath);
-                        annotationPartitionNum++;
-                        currentAnnotationPartition = [];
+                    // Only accumulate into partition buffer for batch export manifest
+                    // when using the batch annotation strategy.
+                    if (shouldCreateBatchAnnotations) {
+                        currentAnnotationPartition.push(annotation);
+                        if (currentAnnotationPartition.length >= ANNOTATION_PARTITION_CAP) {
+                            const partPath = path.join(config.exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
+                            await fs.writeFile(partPath, JSON.stringify(currentAnnotationPartition, null, 2));
+                            annotationPartitions.push(partPath);
+                            savedPaths.annotations.push(partPath);
+                            annotationPartitionNum++;
+                            currentAnnotationPartition = [];
+                        }
                     }
 
                     exported.push({
@@ -1404,7 +1425,13 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             summary: {
                 total: targetLayouts.length,
                 success: exported.filter(e => !e.error).length,
-                failed: exported.filter(e => e.error).length
+                failed: exported.filter(e => e.error).length,
+                fileCount: {
+                    high: savedPaths.high.length,
+                    low: savedPaths.low.length,
+                    annotations: savedPaths.annotations.length,
+                    annotationPartitions: annotationPartitions.length
+                }
             }
         });
     } catch (err) {
