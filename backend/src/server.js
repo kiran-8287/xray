@@ -46,6 +46,7 @@ import { PipelineTimer, PIPELINE_STAGES, generateOperationId } from "./lib/instr
 import { initializeSystemConfig, getWorkerCount, checkMemoryAvailability } from "./lib/systemInfo.js";
 import { Semaphore, chunked, withSemaphore } from "./lib/concurrency.js";
 import { enqueue as enqueueDiskWrite, getDiskWriteQueueStatus, drain as drainDiskQueue } from './lib/diskWriteQueue.js';
+import { getExportsPath, setExportsPath, hasConfiguredExportsPath } from './lib/userConfig.js';
 
 const app = express();
 app.use(cors());
@@ -841,6 +842,56 @@ app.get('/api/storage/catalog', async (_req, res) => {
   }
 });
 
+// User configuration endpoints for export path settings
+app.get('/api/user-config/exports-path', async (_req, res) => {
+  try {
+    const exportsPath = await getExportsPath();
+    const configured = await hasConfiguredExportsPath();
+    res.json({ ok: true, exportsPath, configured });
+  } catch (err) {
+    console.error('[user-config/exports-path] Error:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
+  try {
+    const { exportsPath } = req.body || {};
+    
+    if (!exportsPath || typeof exportsPath !== 'string') {
+      return res.status(400).json({ ok: false, error: 'exportsPath is required and must be a string' });
+    }
+    
+    // Validate the path is absolute
+    if (!path.isAbsolute(exportsPath)) {
+      return res.status(400).json({ ok: false, error: 'exportsPath must be an absolute path' });
+    }
+    
+    const userConfig = await setExportsPath(exportsPath);
+    
+    // Create the directories if they don't exist
+    await fs.mkdir(exportsPath, { recursive: true });
+    await fs.mkdir(path.join(exportsPath, 'high'), { recursive: true });
+    await fs.mkdir(path.join(exportsPath, 'low'), { recursive: true });
+    await fs.mkdir(path.join(exportsPath, 'annotations'), { recursive: true });
+    
+    res.json({ ok: true, exportsPath: userConfig.exportsPath });
+  } catch (err) {
+    console.error('[user-config/exports-path] Error:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.get('/api/user-config/has-exports-path', async (_req, res) => {
+  try {
+    const configured = await hasConfiguredExportsPath();
+    res.json({ ok: true, configured });
+  } catch (err) {
+    console.error('[user-config/has-exports-path] Error:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 // Saved layouts endpoints
 app.get('/api/saved-layouts', async (_req, res) => {
     try {
@@ -1248,9 +1299,15 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             });
         }
 
-        await fs.mkdir(config.exportsHighRoot, { recursive: true });
-        await fs.mkdir(config.exportsLowRoot, { recursive: true });
-        await fs.mkdir(config.exportsAnnotationsRoot, { recursive: true });
+        // Get user-configured exports path (or fall back to default)
+        const userExportsRoot = await getExportsPath();
+        const exportsHighRoot = path.join(userExportsRoot, 'high');
+        const exportsLowRoot = path.join(userExportsRoot, 'low');
+        const exportsAnnotationsRoot = path.join(userExportsRoot, 'annotations');
+        
+        await fs.mkdir(exportsHighRoot, { recursive: true });
+        await fs.mkdir(exportsLowRoot, { recursive: true });
+        await fs.mkdir(exportsAnnotationsRoot, { recursive: true });
 
         const exported = [];
         const savedPaths = { high: [], low: [], annotations: [] };
@@ -1335,12 +1392,12 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     const baseName = `SB_${safeLayoutId}`;
 
                     const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, 'highenergy');
-                    const highExportPath = path.join(config.exportsHighRoot, `${baseName}_high.png`);
+                    const highExportPath = path.join(exportsHighRoot, `${baseName}_high.png`);
                     await fs.writeFile(highExportPath, highPngBuffer);
                     savedPaths.high.push(highExportPath);
 
                     const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, 'lowenergy');
-                    const lowExportPath = path.join(config.exportsLowRoot, `${baseName}_low.png`);
+                    const lowExportPath = path.join(exportsLowRoot, `${baseName}_low.png`);
                     await fs.writeFile(lowExportPath, lowPngBuffer);
                     savedPaths.low.push(lowExportPath);
 
@@ -1365,7 +1422,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                         (saveMode === 'selected' && targetLayouts.length > BATCH_THRESHOLD);
 
                     let annotationPath = null;
-                    annotationPath = path.join(config.exportsAnnotationsRoot, `${baseName}.json`);
+                    annotationPath = path.join(exportsAnnotationsRoot, `${baseName}.json`);
                     await fs.writeFile(annotationPath, JSON.stringify(annotation, null, 2));
                     savedPaths.annotations.push(annotationPath);
                     annotationRecords.push(annotation);
@@ -1375,7 +1432,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     if (shouldCreateBatchAnnotations) {
                         currentAnnotationPartition.push(annotation);
                         if (currentAnnotationPartition.length >= ANNOTATION_PARTITION_CAP) {
-                            const partPath = path.join(config.exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
+                            const partPath = path.join(exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
                             await fs.writeFile(partPath, JSON.stringify(currentAnnotationPartition, null, 2));
                             annotationPartitions.push(partPath);
                             savedPaths.annotations.push(partPath);
@@ -1407,7 +1464,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
         // Flush remaining annotations in the partition buffer
         if (currentAnnotationPartition.length > 0) {
             try {
-                const partPath = path.join(config.exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
+                const partPath = path.join(exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
                 await fs.writeFile(partPath, JSON.stringify(currentAnnotationPartition, null, 2));
                 annotationPartitions.push(partPath);
                 savedPaths.annotations.push(partPath);

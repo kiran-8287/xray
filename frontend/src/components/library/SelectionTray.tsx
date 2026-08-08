@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, AlertTriangle } from "lucide-react";
+import { GENERATION_LIMITS } from "../../types/generation";
+import { GenerationService } from "../../lib/generationService";
 
 interface SelectionTrayProps {
   selectedCount: number;
@@ -259,6 +261,25 @@ export default function SelectionTray({
 
         {generationProgress && (
           <span className="text-xs text-muted animate-pulse">{generationProgress}</span>
+        )}
+        
+        {/* Large k value warning */}
+        {kValue >= GENERATION_LIMITS.SOFT_WARN_THRESHOLD && !isGenerating && (
+          <div className="bg-amber-50 border border-amber-300 rounded-lg p-2.5 mb-2">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-xs font-semibold text-amber-800">
+                  Large Generation: {kValue.toLocaleString()} combinations
+                </p>
+                <p className="text-[11px] text-amber-700 mt-0.5">
+                  {kValue >= GENERATION_LIMITS.SPLIT_THRESHOLD
+                    ? `Will auto-split into batches of 25,000 to prevent crashes`
+                    : `Consider enabling split generation for better performance`}
+                </p>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 

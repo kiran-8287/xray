@@ -6,6 +6,7 @@ import type { CombinatorialResult, FailureLog } from "../types/customization";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 import { GenerationService } from "../lib/generationService";
+import { addCombos, addFailures, getAllCombos, getAllFailures, clearAll as storageClearAll } from "../lib/storageService";
 import { getCategoryConfig, normalizeCategoryName, normalizeCategorizedItems, LIBRARIES_UI, getLibrarySubcategories, clearCustomSubcategoriesCache } from "../config/categories";
 import AddSubcategoryModal from "../components/common/AddSubcategoryModal";
 import Pagination from "../components/library/Pagination";
@@ -139,29 +140,29 @@ export default function LibraryPage() {
     }
   }, [maxNonThreats]);
 
-  const [combinations, setCombinations] = useState<CombinatorialResult[]>(() => {
-    try {
-      const cached = sessionStorage.getItem("collageCombinations");
-      if (cached) {
-        return JSON.parse(cached);
-      }
-    } catch {
-      // ignore
-    }
-    return [];
-  });
+  const [combinations, setCombinations] = useState<CombinatorialResult[]>([]);
+  const [failures, setFailures] = useState<FailureLog[]>([]);
 
-  const [failures, setFailures] = useState<FailureLog[]>(() => {
-    try {
-      const cached = sessionStorage.getItem("collageFailures");
-      if (cached) {
-        return JSON.parse(cached);
+  // Restore from IndexedDB on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const [idbCombos, idbFailures] = await Promise.all([
+          getAllCombos(),
+          getAllFailures(),
+        ]);
+
+        if (idbCombos.length > 0) {
+          setCombinations(idbCombos as any);
+        }
+        if (idbFailures.length > 0) {
+          setFailures(idbFailures);
+        }
+      } catch (err) {
+        console.warn("[LibraryPage] restore from IndexedDB failed:", err);
       }
-    } catch {
-      // ignore
-    }
-    return [];
-  });
+    })();
+  }, []);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState("");
@@ -966,22 +967,21 @@ export default function LibraryPage() {
     };
   }, []);
 
-  // Persist combinations and failures to sessionStorage
+  // Persist combinations and failures to IndexedDB
   useEffect(() => {
-    try {
-      if (combinations.length > 0) {
-        sessionStorage.setItem("collageCombinations", JSON.stringify(combinations));
-      }
-      if (failures.length > 0) {
-        sessionStorage.setItem("collageFailures", JSON.stringify(failures));
-      }
-    } catch (err) {
-      // Silently ignore storage quota exceeded - expected with large datasets
-      if (err instanceof DOMException && err.name === "QuotaExceededError") {
-        console.warn("Storage quota exceeded for sessionStorage - this is expected with large datasets");
-      } else {
-        console.error("Error saving to sessionStorage:", err);
-      }
+    const lightweightCombos = combinations.map(combo => ({
+      id: combo.id,
+      bag: combo.bag ? { id: combo.bag.id } : null,
+      threats: combo.threats?.map(t => ({ id: t.id })) || [],
+      others: combo.others?.map(o => ({ id: o.id })) || [],
+    }));
+
+    if (lightweightCombos.length > 0) {
+      addCombos(lightweightCombos);
+    }
+
+    if (failures.length > 0) {
+      addFailures(failures);
     }
   }, [combinations, failures]);
 

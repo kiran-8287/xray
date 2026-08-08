@@ -18,26 +18,43 @@ import type {
   GenerationProgress,
   GenerationState,
   AutoSaveStatus,
+  SplitGenerationParams,
+  DistributionQuota,
 } from "../types/generation";
 import { getTransformedPolygon } from "./geometry";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "./fetchWithTimeout";
+import {
+  addCombos,
+  addFailures,
+  setProgress as storageSetProgress,
+  getAllCombos,
+  getAllFailures,
+  getProgress as storageGetProgress,
+  clearAll as storageClearAll,
+} from "./storageService";
+import { calculateDistributionQuotas, shouldUseSplitGeneration } from "./splitGeneration";
 
 type Subscriber = (state: GenerationState) => void;
 
 const ITEMS_PER_PAGE = 100;
-const MAX_CONCURRENT_RENDERS = 2; // Limit concurrent image rendering requests
-const NOTIFY_THROTTLE_MS = 100; // Throttle subscriber notifications to every 100ms
+const MAX_CONCURRENT_RENDERS = 2;
+const NOTIFY_THROTTLE_MS = 100;
 
 // Chunked generation constants
-const CHUNK_SIZE = 5000; // Generate 5k combinations per chunk
-const MAX_BUFFER_SIZE = 300; // Max combinations in memory (3 pages) - optimized for responsive UI
-const BUFFER_REFILL_THRESHOLD = 100; // Request more when buffer drops below 1 page
-const MAX_BUFFER_GROWTH = 1000; // Allow buffer to grow up to this size before hard pause
+const CHUNK_SIZE = 5000;
+const MAX_BUFFER_SIZE = 300;
+const BUFFER_REFILL_THRESHOLD = 100;
+const MAX_BUFFER_GROWTH = 1000;
 
 // Auto-save timing constants
-const AUTO_SAVE_INITIAL_DELAY_MS = 5000; // Wait 5 seconds before starting auto-save
-const AUTO_SAVE_PAGE_DELAY_MS = 5000; // Wait 5 seconds between each page save
+const AUTO_SAVE_INITIAL_DELAY_MS = 5000;
+const AUTO_SAVE_PAGE_DELAY_MS = 5000;
+
+// Split generation constants
+const DEFAULT_SPLIT_BATCH_SIZE = 25_000; // Split large k into batches of this size
+const SPLIT_GENERATION_ENABLED = true; // Feature flag
+
 
 let worker: Worker | null = null;
 let autoSaveEnabled = false;
@@ -78,6 +95,8 @@ let state: GenerationState = {
 
 const subscribers = new Set<Subscriber>();
 
+
+
 function notifySubscribers() {
   const now = Date.now();
   const timeSinceLastNotify = now - lastNotifyTime;
@@ -113,40 +132,32 @@ function notifySubscribers() {
 }
 
 function persistToStorage() {
-  try {
-    const allCombos = [...state.combinations, ...generatedBuffer];
-    if (allCombos.length > 0) {
-      const lightweightCombos = allCombos.map(combo => ({
-        id: combo.id,
-        bag: combo.bag ? { id: combo.bag.id } : null,
-        threats: combo.threats?.map(t => ({ id: t.id })) || [],
-        others: combo.others?.map(o => ({ id: o.id })) || [],
-      }));
-      sessionStorage.setItem("collageCombinations", JSON.stringify(lightweightCombos));
-    } else {
-      sessionStorage.removeItem("collageCombinations");
-    }
-    if (state.failures.length > 0) {
-      sessionStorage.setItem("collageFailures", JSON.stringify(state.failures));
-    }
-    if (state.isGenerating && state.progress) {
-      sessionStorage.setItem("generationProgress", JSON.stringify(state.progress));
-    } else {
-      sessionStorage.removeItem("generationProgress");
-    }
-  } catch (err) {
-    console.warn("[GenerationService] storage persist failed:", err);
-    if (err instanceof Error && err.name === 'QuotaExceededError') {
-      try {
-        sessionStorage.removeItem("collageCombinations");
-        sessionStorage.removeItem("collageFailures");
-      } catch (_) { /* ignore */ }
-    }
+  const allCombos = [...state.combinations, ...generatedBuffer];
+  if (allCombos.length > 0) {
+    const lightweightCombos = allCombos.map(combo => ({
+      id: combo.id,
+      bag: combo.bag ? { id: combo.bag.id } : null,
+      threats: combo.threats?.map(t => ({ id: t.id })) || [],
+      others: combo.others?.map(o => ({ id: o.id })) || [],
+    }));
+    addCombos(lightweightCombos);
+  }
+
+  if (state.failures.length > 0) {
+    addFailures(state.failures);
+  }
+
+  if (state.isGenerating && state.progress) {
+    storageSetProgress(state.progress);
   }
 }
 
 function refillDisplayWindow() {
-  while (state.combinations.length < ITEMS_PER_PAGE && generatedBuffer.length > 0) {
+  // Load multiple pages when buffer has plenty of items
+  const pagesToLoad = generatedBuffer.length > ITEMS_PER_PAGE * 3 ? 3 : 1;
+  const targetCount = ITEMS_PER_PAGE * pagesToLoad;
+  
+  while (state.combinations.length < targetCount && generatedBuffer.length > 0) {
     state.combinations.push(generatedBuffer.shift()!);
   }
 }
@@ -428,6 +439,110 @@ async function runAutoSaveLoop() {
   }
 }
 
+/**
+ * Generate a single batch of combinations using a web worker
+ * Used by split generation to process batches sequentially
+ * 
+ * NOW WITH INCREMENTAL UPDATES - Shows items immediately as they're generated!
+ */
+async function generateSingleBatch(
+  params: GenerationParams,
+  batchSize?: number,
+  batchLabel?: string,
+  onProgress?: (results: CombinatorialResult[], failures: FailureLog[]) => void
+): Promise<{ results: CombinatorialResult[]; failures: FailureLog[] }> {
+  return new Promise((resolve, reject) => {
+    const results: CombinatorialResult[] = [];
+    const failures: FailureLog[] = [];
+    let worker: Worker | null = null;
+    
+    // Timeout scales with the batch size. Base 5 min for the first 5,000 combos,
+    // then +1 min for every additional 5,000. This gives a 25K batch ~9 minutes,
+    // while keeping small batches snappy. (Previously a fixed 5-min timeout could
+    // fire even for a correctly-sized batch on slow/loaded machines.)
+    const k = Math.max(params.kValue || 0, 0);
+    const timeoutMs = 300000 + Math.max(0, k - 5000) / 5000 * 60000;
+    const timeout = setTimeout(() => {
+      if (worker) worker.terminate();
+      reject(new Error(`${batchLabel || "Batch"} generation timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+    
+    try {
+      worker = new Worker(
+        new URL("../workers/incrementalGenerator.worker.ts", import.meta.url),
+        { type: "module" }
+      );
+      
+      worker.onmessage = (event) => {
+        const response = event.data;
+        
+        if (response.type === "batch") {
+          const batch = response.batch || [];
+          
+          // Add to results
+          results.push(...batch);
+          
+          // Add any failures
+          const batchFailures: FailureLog[] = response.failures || [];
+          if (batchFailures.length > 0) {
+            failures.push(...batchFailures);
+          }
+          
+          // CALLBACK: Show only the NEW batch items immediately as generated
+          // (NOT the cumulative results — avoids duplicating earlier batches)
+          if (onProgress && batch.length > 0) {
+            onProgress(batch, batchFailures);
+          }
+        } else if (response.type === "complete" || response.type === "chunkComplete") {
+          clearTimeout(timeout);
+          worker?.terminate();
+          // Capture failures delivered with the completion message
+          if (response.failures && response.failures.length > 0) {
+            failures.push(...response.failures);
+          }
+          resolve({ results, failures });
+        } else if (response.type === "error") {
+          clearTimeout(timeout);
+          worker?.terminate();
+          reject(new Error(response.error || "Worker error"));
+        }
+      };
+      
+      worker.onerror = (error) => {
+        clearTimeout(timeout);
+        worker?.terminate();
+        reject(new Error("Worker failed: " + (error.message || "Unknown error")));
+      };
+      
+      const effectiveThreatDist: Record<number, number> = {};
+      for (let i = 1; i <= params.maxThreats; i++) {
+        effectiveThreatDist[i] = (params.threatDistribution && params.threatDistribution[i]) ?? 0;
+      }
+      const effectiveNonThreatDist: Record<number, number> = {};
+      for (let i = 1; i <= params.maxNonThreats; i++) {
+        effectiveNonThreatDist[i] = (params.nonThreatDistribution && params.nonThreatDistribution[i]) ?? 0;
+      }
+      
+      worker.postMessage({
+        type: "generate",
+        selectedBags: params.selectedBags,
+        selectedThreats: params.selectedThreats,
+        selectedOthers: params.selectedOthers,
+        kValue: params.kValue,
+        threatDistribution: effectiveThreatDist,
+        nonThreatDistribution: effectiveNonThreatDist,
+        requireAtLeastOneNonThreat: params.requireAtLeastOneNonThreat || false,
+        existingIds: params.existingIds || [],
+        batchSize: batchSize || params.batchSize || 200,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      worker?.terminate();
+      reject(err);
+    }
+  });
+}
+
 async function autoSaveBatch(batch: CombinatorialResult[]) {
   if (!autoSaveEnabled || batch.length === 0) return;
   generatedBuffer.push(...batch);
@@ -528,7 +643,16 @@ function requestNextChunk() {
 export const GenerationService = {
   ITEMS_PER_PAGE,
 
-  startGeneration(params: GenerationParams) {
+  async startGeneration(params: GenerationParams) {
+    const splitParams = params as SplitGenerationParams;
+    
+    // Check if we should use split generation for large k values
+    if (shouldUseSplitGeneration(params.kValue, splitParams)) {
+      console.log(`[GenerationService] Using split generation for k=${params.kValue.toLocaleString()}`);
+      return await this.startSplitGeneration(splitParams);
+    }
+    
+    // Original single-generation logic for smaller k values
     if (worker) {
       worker.terminate();
       worker = null;
@@ -536,16 +660,16 @@ export const GenerationService = {
 
     autoSaveEnabled = params.autoSave === true;
     if (autoSaveEnabled) {
-      autoSaveStartTime = Date.now(); // Record when generation started
+      autoSaveStartTime = Date.now();
     }
 
     // Reset chunked generation state
     totalGeneratedCount = 0;
     isGeneratingChunk = false;
-    consecutiveZeroChunks = 0; // Bug #3 fix: reset circuit breaker on new generation
+    consecutiveZeroChunks = 0;
     chunkStartGeneratedCount = 0;
-    generatedIds = []; // Reset accumulated IDs across chunks
-    currentGenerationParams = params; // Store params for later chunk requests
+    generatedIds = [];
+    currentGenerationParams = params;
 
     state = {
       isGenerating: true,
@@ -560,11 +684,8 @@ export const GenerationService = {
     generatedBuffer = [];
     notifySubscribers();
 
-    try {
-      sessionStorage.removeItem("collageCombinations");
-      sessionStorage.removeItem("collageFailures");
-      sessionStorage.setItem("generationProgress", JSON.stringify(state.progress));
-    } catch (_) { /* ignore */ }
+    // Clear previous generation data from IndexedDB
+    await storageClearAll();
 
     try {
       console.log("[GenerationService] Creating worker...");
@@ -746,6 +867,186 @@ export const GenerationService = {
     }
   },
 
+  async startSplitGeneration(params: SplitGenerationParams) {
+    const { splitBatchSize = 25_000 } = params;
+    
+    const quotas = calculateDistributionQuotas(
+      params.kValue,
+      params.threatDistribution,
+      params.nonThreatDistribution,
+      splitBatchSize
+    );
+
+    console.log(`[SplitGeneration] Starting:`, {
+      totalK: params.kValue.toLocaleString(),
+      numBatches: quotas.numBatches,
+    });
+
+    autoSaveEnabled = params.autoSave === true;
+    if (autoSaveEnabled) {
+      autoSaveStartTime = Date.now();
+    }
+
+    totalGeneratedCount = 0;
+    generatedIds = [];
+    isGeneratingChunk = false;
+    consecutiveZeroChunks = 0;
+
+    state = {
+      isGenerating: true,
+      combinations: [],
+      failures: [],
+      progress: { generated: 0, total: params.kValue },
+      hasGeneratedResults: false,
+      autoSaveStatus: autoSaveEnabled
+        ? { enabled: true, mode: autoSaveMode, queued: 0, batchesSent: 0, errors: 0, pagesCompleted: 0, imagesSaved: 0 }
+        : null,
+    };
+    generatedBuffer = [];
+    notifySubscribers();
+
+    await storageClearAll();
+
+    // Start auto-save loop if enabled (saves pages, allowing the user to see
+    // the next pages advance automatically as each page is saved to backend)
+    if (autoSaveEnabled) {
+      console.log("[SplitGeneration] Starting auto-save loop...");
+      runAutoSaveLoop();
+    }
+
+    let allFailures: FailureLog[] = [];
+    let accumulatedIds: string[] = [];
+
+    for (let i = 0; i < quotas.batches.length; i++) {
+      const batch = quotas.batches[i];
+      
+      state.progress = { generated: totalGeneratedCount, total: params.kValue };
+      notifySubscribers();
+
+      const batchLabel = `Batch ${i + 1}/${quotas.numBatches}`;
+
+      try {
+        // Callback to show items IMMEDIATELY as they're generated.
+        // New items are streamed into generatedBuffer so the first 100
+        // appear on page 1 right away, and the next 200 fill pages 2-3.
+        const onProgress = (newItems: CombinatorialResult[], newFailures: FailureLog[]) => {
+          if (newItems.length > 0) {
+            generatedBuffer.push(...newItems);
+            totalGeneratedCount += newItems.length;
+            for (const combo of newItems) {
+              if (combo.id) generatedIds.push(combo.id);
+            }
+          }
+          
+          if (newFailures.length > 0) {
+            allFailures.push(...newFailures);
+            state.failures = allFailures;
+          }
+          
+          // Refill display window (loads 3 pages when buffer is large)
+          refillDisplayWindow();
+          state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
+          state.progress = { generated: totalGeneratedCount, total: params.kValue };
+          
+          // Immediately update UI (notifySubscribers is internally throttled)
+          notifySubscribers();
+          persistToStorage();
+        };
+
+        const batchResult = await generateSingleBatch(
+          {
+            ...params,
+            // CRITICAL FIX: generate ONLY this batch's quota, not the full k.
+            // Previously we passed the full params.kValue, so every split sub-batch
+            // regenerated the ENTIRE total (e.g. 200,000) instead of its own 25,000,
+            // which caused 5-minute timeouts and massive redundant work.
+            kValue: batch.batchK,
+            threatDistribution: batch.threatQuotas,
+            nonThreatDistribution: batch.nonThreatQuotas,
+            existingIds: accumulatedIds,
+          },
+          params.batchSize || 200,
+          batchLabel,
+          onProgress  // stream items live into the display/buffer
+        );
+
+        // The whole batch's results are the source of truth for IDs & failures.
+        // NOTE: totalGeneratedCount is already updated incrementally inside
+        // onProgress for each emitted sub-batch, so we must NOT add
+        // batchResult.results.length here (that would double-count).
+        accumulatedIds.push(...batchResult.results.map(c => c.id));
+        
+        if (batchResult.failures) {
+          allFailures.push(...batchResult.failures);
+          state.failures = allFailures;
+        }
+        state.progress = { generated: totalGeneratedCount, total: params.kValue };
+        refillDisplayWindow();
+
+        console.log(`[SplitGeneration] ${batchLabel} complete:`, {
+          batchGenerated: batchResult.results.length.toLocaleString(),
+          totalGenerated: totalGeneratedCount.toLocaleString(),
+          displayItems: state.combinations.length,
+          bufferItems: generatedBuffer.length,
+          percentage: ((totalGeneratedCount / params.kValue) * 100).toFixed(1) + '%'
+        });
+      } catch (err) {
+        console.error(`${batchLabel} failed:`, err);
+        allFailures.push({
+          bagName: "Split Generation",
+          bagId: "N/A",
+          threatName: "N/A",
+          threatId: "N/A",
+          reason: `${batchLabel} failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+          expected: batch.batchK,
+          actual: 0,
+        } as any);
+        state.failures = allFailures;
+        notifySubscribers();
+      }
+    }
+
+    // Finalize - load 3 pages at the end
+    refillDisplayWindow();
+    state.failures = allFailures;
+    state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
+    state.progress = { generated: totalGeneratedCount, total: params.kValue };
+    state.isGenerating = false;
+
+    console.log(`[SplitGeneration] Complete:`, {
+      totalGenerated: totalGeneratedCount.toLocaleString(),
+      totalFailures: allFailures.length,
+      expected: params.kValue.toLocaleString(),
+      finalDisplayItems: state.combinations.length,
+      finalBufferItems: generatedBuffer.length,
+    });
+
+    notifySubscribers();
+    persistToStorage();
+  },
+
+  getSplitGenerationPlan(params: GenerationParams) {
+    const splitParams = params as SplitGenerationParams;
+    
+    // Quick check without full calculation
+    const SPLIT_THRESHOLD = 100_000;
+    const shouldSplit = (splitParams.enableSplitGeneration === true) || (params.kValue >= SPLIT_THRESHOLD);
+    
+    if (!shouldSplit) {
+      return { shouldSplit: false, quota: null, numBatches: 0 };
+    }
+    
+    const batchSize = splitParams.splitBatchSize || 25_000;
+    const quota = calculateDistributionQuotas(
+      params.kValue,
+      params.threatDistribution,
+      params.nonThreatDistribution,
+      batchSize
+    );
+    
+    return { shouldSplit: true, quota, numBatches: quota.numBatches };
+  },
+
   abort() {
     if (worker) {
       worker.terminate();
@@ -908,11 +1209,9 @@ export const GenerationService = {
       autoSaveStatus: null,
     };
     notifySubscribers();
-    try {
-      sessionStorage.removeItem("collageCombinations");
-      sessionStorage.removeItem("collageFailures");
-      sessionStorage.removeItem("generationProgress");
-    } catch (_) { /* ignore */ }
+
+    // Clear IndexedDB storage
+    storageClearAll();
   },
 
   setCombinations(combinations: CombinatorialResult[], failures: FailureLog[]) {
@@ -948,24 +1247,31 @@ export const GenerationService = {
       generatedBuffer.some(c => c.objects && c.objects.length > 0);
     if (hasFullObjects) return;
 
-    try {
-      const combos = sessionStorage.getItem("collageCombinations");
-      const failures = sessionStorage.getItem("collageFailures");
-      if (combos) {
-        generatedBuffer = JSON.parse(combos);
-        generatedIds = generatedBuffer.map(c => c.id).filter(Boolean);
-        state.combinations = [];
-        refillDisplayWindow();
-        state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
+    (async () => {
+      try {
+        const [combos, failures] = await Promise.all([
+          getAllCombos(),
+          getAllFailures(),
+        ]);
+
+        if (combos.length > 0) {
+          generatedBuffer = combos as unknown as CombinatorialResult[];
+          generatedIds = generatedBuffer.map(c => c.id).filter(Boolean);
+          state.combinations = [];
+          refillDisplayWindow();
+          state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
+        }
+
+        if (failures.length > 0) {
+          state.failures = failures;
+        }
+
+        if (combos.length > 0 || failures.length > 0) {
+          notifySubscribers();
+        }
+      } catch (err) {
+        console.warn("[GenerationService] restore from storage failed:", err);
       }
-      if (failures) {
-        state.failures = JSON.parse(failures);
-      }
-      if (combos || failures) {
-        notifySubscribers();
-      }
-    } catch (err) {
-      console.warn("[GenerationService] restore from storage failed:", err);
-    }
+    })();
   },
 };
