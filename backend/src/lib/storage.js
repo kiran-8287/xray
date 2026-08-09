@@ -293,12 +293,15 @@ async function readJSONFile(filePath, defaultValue = []) {
   }
 }
 
-// Category normalization helper
+// Category normalization helper — matches frontend normalizeCategoryName logic
+// so imported/uploaded items land in the same partition the UI expects.
 function normalizeCategoryKey(cat) {
   if (!cat) return 'non_threats';
   const c = String(cat).toLowerCase().trim();
-  if (c === 'bags' || c === 'bag') return 'bags';
-  if (c === 'threats' || c === 'threat' || c === 'threads') return 'threats';
+  // Match non-threat first before 'threat' to prevent 'non-threat' matching 'threat'
+  if (/^non[- ]?threat/.test(c)) return 'non_threats';
+  if (c.includes('bag')) return 'bags';
+  if (c.includes('threat') || c.includes('electronic')) return 'threats';
   return 'non_threats';
 }
 
@@ -308,6 +311,46 @@ function getPartitionFilePath(categoryKey, partitionNum) {
 
 function getSavedLayoutsPartitionPath(partitionNum) {
   return path.join(SAVED_LAYOUTS_DIR, `${SAVED_LAYOUTS_PARTITION_PREFIX}${partitionNum}.json`);
+}
+
+// ---- In-memory cache for getItems() / getItemsPaginated() ----
+//
+// Reading all partition files on every request is the main cause of the
+// observed "peak concurrency = 99" spikes. Under concurrent paginated
+// fetches from the frontend, each request does a full disk scan, which
+// serializes on I/O and piles up in-flight requests.
+//
+// We cache the merged items array for a short TTL and invalidate it on
+// any write path so reads stay consistent without paying the full-scan
+// cost on every HTTP request.
+
+const ITEMS_CACHE_TTL_MS = 10_000; // 10 seconds
+let itemsCache = null;
+let itemsCacheTimestamp = 0;
+let itemsCacheDirty = true;
+
+function invalidateItemsCache() {
+  itemsCache = null;
+  itemsCacheTimestamp = 0;
+  itemsCacheDirty = true;
+}
+
+async function getCachedItems() {
+  const now = Date.now();
+  if (!itemsCacheDirty && itemsCache && now - itemsCacheTimestamp < ITEMS_CACHE_TTL_MS) {
+    return itemsCache;
+  }
+
+  const [bags, threats, nonThreats] = await Promise.all([
+    getItemsForCategory('bags'),
+    getItemsForCategory('threats'),
+    getItemsForCategory('non_threats')
+  ]);
+
+  itemsCache = [...bags, ...threats, ...nonThreats];
+  itemsCacheTimestamp = now;
+  itemsCacheDirty = false;
+  return itemsCache;
 }
 
 // ---- Catalog & Partition Initialization & Legacy Migration ----
@@ -419,14 +462,8 @@ async function getItems(categoryFilter = null) {
     return await getItemsForCategory(catKey);
   }
 
-  // Load from all category partitions
-  const [bags, threats, nonThreats] = await Promise.all([
-    getItemsForCategory('bags'),
-    getItemsForCategory('threats'),
-    getItemsForCategory('non_threats')
-  ]);
-
-  return [...bags, ...threats, ...nonThreats];
+  // Use cached merged list for the common "all items" case
+  return await getCachedItems();
 }
 
 async function getItemById(id) {
@@ -540,6 +577,7 @@ async function createItemsBatch(itemsArray) {
   }
 
   await saveCatalog(catalog);
+  invalidateItemsCache();
   return createdItems;
 }
 
@@ -568,6 +606,7 @@ async function updateItem(id, itemData) {
       if (index !== -1) {
         items[index] = { ...items[index], ...itemData };
         await writeJSONFileAtomic(partPath, items);
+        invalidateItemsCache();
         return items[index];
       }
     }
@@ -593,6 +632,7 @@ async function deleteItem(id) {
         await writeJSONFileAtomic(partPath, items);
         catMeta.totalCount = Math.max(0, catMeta.totalCount - 1);
         await saveCatalog(catalog);
+        invalidateItemsCache();
         return true;
       }
     }
@@ -645,6 +685,7 @@ async function bulkDeleteItems(ids) {
   }
 
   if (deletedIds.length > 0) {
+    invalidateItemsCache();
     // Rebuild catalog counts for affected categories from partition totals (accurate)
     for (const catKey of ['bags', 'threats', 'non_threats']) {
       const catMeta = catalog.categories[catKey];

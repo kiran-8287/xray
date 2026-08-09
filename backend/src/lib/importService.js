@@ -47,16 +47,19 @@ async function readJsonSafely(absPath) {
 }
 
 function isBagCategory(cat) {
-  const c = String(cat || '').toLowerCase();
-  return c === 'bags' || c === 'bag';
+  const c = String(cat || '').toLowerCase().trim();
+  return c.includes('bag');
 }
 function isThreatCategory(cat) {
-  const c = String(cat || '').toLowerCase();
-  return c === 'threats' || c === 'threat' || c === 'threads';
+  const c = String(cat || '').toLowerCase().trim();
+  return c.includes('threat') || c.includes('electronic') || c === 'electronics';
 }
 function displayCategory(cat) {
-  if (isBagCategory(cat)) return 'bags';
-  if (isThreatCategory(cat)) return 'threats';
+  const c = String(cat || '').toLowerCase().trim();
+  // Match non-threat first before 'threat' to prevent 'non-threat' matching 'threat'
+  if (/^non[- ]?threat/.test(c)) return 'non-threats';
+  if (c.includes('bag')) return 'bags';
+  if (c.includes('threat') || c.includes('electronic') || c === 'electronics') return 'threats';
   return 'non-threats';
 }
 
@@ -171,6 +174,80 @@ function addItemTo(map, canCat, o, allowedIds) {
   });
 }
 
+// Strip the trailing "_copyNNNN" suffix from a generated copy id so copies of
+// the same physical object (e.g. "P01X010-2024101200923_copy0103") group under
+// their base id. Ids without a copy suffix are returned unchanged.
+function copyBaseId(id) {
+  return String(id || '').replace(/_[cC]opy\d+$/i, '');
+}
+
+// Multiple layouts can reference copies of the same base bag with *different*
+// subcategory labels (usually caused by inconsistent annotation exports from
+// the previous system). That produces visibly "jumbled" categories after import
+// (e.g. half the backpacks showing up under briefcases). Reconcile every copy
+// group to its most common label so the library stays consistent, and report
+// how many items were affected.
+function reconcileItemSubcategories(items) {
+  const groups = new Map();
+  for (const it of items) {
+    const base = copyBaseId(it.id);
+    if (!groups.has(base)) groups.set(base, []);
+    groups.get(base).push(it);
+  }
+
+  let conflicts = 0;
+  const reconciled = [];
+  for (const [base, groupItems] of groups) {
+    // ---- Reconcile categories first ----
+    const catFreq = new Map();
+    for (const it of groupItems) {
+      const k = displayCategory(it.category);
+      catFreq.set(k, (catFreq.get(k) || 0) + 1);
+    }
+    if (catFreq.size > 1) {
+      let bestCat = null;
+      let bestCatCount = -1;
+      for (const [cat, count] of catFreq) {
+        if (count > bestCatCount || (count === bestCatCount && (!bestCat || cat < bestCat))) {
+          bestCat = cat;
+          bestCatCount = count;
+        }
+      }
+      if (bestCat && groupItems.some((it) => displayCategory(it.category) !== bestCat)) {
+        conflicts += groupItems.length;
+        reconciled.push({ base, from: Array.from(catFreq.keys()), to: bestCat, count: groupItems.length, type: 'category' });
+      }
+      for (const it of groupItems) it.category = bestCat;
+    }
+
+    // ---- Reconcile subcategories ----
+    const freq = new Map();
+    for (const it of groupItems) {
+      // Normalize subcategory keys to prevent "Backpack" vs "backpack" from
+      // being treated as different subcategories.
+      const k = titleCase(it.subcategory || 'General');
+      freq.set(k, (freq.get(k) || 0) + 1);
+    }
+    if (freq.size < 2) continue;
+
+    let best = null;
+    let bestCount = -1;
+    for (const [sub, count] of freq) {
+      if (count > bestCount || (count === bestCount && (!best || sub < best))) {
+        best = sub;
+        bestCount = count;
+      }
+    }
+    if (best && groupItems.some((it) => titleCase(it.subcategory) !== best)) {
+      conflicts += groupItems.length;
+      reconciled.push({ base, from: Array.from(freq.keys()), to: best, count: groupItems.length, type: 'subcategory' });
+    }
+    for (const it of groupItems) it.subcategory = best;
+  }
+
+  return { items, conflicts, reconciled };
+}
+
 function itemsFromLayouts(layouts, allowedIds) {
   const map = new Map();
   for (const l of layouts) {
@@ -179,7 +256,7 @@ function itemsFromLayouts(layouts, allowedIds) {
     if (Array.isArray(objs.threats)) for (const t of objs.threats) addItemTo(map, 'threats', t, allowedIds);
     if (Array.isArray(objs['non-threats'])) for (const nt of objs['non-threats']) addItemTo(map, 'non-threats', nt, allowedIds);
   }
-  return Array.from(map.values());
+  return reconcileItemSubcategories(Array.from(map.values()));
 }
 
 function itemsFromCatalog(category, parsed) {
@@ -282,6 +359,7 @@ async function parseSources({ pixelFiles = [], jsonFiles = [] }) {
   const layouts = [];
   const seenLayoutKeys = new Set();
   const jsonStats = { annotationsFiles: 0, savedLayoutsFiles: 0, catalogFiles: 0, unknownFiles: 0, errors: [] };
+  const itemDerivation = { conflicts: 0, reconciled: [] };
 
   for (const jf of jsonFiles) {
     let parsed;
@@ -314,17 +392,23 @@ async function parseSources({ pixelFiles = [], jsonFiles = [] }) {
 
   // Annotation-derived items fill gaps not covered by the catalog — but only
   // when the object's pixel file is present in the upload (prevents phantom
-  // items for missing references).
+  // items for missing references). Copies of the same base bag are reconciled
+  // to their most common subcategory label so categories don't look jumbled
+  // after import.
   const allowedForAnnotation = new Set([...catalogItems.keys(), ...pixelFiles.filter((p) => p.energy === 'highenergy').map((p) => p.baseName)]);
-  for (const it of itemsFromLayouts(layouts, allowedForAnnotation)) {
+  const layoutDerived = itemsFromLayouts(layouts, allowedForAnnotation);
+  for (const it of layoutDerived.items) {
     if (!catalogItems.has(it.id)) catalogItems.set(it.id, it);
   }
+  itemDerivation.reconciled.push(...layoutDerived.reconciled);
+  itemDerivation.conflicts += layoutDerived.conflicts;
 
   return {
     catalogItems: Array.from(catalogItems.values()),
     catalogItemIds: new Set(catalogItems.keys()),
     layouts,
     jsonStats,
+    itemDerivation,
     highBases: new Set(pixelFiles.filter((p) => p.energy === 'highenergy').map((p) => p.baseName)),
     lowBases: new Set(pixelFiles.filter((p) => p.energy === 'lowenergy').map((p) => p.baseName)),
     pixelFiles,
@@ -447,6 +531,7 @@ export async function analyzeImport({ pixelFiles = [], jsonFiles = [], progress 
       collisionRenames,
       missingObjects,
     },
+    itemDerivation: parsed.itemDerivation || { conflicts: 0, reconciled: [] },
     stats: {
       pixelNew: pixelNew.length,
       pixelDuplicate: pixelDup.length,
@@ -457,6 +542,7 @@ export async function analyzeImport({ pixelFiles = [], jsonFiles = [], progress 
       layoutsDuplicate,
       collisionRenames,
       missingLayouts: missingObjects.length,
+      subcategoryConflicts: (parsed.itemDerivation && parsed.itemDerivation.conflicts) || 0,
     },
   };
 
@@ -500,24 +586,40 @@ async function generateValidRegionsForNewBags(addedItems, progress) {
   const bagsMissing = addedItems.filter((it) => displayCategory(it.category) === 'bags' && !it.valid_region_points);
   if (bagsMissing.length === 0) return { done: 0, failed: [] };
 
-  const tasks = bagsMissing.map((it) => ({
-    itemId: it.id,
-    npzPath: path.join(config.pixelDataHighRoot, `${it.id}.npz`),
-  }));
+  // Resolve the actual .npz base filename from the item's stored pixel
+  // reference (highenergy/<base>.npz or lowenergy/<base>.npz) instead of
+  // assuming the filename equals the item id. The pixel file is copied under
+  // its ORIGINAL base name, which can differ from the item id (e.g. imported
+  // layout-derived ids).
+  const toBase = (it) => {
+    const ref = it.pixelDataFilename || it.pixel_data_path || '';
+    const base = String(ref).split(/[\\/]/).pop().replace(/\.npz$/i, '');
+    return base || String(it.id || '');
+  };
 
-  // Runtime availability checks (mirrors /api/auto-valid-region-batch).
-  const todo = [];
-  for (const t of tasks) {
-    try { await fs.access(t.npzPath); todo.push(t); }
-    catch { /* no pixel data yet -> skip silently */ }
+  const tasks = [];
+  const failedMissing = [];
+  for (const it of bagsMissing) {
+    const base = toBase(it);
+    // Check both highenergy and lowenergy folders since pixel files may be
+    // in either location depending on the original system's structure.
+    const highPath = path.join(config.pixelDataHighRoot, `${base}.npz`);
+    const lowPath = path.join(config.pixelDataLowRoot, `${base}.npz`);
+    let npzPath = null;
+    try { await fs.access(highPath); npzPath = highPath; } catch { /* try low */ }
+    if (!npzPath) {
+      try { await fs.access(lowPath); npzPath = lowPath; } catch { /* missing */ }
+    }
+    if (npzPath) tasks.push({ itemId: it.id, npzPath });
+    else failedMissing.push({ itemId: it.id, reason: `pixel data file not found: ${base}.npz (checked highenergy/ and lowenergy/)` });
   }
 
   let done = 0;
-  const failed = [];
+  const failed = [...failedMissing];
   const concurrency = 2;
   const chunks = [];
-  for (let i = 0; i < todo.length; i += BATCH_FILES_PER_PROCESS) {
-    chunks.push(todo.slice(i, i + BATCH_FILES_PER_PROCESS));
+  for (let i = 0; i < tasks.length; i += BATCH_FILES_PER_PROCESS) {
+    chunks.push(tasks.slice(i, i + BATCH_FILES_PER_PROCESS));
   }
 
   const runQueue = [...chunks];
@@ -532,23 +634,24 @@ async function generateValidRegionsForNewBags(addedItems, progress) {
         results = chunk.map((t) => ({ itemId: t.itemId, ok: false, error: String((err && err.message) || err) }));
       }
       for (const r of results) {
-        done++;
         if (r && r.ok && r.data && Array.isArray(r.data.points) && r.data.points.length >= 3) {
           try {
             await updateItem(r.itemId, { valid_region_points: { points: r.data.points } });
+            done++;
           } catch (err) {
             failed.push({ itemId: r.itemId, reason: String((err && err.message) || err) });
           }
         } else {
           failed.push({ itemId: r && r.itemId, reason: (r && r.error) || 'no valid region generated' });
         }
-        if (done % 20 === 0) progress({ stage: 'valid-region', done, total: todo.length });
+        const processed = done + failed.length;
+        if (processed % 20 === 0) progress({ stage: 'valid-region', done: processed, total: bagsMissing.length });
       }
     }
   });
   await Promise.all(workers);
-  progress({ stage: 'valid-region', done: todo.length, total: todo.length });
-  return { done: todo.length, failed };
+  progress({ stage: 'valid-region', done: bagsMissing.length, total: bagsMissing.length });
+  return { done, failed };
 }
 
 function collectLayoutRefs(l) {
@@ -584,6 +687,13 @@ export async function runImport({ pixelFiles = [], jsonFiles = [], options = {},
   emit({ stage: 'start', message: 'Parsing sources…' });
   const parsed = await parseSources({ pixelFiles, jsonFiles });
 
+  // Build a map of base name -> energy folder so we can set correct pixel
+  // data paths for items created from unclassified files / overrides.
+  const pixelEnergyMap = new Map();
+  for (const p of pixelFiles) {
+    pixelEnergyMap.set(p.baseName, p.energy);
+  }
+
   const existingItems = await getItems();
   const existingItemIds = new Set(existingItems.map((i) => i.id));
   const available = buildAvailableSet(existingItems, parsed);
@@ -604,12 +714,15 @@ export async function runImport({ pixelFiles = [], jsonFiles = [], options = {},
   const classified = new Set(parsed.catalogItems.map((i) => i.id));
   for (const [base, category] of Object.entries(overrides)) {
     if (!category || classified.has(base) || existingItemIds.has(base)) continue;
+    // Use the actual energy folder for the pixel file instead of always
+    // defaulting to highenergy/.
+    const energy = pixelEnergyMap.get(base) || 'highenergy';
     itemsToAdd.push({
       id: base,
       category: displayCategory(category),
       subcategory: 'General',
       filepath: `${base}.png`,
-      pixelDataFilename: `highenergy/${base}.npz`,
+      pixelDataFilename: `${energy}/${base}.npz`,
       _fromOverride: true,
     });
     classified.add(base);

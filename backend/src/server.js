@@ -1589,6 +1589,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     let lowEnergyPath = null;
                     let highEnergyFilename = null;
                     let lowEnergyFilename = null;
+                    let annotationPath = null;
 
                     if (includeImages) {
                         const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
@@ -1636,7 +1637,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     const shouldCreateBatchAnnotations = isBulkMode;
 
                     if (shouldCreateIndividualFile) {
-                        const annotationPath = path.join(exportsAnnotationsRoot, `${baseName}.json`);
+                        annotationPath = path.join(exportsAnnotationsRoot, `${baseName}.json`);
                         await fs.writeFile(annotationPath, JSON.stringify(annotation, null, 2));
                         savedPaths.annotations.push(annotationPath);
                     }

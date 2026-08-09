@@ -1,6 +1,7 @@
 /** LoadPage — import pixel data + JSONs from a previous system. */
 
 import React, { useState, useRef, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   FolderOpen,
   Upload,
@@ -58,6 +59,10 @@ type AnalyzeReport = {
     collisionRenames: number;
     missingObjects: MissingObject[];
   };
+  itemDerivation?: {
+    conflicts: number;
+    reconciled: Array<{ base: string; from: string[]; to: string; count: number; type?: string }>;
+  };
   stats: {
     pixelNew: number;
     pixelDuplicate: number;
@@ -68,6 +73,7 @@ type AnalyzeReport = {
     layoutsDuplicate: number;
     collisionRenames: number;
     missingLayouts: number;
+    subcategoryConflicts?: number;
   };
 };
 
@@ -152,6 +158,18 @@ export default function LoadPage() {
   const [runId, setRunId] = useState<string>("");
   const [skipMissing, setSkipMissing] = useState(false);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
+  const [massCategory, setMassCategory] = useState("");
+
+  /* Apply the chosen mass-assign category to every unclassified pixel file. */
+  const applyMassCategory = () => {
+    if (!report || !massCategory) return;
+    setOverrides((prev) => {
+      const next = { ...prev };
+      for (const u of report.items.unclassified) next[u.id] = massCategory;
+      return next;
+    });
+    showToast("info", `Assigned "${CATEGORY_OPTIONS.find((o) => o.value === massCategory)?.label ?? massCategory}" to all ${report.items.unclassified.length} unclassified file(s).`);
+  };
 
   /* ---- Run / progress ---- */
   const [running, setRunning] = useState(false);
@@ -167,6 +185,9 @@ export default function LoadPage() {
     setToasts((prev) => [...prev, { id, type, message }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
   };
+
+  /* ---- Navigation ---- */
+  const navigate = useNavigate();
 
   /* ---- Cleanup aborts on unmount ---- */
   useEffect(() => {
@@ -237,12 +258,18 @@ export default function LoadPage() {
         json: data.json || { annotationsFiles: 0, savedLayoutsFiles: 0, catalogFiles: 0, unknownFiles: 0, errors: [] },
         items: { toAdd: [], duplicates: [], unclassified: [], ...data.items },
         layouts: { total: 0, toAdd: [], duplicates: 0, collisionRenames: 0, missingObjects: [], ...data.layouts },
-        stats: data.stats,
+        itemDerivation: data.itemDerivation || { conflicts: 0, reconciled: [] },
+        stats: { subcategoryConflicts: 0, ...data.stats },
       };
       r.items.unclassified = (r.items.unclassified || []).map((u: any) => ({
         id: typeof u === "string" ? u : (u && u.id) || u,
         category: (u && u.category) || null,
       }));
+
+      if (r.itemDerivation && r.itemDerivation.conflicts > 0) {
+        showToast("info",
+          `${r.itemDerivation.conflicts} item(s) had conflicting subcategory labels in the source annotations and were assigned the most common label per bag.`);
+      }
 
       setReport(r);
       setProgress(null);
@@ -401,6 +428,7 @@ export default function LoadPage() {
     setSummary(null);
     setRunError(null);
     setOverrides({});
+    setMassCategory("");
     setSkipMissing(false);
   };
 
@@ -412,6 +440,7 @@ export default function LoadPage() {
     setRunError(null);
     setAnalyzeError(null);
     setOverrides({});
+    setMassCategory("");
     setSkipMissing(false);
     abortRef.current?.abort();
   };
@@ -730,39 +759,110 @@ export default function LoadPage() {
           </div>
 
           {report.items.unclassified.length > 0 && (
-            <div className="mb-4 rounded-xl border border-border bg-white p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <AlertTriangle size={15} className="text-amber-500" />
-                <span className="text-sm font-semibold text-ink">
-                  {report.items.unclassified.length} pixel file(s) need a category
+            <div className="mb-4 rounded-xl border-2 border-amber-300 bg-amber-50 p-4 shadow-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle size={18} className="text-amber-600" />
+                <span className="text-sm font-bold text-amber-900">
+                  {report.items.unclassified.length} pixel file(s) have no category
                 </span>
               </div>
-              <p className="text-xs text-muted mb-2">
-                Pick a category below. Files left as “None” are still copied to storage but
-                not shown in the library.
+              <p className="text-xs text-amber-700 mb-3">
+                These files were not tagged in the original system. Choose a category below and click Apply to assign them all at once, or expand Assign individually to set them one by one. Leaving the dropdown on None copies the pixel files to storage but they will not appear in the library.
               </p>
-              <div className="max-h-56 overflow-auto space-y-1.5">
-                {report.items.unclassified.slice(0, 60).map((u) => (
-                  <div key={u.id} className="flex items-center justify-between gap-3">
-                    <span className="text-xs font-mono text-ink truncate">{u.id}</span>
-                    <select
-                      value={overrides[u.id] ?? ""}
-                      onChange={(e) => setOverrides((prev) => ({ ...prev, [u.id]: e.target.value }))}
-                      disabled={running}
-                      className="text-xs rounded-lg border border-border bg-surface px-2 py-1.5 focus:outline-none focus:border-accent"
-                    >
-                      {CATEGORY_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-                {report.items.unclassified.length > 60 && (
-                  <p className="text-xs text-muted">+{report.items.unclassified.length - 60} more…</p>
+
+              {/* Mass assign — single dropdown for all unclassified items */}
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2.5">
+                <span className="text-xs font-bold text-amber-900 whitespace-nowrap uppercase tracking-wide">Mass Assign All:</span>
+                <select
+                  value={massCategory}
+                  onChange={(e) => setMassCategory(e.target.value)}
+                  disabled={running}
+                  className="w-48 p-2 border-2 border-amber-200 rounded-lg text-xs bg-white font-medium focus:outline-none focus:border-accent"
+                >
+                  {CATEGORY_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={applyMassCategory}
+                  disabled={running || !massCategory}
+                  className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl bg-accent text-white text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors shadow-sm"
+                >
+                  <Layers size={14} />
+                  {massCategory
+                    ? <>Apply {CATEGORY_OPTIONS.find((o) => o.value === massCategory)?.label ?? massCategory} to all {report.items.unclassified.length} file(s)</>
+                    : <>Select a category above</>}
+                </button>
+                {Object.keys(overrides).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setOverrides({})}
+                    disabled={running}
+                    className="px-3 py-2 rounded-xl border-2 border-amber-200 bg-white text-xs font-bold text-amber-700 hover:text-amber-900 hover:border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Clear all overrides
+                  </button>
                 )}
               </div>
+
+              {/* Per-file overrides */}
+              <details className="group">
+                <summary className="text-xs font-semibold text-amber-800 cursor-pointer hover:text-amber-900 select-none">
+                  Assign individually ({report.items.unclassified.length} files)
+                </summary>
+                <div className="mt-2 max-h-56 overflow-auto rounded-lg border border-amber-200 bg-white p-2 space-y-1">
+                  {report.items.unclassified.slice(0, 200).map((u) => (
+                    <div key={u.id} className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-mono text-ink truncate">{u.id}</span>
+                      <select
+                        value={overrides[u.id] ?? ""}
+                        onChange={(e) => setOverrides((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                        disabled={running}
+                        className="text-xs rounded-lg border border-amber-200 bg-white px-2 py-1.5 focus:outline-none focus:border-accent font-medium"
+                      >
+                        {CATEGORY_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                  {report.items.unclassified.length > 200 && (
+                    <p className="text-xs text-amber-600 font-medium">+{report.items.unclassified.length - 200} more…</p>
+                  )}
+                </div>
+              </details>
             </div>
           )}
+
+          {report.itemDerivation?.conflicts ? (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <div className="flex items-start gap-2 mb-1">
+                <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" />
+                <span className="text-sm font-semibold text-amber-800">
+                  {report.itemDerivation.conflicts} item(s) reconciled to a consistent category / subcategory
+                </span>
+              </div>
+              <p className="text-xs text-amber-700 mb-2">
+                The same base bag appeared in multiple sources with different category or subcategory labels
+                (e.g. some copies assigned different categories or subcategories).
+                To avoid jumbled categories, every copy was assigned the most common label for that bag.
+              </p>
+              {report.itemDerivation.reconciled.length > 0 && (
+                <div className="max-h-40 overflow-auto space-y-1">
+                  {report.itemDerivation.reconciled.slice(0, 10).map((r) => (
+                    <div key={r.base + '-' + (r.type || '')} className="rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-[11px] text-amber-900">
+                      <span className="font-mono font-semibold">{r.base}</span> → <span className="font-semibold">{r.to}</span>
+                      <span className="text-amber-600"> ({r.count} file(s), conflicting {r.type ?? 'labels'}: {Array.from(new Set(r.from)).join(", ")})</span>
+                    </div>
+                  ))}
+                  {report.itemDerivation.reconciled.length > 10 && (
+                    <p className="text-[11px] text-amber-600">+{report.itemDerivation.reconciled.length - 10} more…</p>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : null}
 
           {/* Run / import */}
           <div className="mt-5 flex items-center gap-3 border-t border-border pt-4">
@@ -834,18 +934,20 @@ export default function LoadPage() {
             <Stat label="Valid regions" value={summary.validRegions.generated} sub={summary.validRegions.failed ? `${summary.validRegions.failed} failed` : "generated"} tone={summary.validRegions.failed ? "warn" : "ok"} />
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <a
-              href="#/library"
+            <button
+              type="button"
+              onClick={() => navigate("/library")}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors"
             >
               <Layers size={15} /> Go to Library
-            </a>
-            <a
-              href="#/saved"
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/saved")}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-300 bg-white text-emerald-700 text-sm font-semibold hover:bg-emerald-50 transition-colors"
             >
               <FileJson size={15} /> Go to Saved
-            </a>
+            </button>
           </div>
         </div>
       )}
