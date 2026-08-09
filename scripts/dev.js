@@ -11,7 +11,13 @@ function waitForServer(url, timeout = 30000) {
     const start = Date.now();
     const attempt = () => {
       http.get(url, (res) => {
-        resolve();
+        if (res.statusCode === 200) {
+          resolve();
+        } else if (Date.now() - start > timeout) {
+          reject(new Error(`Timeout waiting for ${url}`));
+        } else {
+          setTimeout(attempt, 200);
+        }
       }).on("error", () => {
         if (Date.now() - start > timeout) {
           reject(new Error(`Timeout waiting for ${url}`));
@@ -57,8 +63,12 @@ async function main() {
   // Wait for Vite to actually respond to HTTP requests
   try {
     await waitForServer("http://127.0.0.1:5174");
-    // Auto-open browser on Windows
-    spawn("cmd", ["/c", "start", "http://127.0.0.1:5174"], {
+    // Give Vite a moment to finish initial module compilation before opening browser
+    await new Promise((r) => setTimeout(r, 300));
+    // Auto-open browser on Windows with a cache-busting query so the browser
+    // never serves a stale cached index.html on first load.
+    const cacheBuster = `?_dev_start=${Date.now()}`;
+    spawn("cmd", ["/c", "start", `http://127.0.0.1:5174${cacheBuster}`], {
       stdio: "ignore",
       detached: true,
     }).unref();

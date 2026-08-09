@@ -4,10 +4,13 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   server: {
-    host: "127.0.0.1",
+    host: "localhost",
     port: 5174,
     strictPort: true,
-    origin: "http://127.0.0.1:5174",
+    origin: "http://localhost:5174",
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+    },
   },
 });
 

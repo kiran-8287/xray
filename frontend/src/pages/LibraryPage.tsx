@@ -227,7 +227,14 @@ export default function LibraryPage() {
     }
   }, [selectedItems, SELECT_PERSIST_THRESHOLD]);
 
+  const fetchInProgressRef = useRef(false);
+
   const fetchCategorizedItems = async () => {
+    // Guard against concurrent fetches that pile up requests
+    if (fetchInProgressRef.current) {
+      return;
+    }
+    fetchInProgressRef.current = true;
     try {
       setIsLoading(true);
       // Clear any stale sessionStorage cache — always do a fresh full paginated fetch
@@ -314,6 +321,7 @@ export default function LibraryPage() {
       showNotification("error", "Unable to load library items.");
     } finally {
       setIsLoading(false);
+      fetchInProgressRef.current = false;
     }
   };
 

@@ -93,6 +93,7 @@ export default function CustomizationPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sidebarSearch, setSidebarSearch] = useState("");
   const hasInitialized = useRef(false);
+  const fetchInProgressRef = useRef(false);
   
   // Unsaved changes tracking
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -101,6 +102,11 @@ export default function CustomizationPage() {
 
   useEffect(() => {
     (async () => {
+      // Guard against concurrent fetches that pile up requests
+      if (fetchInProgressRef.current) {
+        return;
+      }
+      fetchInProgressRef.current = true;
       try {
         const BATCH_SIZE = 500;
         const firstRes = await fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?page=1&limit=${BATCH_SIZE}`);
@@ -151,6 +157,8 @@ export default function CustomizationPage() {
       } catch (err: any) {
         console.error("Error loading scanned bags in workspace:", err);
         setLoadError("Cannot connect to backend. Please verify the server is running.");
+      } finally {
+        fetchInProgressRef.current = false;
       }
     })();
   }, []);
