@@ -1481,25 +1481,12 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             cancelled = exportCancellations.has(jobId);
         }
 
-        if (targetLayouts.length === 0) {
-            return res.json({
-                ok: true,
-                message: 'No layouts to export',
-                exported: [],
-                savedPaths: { high: [], low: [], annotations: [] },
-                cancelled
-            });
-        }
-
         // Get user-configured exports path (or fall back to default)
         const userExportsRoot = await getExportsPath();
         const exportsRoot = path.resolve(userExportsRoot);
         const exportsHighRoot = path.join(exportsRoot, 'high');
         const exportsLowRoot = path.join(exportsRoot, 'low');
         const exportsAnnotationsRoot = path.join(exportsRoot, 'annotations');
-        // Catalog root: stores the authoritative item list (category / subcategory /
-        // pixel refs / valid regions) so a fresh system can rebuild the EXACT library
-        // instead of re-deriving possibly-conflicting labels from annotations alone.
         const exportsCatalogRoot = path.join(exportsRoot, 'catalog');
         
         await fs.mkdir(exportsHighRoot, { recursive: true });
@@ -1512,11 +1499,10 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
         const annotationRecords = [];
         const ANNOTATION_PARTITION_CAP = 5000;
 
-        // ---- NEW: always export the current library catalog so a re-import on a
+        // ---- ALWAYS export the current library catalog first so a re-import on a
         // fresh machine reproduces the exact items (category + subcategory + pixels +
         // valid regions) instead of deriving them from annotation copies.
-        // Files are written per category partition so the import service auto-detects
-        // them via detectJsonType (bags_1.json / threats_1.json / non_threats_1.json).
+        // This runs even when there are no layouts to export.
         try {
             const allItems = await getItems();
             const catBins = { bags: [], threats: [], non_threats: [] };
@@ -1528,13 +1514,22 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             for (const [key, items] of Object.entries(catBins)) {
                 if (items.length === 0) continue;
                 const catName = catFileNames[key];
-                // Rewrite the partition so each run reflects the CURRENT library state.
                 const catPath = path.join(exportsCatalogRoot, catName);
                 await fs.writeFile(catPath, JSON.stringify(items, null, 2));
                 savedPaths.catalogs.push(catPath);
             }
         } catch (err) {
             console.warn('[export] Failed to write catalog files:', err);
+        }
+
+        if (targetLayouts.length === 0) {
+            return res.json({
+                ok: true,
+                message: 'No layouts to export',
+                exported: [],
+                savedPaths,
+                cancelled
+            });
         }
 
         // Determine the starting partition number by scanning existing annotation files.

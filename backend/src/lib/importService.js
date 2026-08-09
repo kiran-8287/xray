@@ -187,10 +187,16 @@ function copyBaseId(id) {
 // (e.g. half the backpacks showing up under briefcases). Reconcile every copy
 // group to its most common label so the library stays consistent, and report
 // how many items were affected.
-function reconcileItemSubcategories(items) {
+//
+// `reservedIds` is a Set of base IDs whose labels are already authoritative
+// (e.g. from a catalog export). Those IDs are completely excluded from
+// reconciliation so they never show up as "conflicts" and their labels are
+// never overridden by annotation-derived copies.
+function reconcileItemSubcategories(items, reservedIds = new Set()) {
   const groups = new Map();
   for (const it of items) {
     const base = copyBaseId(it.id);
+    if (reservedIds.has(base)) continue; // catalog owns this base — skip entirely
     if (!groups.has(base)) groups.set(base, []);
     groups.get(base).push(it);
   }
@@ -248,7 +254,7 @@ function reconcileItemSubcategories(items) {
   return { items, conflicts, reconciled };
 }
 
-function itemsFromLayouts(layouts, allowedIds) {
+function itemsFromLayouts(layouts, allowedIds, reservedIds = new Set()) {
   const map = new Map();
   for (const l of layouts) {
     const objs = (l.layout_json && l.layout_json.objects) || {};
@@ -256,7 +262,7 @@ function itemsFromLayouts(layouts, allowedIds) {
     if (Array.isArray(objs.threats)) for (const t of objs.threats) addItemTo(map, 'threats', t, allowedIds);
     if (Array.isArray(objs['non-threats'])) for (const nt of objs['non-threats']) addItemTo(map, 'non-threats', nt, allowedIds);
   }
-  return reconcileItemSubcategories(Array.from(map.values()));
+  return reconcileItemSubcategories(Array.from(map.values()), reservedIds);
 }
 
 function itemsFromCatalog(category, parsed) {
@@ -392,11 +398,12 @@ async function parseSources({ pixelFiles = [], jsonFiles = [] }) {
 
   // Annotation-derived items fill gaps not covered by the catalog — but only
   // when the object's pixel file is present in the upload (prevents phantom
-  // items for missing references). Copies of the same base bag are reconciled
-  // to their most common subcategory label so categories don't look jumbled
-  // after import.
+  // items for missing references). Items whose base ID already exists in the
+  // catalog are reserved: they are excluded from reconciliation so the catalog
+  // labels are never reported as "conflicts" or overwritten by annotation copies.
   const allowedForAnnotation = new Set([...catalogItems.keys(), ...pixelFiles.filter((p) => p.energy === 'highenergy').map((p) => p.baseName)]);
-  const layoutDerived = itemsFromLayouts(layouts, allowedForAnnotation);
+  const reservedIds = new Set([...catalogItems.keys()].map((id) => copyBaseId(id)));
+  const layoutDerived = itemsFromLayouts(layouts, allowedForAnnotation, reservedIds);
   for (const it of layoutDerived.items) {
     if (!catalogItems.has(it.id)) catalogItems.set(it.id, it);
   }
