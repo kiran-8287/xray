@@ -316,6 +316,36 @@ class WorkerPool {
       resolvers.forEach(resolve => resolve());
     }
   }
+
+  /**
+   * Destroy the pool by terminating all worker threads.
+   * Should be called after drain() to clean up resources.
+   */
+  destroy() {
+    // Clear any pending batches and timers
+    this._batchBuffer = [];
+    if (this._batchTimer) {
+      clearTimeout(this._batchTimer);
+      this._batchTimer = null;
+    }
+    this.queue = [];
+
+    // Terminate all idle workers
+    for (const worker of this.idle) {
+      try {
+        worker.terminate();
+      } catch {
+        // ignore
+      }
+    }
+    this.idle.clear();
+    this.size = 0;
+
+    // Resolve any pending drain promises so callers aren't left hanging
+    const resolvers = this._drainResolvers;
+    this._drainResolvers = [];
+    resolvers.forEach(resolve => resolve());
+  }
 }
 
 export default WorkerPool;

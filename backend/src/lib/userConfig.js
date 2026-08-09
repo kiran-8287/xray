@@ -49,7 +49,8 @@ async function saveUserConfig(configData) {
  */
 async function getExportsPath() {
   const userConfig = await loadUserConfig();
-  return userConfig.exportsPath || config.exportsRoot;
+  const raw = userConfig.exportsPath || config.exportsRoot;
+  return path.resolve(raw);
 }
 
 /**

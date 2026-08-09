@@ -294,6 +294,7 @@ await fs.mkdir(collageHighRoot, { recursive: true });
 await fs.mkdir(collageLowRoot, { recursive: true });
 await fs.mkdir(pixelDataRoot, { recursive: true });
 await fs.mkdir(tempDir, { recursive: true });
+await fs.mkdir(path.join(tempDir, 'raw-uploads'), { recursive: true });
 
 // Ensure exports subdirectories exist
 const { exportsHighRoot, exportsLowRoot, exportsAnnotationsRoot } = config;
@@ -365,12 +366,16 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// Multer setup for raw file uploads (memory storage for streaming)
-const rawUpload = multer({ 
-  storage: multer.memoryStorage(),
+// Multer setup for raw file uploads (disk storage to avoid loading huge files into RAM)
+const rawUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, path.join(tempDir, 'raw-uploads')),
+    filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`),
+  }),
   limits: {
     files: 5000,
-  }
+    fileSize: 1024 * 1024 * 1024, // 1 GB per file ceiling
+  },
 });
 
 // Multer setup for import (Save Historic Data) uploads.
@@ -575,7 +580,7 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
         // Stage 1: Upload Receipt
         timer.startStage(PIPELINE_STAGES.UPLOAD_RECEIPT);
         const files = req.files || [];
-        logger.info({ operationId, fileCount: files.length, totalSize: files.reduce((sum, f) => sum + f.buffer.length, 0) }, 'upload_receipt');
+        logger.info({ operationId, fileCount: files.length, totalSize: files.reduce((sum, f) => sum + (f.size || 0), 0) }, 'upload_receipt');
         timer.endStage(PIPELINE_STAGES.UPLOAD_RECEIPT, { fileCount: files.length });
         
         // Stage 2: Validation
@@ -649,10 +654,9 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
 
         // Stage 3: File Preprocessing
         timer.startStage(PIPELINE_STAGES.FILE_PREPROCESSING);
-        
-        // Files are already loaded into memory by multer's memoryStorage.
-        // The workers process files one at a time via temp files on disk, so overhead is minimal.
-        // Only account for additional processing overhead, not file sizes (already allocated).
+
+        // Files are streamed to disk by multer's diskStorage.
+        // We copy them to the app's temp directory with unique names so the workers can process them.
         const workerCount = await getWorkerCount('upload', 10);
         // Estimate memory dynamically based on batch size (~0.05MB per file, min 2MB)
         const estimatedMemoryMB = Math.max(2, Math.ceil(nonDuplicates.length * 0.05));
@@ -690,10 +694,7 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
         
         for (const { file, itemId, fileType } of nonDuplicates) {
             const tempPath = path.join(tempDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
-            await fs.writeFile(tempPath, file.buffer);
-
-            // ✅ Clear buffer after writing to disk to free memory immediately
-            file.buffer = null;
+            await fs.copyFile(file.path, tempPath);
 
             pool.addTask(
                 {
@@ -741,7 +742,8 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
         const workerDispatchStart = process.hrtime.bigint();
         
         await pool.drain();
-        
+        pool.destroy();
+
         const workerDispatchDuration = Number(process.hrtime.bigint() - workerDispatchStart) / 1e9;
         timer.endStage(PIPELINE_STAGES.WORKER_DISPATCH, { 
             workerCount,
@@ -1480,9 +1482,10 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
 
         // Get user-configured exports path (or fall back to default)
         const userExportsRoot = await getExportsPath();
-        const exportsHighRoot = path.join(userExportsRoot, 'high');
-        const exportsLowRoot = path.join(userExportsRoot, 'low');
-        const exportsAnnotationsRoot = path.join(userExportsRoot, 'annotations');
+        const exportsRoot = path.resolve(userExportsRoot);
+        const exportsHighRoot = path.join(exportsRoot, 'high');
+        const exportsLowRoot = path.join(exportsRoot, 'low');
+        const exportsAnnotationsRoot = path.join(exportsRoot, 'annotations');
         
         await fs.mkdir(exportsHighRoot, { recursive: true });
         await fs.mkdir(exportsLowRoot, { recursive: true });
@@ -1492,7 +1495,27 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
         const savedPaths = { high: [], low: [], annotations: [] };
         const annotationRecords = [];
         const ANNOTATION_PARTITION_CAP = 5000;
+
+        // Determine the starting partition number by scanning existing annotation files.
+        // This prevents overwriting previous exports (e.g., annotations_1.json, annotations_2.json).
         let annotationPartitionNum = 1;
+        try {
+            const existingFiles = await fs.readdir(exportsAnnotationsRoot);
+            const existingPartitionNums = existingFiles
+                .filter(name => /^annotations_\d+\.json$/.test(name))
+                .map(name => {
+                    const match = name.match(/^annotations_(\d+)\.json$/);
+                    return match ? parseInt(match[1], 10) : null;
+                })
+                .filter((num) => num !== null);
+
+            if (existingPartitionNums.length > 0) {
+                annotationPartitionNum = Math.max(...existingPartitionNums) + 1;
+            }
+        } catch (err) {
+            console.warn('[export] Failed to scan existing annotation partitions:', err);
+        }
+
         let currentAnnotationPartition = [];
         const annotationPartitions = [];
 
@@ -1603,23 +1626,22 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                         lowEnergyImage: lowEnergyFilename,
                         objects: layout.layout_json?.objects || null
                     };
-                    // Per-layout annotation file — always written for all modes.
-                    // Individual and small Save Selected keep only per-layout JSONs;
-                    // batch annotations.json partitions are only created when:
-                    //   - saveMode === 'all', OR
-                    //   - saveMode === 'selected' and targetLayouts.length > BATCH_THRESHOLD
-                    const shouldCreateBatchAnnotations =
+                    // Per-layout annotation file — skipped for bulk modes to avoid
+                    // creating thousands of individual JSONs. We only write
+                    // batched annotation partitions in those cases.
+                    const isBulkMode =
                         saveMode === 'all' ||
                         (saveMode === 'selected' && targetLayouts.length > BATCH_THRESHOLD);
+                    const shouldCreateIndividualFile = !isBulkMode;
+                    const shouldCreateBatchAnnotations = isBulkMode;
 
-                    let annotationPath = null;
-                    annotationPath = path.join(exportsAnnotationsRoot, `${baseName}.json`);
-                    await fs.writeFile(annotationPath, JSON.stringify(annotation, null, 2));
-                    savedPaths.annotations.push(annotationPath);
+                    if (shouldCreateIndividualFile) {
+                        const annotationPath = path.join(exportsAnnotationsRoot, `${baseName}.json`);
+                        await fs.writeFile(annotationPath, JSON.stringify(annotation, null, 2));
+                        savedPaths.annotations.push(annotationPath);
+                    }
                     annotationRecords.push(annotation);
 
-                    // Only accumulate into partition buffer for batch export manifest
-                    // when using the batch annotation strategy.
                     if (shouldCreateBatchAnnotations) {
                         currentAnnotationPartition.push(annotation);
                         if (currentAnnotationPartition.length >= ANNOTATION_PARTITION_CAP) {
@@ -1906,7 +1928,7 @@ app.post("/api/upload", requireAuth, uploadWithLimits.array("images", config.max
                 }
                 const parsed = parseFilename(file.originalname);
                 subcategory = parsed.subcategory;
-                const name = path.basename(file.originalname, path.extname(file.originalname));
+                const name = deriveItemId(file.originalname);
 
                 if (fileMeta.category) {
                     category = fileMeta.category;
