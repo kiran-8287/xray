@@ -1,10 +1,12 @@
 /**
  * GenerationService - Module-level singleton for incremental combination generation.
  *
- * Memory-efficient design:
- * - generatedBuffer: all combos received from worker but not yet saved
+ * Memory-efficient design ("show only 100 at a time"):
+ * - generatedBuffer: staging buffer holding the next ~200 combos from the worker
  * - state.combinations: ONLY the current display window (≤ ITEMS_PER_PAGE = 100)
- * - After saving a page, it's evicted and the next page is pulled from buffer
+ * - After saving a page (100), it's evicted and the next 100 are pulled straight
+ *   from the staged buffer (no generation wait), then the buffer is topped back
+ *   up toward STAGED_BUFFER_SIZE (200) — "add another 100 next to the buffer".
  *
  * "Save as you go" mode: when enabled with a mode (annotations/both),
  * automatically save pages of 100, evict, load next 100 from buffer, repeat.
@@ -43,8 +45,15 @@ const NOTIFY_THROTTLE_MS = 100;
 
 // Chunked generation constants
 const CHUNK_SIZE = 5000;
-const MAX_BUFFER_SIZE = 300;
-const BUFFER_REFILL_THRESHOLD = 100;
+// Display + staging model ("show only 100 at a time"):
+// - The collage grid renders ONLY ITEMS_PER_PAGE (100) combinations.
+// - The next STAGED_BUFFER_SIZE (200) combos are kept staged in generatedBuffer so
+//   they load instantly right after the current page is saved ("next 100 out of the
+//   stored 200"), then checkAndRefillBuffer() tops the buffer back up toward
+//   STAGED_BUFFER_SIZE ("add another 100 next to the buffer").
+const STAGED_BUFFER_SIZE = 200;
+const BUFFER_REFILL_THRESHOLD = STAGED_BUFFER_SIZE;
+const MAX_BUFFER_SIZE = 300; // hard ceiling on in-memory combos (100 shown + 200 staged)
 const MAX_BUFFER_GROWTH = 1000;
 
 // Auto-save timing constants
@@ -67,6 +76,13 @@ let lastNotifyTime = 0;
 let pendingNotify = false;
 let autoSaveStartTime = 0;
 let lastAutoSaveTime = 0; // Track when last auto-save completed
+
+// Backpressure hook for split generation: when the in-memory buffer fills up,
+// a sub-batch pauses and stores a resume callback here. It is invoked from
+// saveCurrentPage() / processNextAutoSavePage() via checkAndRefillBuffer() once
+// pages have been evicted and buffer space frees up. This keeps the buffer
+// bounded instead of letting all 25K+ combos accumulate in RAM.
+let splitBatchResumeFn: (() => void) | null = null;
 
 // Chunked generation state
 let totalGeneratedCount = 0; // Total combinations generated so far
@@ -153,9 +169,11 @@ function persistToStorage() {
 }
 
 function refillDisplayWindow() {
-  // Load multiple pages when buffer has plenty of items
-  const pagesToLoad = generatedBuffer.length > ITEMS_PER_PAGE * 3 ? 3 : 1;
-  const targetCount = ITEMS_PER_PAGE * pagesToLoad;
+  // Show ONLY one page (ITEMS_PER_PAGE = 100) at a time — NOT 3 pages of 300.
+  // Everything else stays staged in generatedBuffer so the instant the current
+  // page is saved, the next 100 are pulled from the buffer ("next 100 out of the
+  // stored 200"). checkAndRefillBuffer() then tops the buffer back up.
+  const targetCount = ITEMS_PER_PAGE;
   
   while (state.combinations.length < targetCount && generatedBuffer.length > 0) {
     state.combinations.push(generatedBuffer.shift()!);
@@ -364,7 +382,10 @@ async function processNextAutoSavePage(): Promise<boolean> {
 
   evictFromDisplayWindow(evictableIds);
   refillDisplayWindow();
-  
+
+  // Buffer space just freed up — allow a paused split sub-batch to continue.
+  maybeResumeSplitGeneration();
+
   // Update hasGeneratedResults flag based on remaining combinations and buffer
   state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
   
@@ -455,65 +476,49 @@ async function generateSingleBatch(
     const results: CombinatorialResult[] = [];
     const failures: FailureLog[] = [];
     let worker: Worker | null = null;
-    
+    let generatedInBatch = 0;  // combos produced so far for THIS split sub-batch
+    let chunkInFlight = false;
+    let done = false;
+    // IDs produced within THIS sub-batch. The worker dedups only against the
+    // `existingIds` it receives per message, so for chunked generation we must
+    // feed the already-generated ids of this sub-batch back in on every chunk
+    // — otherwise chunk N+1 can regenerate combinations from chunk N.
+    const batchGeneratedIds: string[] = [];
+
+
     // Timeout scales with the batch size. Base 5 min for the first 5,000 combos,
     // then +1 min for every additional 5,000. This gives a 25K batch ~9 minutes,
     // while keeping small batches snappy. (Previously a fixed 5-min timeout could
     // fire even for a correctly-sized batch on slow/loaded machines.)
     const k = Math.max(params.kValue || 0, 0);
     const timeoutMs = 300000 + Math.max(0, k - 5000) / 5000 * 60000;
-    const timeout = setTimeout(() => {
-      if (worker) worker.terminate();
-      reject(new Error(`${batchLabel || "Batch"} generation timed out after ${Math.round(timeoutMs / 1000)}s`));
-    }, timeoutMs);
-    
-    try {
-      worker = new Worker(
-        new URL("../workers/incrementalGenerator.worker.ts", import.meta.url),
-        { type: "module" }
-      );
-      
-      worker.onmessage = (event) => {
-        const response = event.data;
-        
-        if (response.type === "batch") {
-          const batch = response.batch || [];
-          
-          // Add to results
-          results.push(...batch);
-          
-          // Add any failures
-          const batchFailures: FailureLog[] = response.failures || [];
-          if (batchFailures.length > 0) {
-            failures.push(...batchFailures);
-          }
-          
-          // CALLBACK: Show only the NEW batch items immediately as generated
-          // (NOT the cumulative results — avoids duplicating earlier batches)
-          if (onProgress && batch.length > 0) {
-            onProgress(batch, batchFailures);
-          }
-        } else if (response.type === "complete" || response.type === "chunkComplete") {
-          clearTimeout(timeout);
-          worker?.terminate();
-          // Capture failures delivered with the completion message
-          if (response.failures && response.failures.length > 0) {
-            failures.push(...response.failures);
-          }
-          resolve({ results, failures });
-        } else if (response.type === "error") {
-          clearTimeout(timeout);
-          worker?.terminate();
-          reject(new Error(response.error || "Worker error"));
-        }
-      };
-      
-      worker.onerror = (error) => {
-        clearTimeout(timeout);
-        worker?.terminate();
-        reject(new Error("Worker failed: " + (error.message || "Unknown error")));
-      };
-      
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const resetTimeout = () => {
+      if (timeout) clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        if (done) return;
+        if (worker) worker.terminate();
+        reject(new Error(`${batchLabel || "Batch"} generation timed out after ${Math.round(timeoutMs / 1000)}s`));
+      }, timeoutMs);
+    };
+
+    const moreToGenerate = () => generatedInBatch < params.kValue;
+
+    // Backpressure: send the next chunk only when the in-memory buffer has room.
+    // If the buffer is full, pause and hand a resume callback to the module-level
+    // hook, which is invoked after pages are saved/evicted. This keeps memory
+    // bounded instead of filling the buffer with all combos at once.
+    const sendChunk = () => {
+      if (done || chunkInFlight) return;
+      if (!moreToGenerate()) return;
+
+      const remaining = params.kValue - generatedInBatch;
+      const chunkSize = Math.min(CHUNK_SIZE, remaining);
+
+      resetTimeout();
+      chunkInFlight = true;
+
       const effectiveThreatDist: Record<number, number> = {};
       for (let i = 1; i <= params.maxThreats; i++) {
         effectiveThreatDist[i] = (params.threatDistribution && params.threatDistribution[i]) ?? 0;
@@ -522,21 +527,108 @@ async function generateSingleBatch(
       for (let i = 1; i <= params.maxNonThreats; i++) {
         effectiveNonThreatDist[i] = (params.nonThreatDistribution && params.nonThreatDistribution[i]) ?? 0;
       }
-      
-      worker.postMessage({
-        type: "generate",
+
+      worker?.postMessage({
+        type: "generateChunk",
         selectedBags: params.selectedBags,
         selectedThreats: params.selectedThreats,
         selectedOthers: params.selectedOthers,
-        kValue: params.kValue,
+        kValue: params.kValue,       // full sub-batch total (keeps isComplete math correct)
+        chunkSize: chunkSize,        // cap how many this run produces
+        totalGenerated: generatedInBatch,
         threatDistribution: effectiveThreatDist,
         nonThreatDistribution: effectiveNonThreatDist,
         requireAtLeastOneNonThreat: params.requireAtLeastOneNonThreat || false,
-        existingIds: params.existingIds || [],
+        existingIds: [...(params.existingIds || []), ...batchGeneratedIds],
         batchSize: batchSize || params.batchSize || 200,
       });
+    };
+
+    // Called once pages are saved and buffer space frees up.
+    const pauseUntilSaved = () => {
+      console.log(`[SplitGeneration] ${batchLabel} buffer full (${generatedBuffer.length}/>=${MAX_BUFFER_GROWTH}), pausing until pages are saved...`);
+      chunkInFlight = false;
+      if (timeout) clearTimeout(timeout); // no in-flight work while paused
+      splitBatchResumeFn = () => {
+        splitBatchResumeFn = null;
+        resetTimeout();
+        sendChunk();
+      };
+    };
+
+    try {
+      worker = new Worker(
+        new URL("../workers/incrementalGenerator.worker.ts", import.meta.url),
+        { type: "module" }
+      );
+
+      worker.onmessage = (event) => {
+        const response = event.data;
+
+        if (response.type === "batch") {
+          const batch = response.batch || [];
+
+          // Add to results
+          results.push(...batch);
+          generatedInBatch += batch.length;
+
+          // Track ids generated in this sub-batch so subsequent chunks pass
+          // them back via existingIds — the worker dedups only against the
+          // existingIds it receives per message, not across messages.
+          for (const combo of batch) {
+            if (combo.id) batchGeneratedIds.push(combo.id);
+          }
+
+          // Add any failures
+          const batchFailures: FailureLog[] = response.failures || [];
+          if (batchFailures.length > 0) {
+            failures.push(...batchFailures);
+          }
+
+          // CALLBACK: Show only the NEW batch items immediately as generated
+          if (onProgress && batch.length > 0) {
+            onProgress(batch, batchFailures);
+          }
+        } else if (response.type === "complete" || response.type === "chunkComplete") {
+          chunkInFlight = false;
+
+          // Capture failures delivered with the completion message
+          if (response.failures && response.failures.length > 0) {
+            failures.push(...response.failures);
+          }
+
+          if (moreToGenerate()) {
+            // Still more combos in this sub-batch: pace by buffer capacity.
+            if (generatedBuffer.length < MAX_BUFFER_GROWTH) {
+              sendChunk();
+            } else {
+              pauseUntilSaved();
+            }
+          } else {
+            done = true;
+            if (timeout) clearTimeout(timeout);
+            worker?.terminate();
+            resolve({ results, failures });
+          }
+        } else if (response.type === "error") {
+          done = true;
+          if (timeout) clearTimeout(timeout);
+          worker?.terminate();
+          reject(new Error(response.error || "Worker error"));
+        }
+      };
+
+      worker.onerror = (error) => {
+        done = true;
+        if (timeout) clearTimeout(timeout);
+        worker?.terminate();
+        reject(new Error("Worker failed: " + (error.message || "Unknown error")));
+      };
+
+      sendChunk();
     } catch (err) {
-      clearTimeout(timeout);
+      done = true;
+      if (timeout) clearTimeout(timeout);
       worker?.terminate();
       reject(err);
     }
@@ -556,9 +648,24 @@ async function autoSaveBatch(batch: CombinatorialResult[]) {
 }
 
 /**
+ * Resume a paused split-generation sub-batch once buffer space frees up.
+ * Called after pages are saved/evicted (manual save and auto-save).
+ */
+function maybeResumeSplitGeneration() {
+  if (splitBatchResumeFn && generatedBuffer.length < MAX_BUFFER_GROWTH) {
+    const resume = splitBatchResumeFn;
+    splitBatchResumeFn = null;
+    resume();
+  }
+}
+
+/**
  * Check if buffer needs refilling and request next chunk if needed
  */
 function checkAndRefillBuffer() {
+  // Resume any paused split sub-batch now that pages have been saved.
+  maybeResumeSplitGeneration();
+
   if (!state.isGenerating || isGeneratingChunk) return;
   
   const totalTarget = state.progress?.total || 0;
@@ -577,6 +684,7 @@ function checkAndRefillBuffer() {
 function finishGeneration(progress: { generated: number; total: number } | null) {
   state.isGenerating = false;
   isGeneratingChunk = false;
+  splitBatchResumeFn = null;
   state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
   state.progress = progress;
   if (worker) {
@@ -890,6 +998,7 @@ export const GenerationService = {
     totalGeneratedCount = 0;
     generatedIds = [];
     isGeneratingChunk = false;
+    splitBatchResumeFn = null; // clear any stale pause hook from a prior run
     consecutiveZeroChunks = 0;
 
     state = {
@@ -943,7 +1052,7 @@ export const GenerationService = {
             state.failures = allFailures;
           }
           
-          // Refill display window (loads 3 pages when buffer is large)
+          // Refill display window (only loads one page of 100; the rest stays staged in buffer)
           refillDisplayWindow();
           state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
           state.progress = { generated: totalGeneratedCount, total: params.kValue };
@@ -1006,7 +1115,7 @@ export const GenerationService = {
       }
     }
 
-    // Finalize - load 3 pages at the end
+    // Finalize - load the display window (one page of 100) from the buffer
     refillDisplayWindow();
     state.failures = allFailures;
     state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
@@ -1056,11 +1165,13 @@ export const GenerationService = {
     state.progress = null;
     autoSaveEnabled = false;
     generatedIds = [];
+    splitBatchResumeFn = null;
     notifySubscribers();
     try {
       sessionStorage.removeItem("generationProgress");
     } catch (_) { /* ignore */ }
   },
+
 
   subscribe(callback: Subscriber): () => void {
     subscribers.add(callback);
@@ -1155,10 +1266,17 @@ export const GenerationService = {
     }
     pageSaveRunningRef = true;
     try {
+      // Save exactly the currently-displayed page (ITEMS_PER_PAGE = 100), NOT
+      // multiple pages of 300. After eviction, refillDisplayWindow() pulls the
+      // next 100 straight from the staged buffer ("next 100 out of the stored
+      // 200") so the next page appears immediately without waiting on generation,
+      // and checkAndRefillBuffer() then tops the buffer back up ("add another
+      // 100 next to the buffer").
       const page = state.combinations.slice(0, ITEMS_PER_PAGE);
       if (page.length === 0) return 0;
 
       const { savedAnnotations, evictableIds } = await savePage(page, mode);
+
 
       if (state.autoSaveStatus) {
         state.autoSaveStatus.queued += savedAnnotations;

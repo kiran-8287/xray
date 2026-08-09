@@ -895,6 +895,268 @@ async function createSavedLayoutsBatch(layoutDataList) {
   }
 }
 
+// ---- Import helpers (portability / "Save Historic Data") ----
+
+/**
+ * Deterministic JSON stringifier that sorts object keys, so logically-equal
+ * objects/layouts produce identical keys regardless of key order or numeric
+ * formatting. Used to decide whether two saved layouts describe the SAME
+ * combination.
+ */
+export function stableStringify(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) {
+    return '[' + value.map((v) => stableStringify(v)).join(',') + ']';
+  }
+  if (typeof value === 'object') {
+    const keys = Object.keys(value).sort();
+    return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify(value[k])).join(',') + '}';
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * Canonical "full description" key of a saved layout. Only the combination
+ * content (layout_json) matters when deciding if two layouts are the same;
+ * the id / created_at / name are NOT part of the content identity.
+ */
+export function layoutContentKey(layout) {
+  if (!layout) return 'null';
+  return stableStringify(layout.layout_json || layout.objects || null);
+}
+
+// Extract the .npz base filename referenced by an item (used for dedup).
+function deriveItemPixelFile(item) {
+  if (!item) return null;
+  const pf = item.pixelDataFilename || item.pixel_data_path;
+  if (!pf) return null;
+  return String(pf).split('\\').pop().split('/').pop().toLowerCase();
+}
+
+/**
+ * Import items into the library, SKIPPING (never re-ID'ing) any item whose
+ * id OR pixel file already exists in the current storage. Unlike
+ * createItemsBatch (which re-assigns colliding IDs), this preserves the
+ * original object identity across systems so a re-import is idempotent.
+ *
+ * @param {Array} itemsArray - item records (category, subcategory, id, ...)
+ * @returns {Promise<{added: any[], skipped: any[], total: number}>}
+ */
+export async function importItemsBatch(itemsArray, { skipExisting = true } = {}) {
+  if (!Array.isArray(itemsArray) || itemsArray.length === 0) {
+    return { added: [], skipped: [], total: 0 };
+  }
+  await ensureDataDir();
+  const catalog = await getCatalog();
+
+  // Collect all existing identifiers across every category partition.
+  const existingIds = new Set();
+  const existingPixelFiles = new Set();
+  for (const catKey of ['bags', 'threats', 'non_threats']) {
+    const catMeta = catalog.categories[catKey];
+    if (!catMeta) continue;
+    for (const pNum of catMeta.partitions) {
+      const partPath = getPartitionFilePath(catKey, pNum);
+      const partItems = await readJSONFile(partPath, []);
+      for (const it of partItems) {
+        if (!it) continue;
+        if (it.id) existingIds.add(it.id);
+        const pf = deriveItemPixelFile(it);
+        if (pf) existingPixelFiles.add(pf);
+      }
+    }
+  }
+
+  const seenBatchIds = new Set();
+  const seenBatchPixel = new Set();
+  const grouped = { bags: [], threats: [], non_threats: [] };
+  const added = [];
+  const skipped = [];
+
+  for (const rawItem of itemsArray) {
+    if (!rawItem || !rawItem.id) {
+      skipped.push({ id: rawItem && rawItem.id, reason: 'missing_id' });
+      continue;
+    }
+    const catKey = normalizeCategoryKey(rawItem.category || rawItem.library);
+    const id = rawItem.id;
+    const pixelFile = deriveItemPixelFile(rawItem) || `${String(id).toLowerCase()}.npz`;
+
+    const dupId = existingIds.has(id) || seenBatchIds.has(id);
+    const dupPixel = existingPixelFiles.has(pixelFile) || seenBatchPixel.has(pixelFile);
+
+    if (skipExisting && (dupId || dupPixel)) {
+      skipped.push({ id, pixelFile, reason: dupId ? 'id_exists' : 'pixel_exists' });
+      continue;
+    }
+
+    if (id) { existingIds.add(id); seenBatchIds.add(id); }
+    existingPixelFiles.add(pixelFile); seenBatchPixel.add(pixelFile);
+
+    const catDisplay = catKey === 'non_threats' ? 'non-threats' : catKey;
+    const item = {
+      created_at: rawItem.created_at || new Date().toISOString(),
+      ...rawItem,
+      category: catDisplay,
+    };
+    grouped[catKey].push(item);
+    added.push(item);
+  }
+
+  // Mirror createItemsBatch partition writes (respect the 5k file cap).
+  for (const [catKey, newItems] of Object.entries(grouped)) {
+    if (newItems.length === 0) continue;
+    const catMeta = catalog.categories[catKey] || {
+      activePartition: 1,
+      partitionCap: DEFAULT_PARTITION_CAP,
+      totalCount: 0,
+      partitions: [1],
+    };
+
+    let pNum = catMeta.activePartition;
+    let currentPartPath = getPartitionFilePath(catKey, pNum);
+    let currentPartItems = await readJSONFile(currentPartPath, []);
+
+    for (const newItem of newItems) {
+      if (currentPartItems.length >= catMeta.partitionCap) {
+        await writeJSONFileAtomic(currentPartPath, currentPartItems);
+        pNum++;
+        if (!catMeta.partitions.includes(pNum)) catMeta.partitions.push(pNum);
+        currentPartPath = getPartitionFilePath(catKey, pNum);
+        currentPartItems = [];
+      }
+      currentPartItems.push(newItem);
+      catMeta.totalCount++;
+    }
+
+    await writeJSONFileAtomic(currentPartPath, currentPartItems);
+    catMeta.activePartition = pNum;
+    catalog.categories[catKey] = catMeta;
+  }
+
+  await saveCatalog(catalog);
+  return { added, skipped, total: added.length };
+}
+
+/**
+ * Import saved layouts, resolving the "same id, different system" collision
+ * the user described:
+ *   - id already exists AND content identical  -> skip (true duplicate)
+ *   - id already exists but content differs     -> add under a fresh unique id
+ *   - id does not exist                         -> add with that id
+ *
+ * @param {Array} layoutDataList - normalized saved layout records
+ * @returns {Promise<{added: any[], skipped: any[], renamed: any[], total: number}>}
+ */
+export async function importSavedLayoutsBatch(layoutDataList, { skipExisting = true, renameCollisions = true } = {}) {
+  if (!Array.isArray(layoutDataList) || layoutDataList.length === 0) {
+    return { added: [], skipped: [], renamed: [], total: 0 };
+  }
+
+  const prev = savedLayoutsMutex;
+  let resolveNext;
+  savedLayoutsMutex = new Promise((r) => { resolveNext = r; });
+  await prev;
+
+  try {
+    await ensureDataDir();
+    try { await fs.mkdir(SAVED_LAYOUTS_DIR, { recursive: true }); } catch { /* exists */ }
+
+    const catalog = await getCatalog();
+    const catMeta = catalog.categories.savedLayouts || {
+      partitions: [1],
+      activePartition: 1,
+      partitionCap: SAVED_LAYOUTS_PARTITION_CAP,
+    };
+
+    const existingLayouts = await getSavedLayouts();
+    const existingById = new Map(existingLayouts.map((l) => [l.id, l]));
+    const existingKeys = new Set(existingLayouts.map((l) => layoutContentKey(l)));
+
+    let activePartition = catMeta.activePartition || 1;
+    let partPath = getSavedLayoutsPartitionPath(activePartition);
+    let layouts = await readJSONFile(partPath, []);
+
+    const now = new Date().toISOString();
+    const added = [];
+    const skipped = [];
+    const renamed = [];
+
+    const flushIfFull = async () => {
+      if (layouts.length >= SAVED_LAYOUTS_PARTITION_CAP) {
+        await writeJSONFileAtomic(partPath, layouts);
+        activePartition++;
+        if (!catMeta.partitions.includes(activePartition)) catMeta.partitions.push(activePartition);
+        partPath = getSavedLayoutsPartitionPath(activePartition);
+        layouts = [];
+      }
+    };
+
+    for (const layoutData of layoutDataList) {
+      if (!layoutData) continue;
+      const id = layoutData.id;
+      const contentKey = layoutContentKey(layoutData);
+      const existing = (id && existingById.get(id)) || undefined;
+
+      if (existing) {
+        if (layoutContentKey(existing) === contentKey) {
+          skipped.push({ id, reason: 'duplicate_identical' });
+          continue;
+        }
+        if (renameCollisions) {
+          const freshId = `${id}_imp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+          const renamedLayout = {
+            ...layoutData,
+            id: freshId,
+            name: layoutData.name || layoutData.layoutName || id,
+            created_at: layoutData.created_at || now,
+          };
+          existingById.set(freshId, renamedLayout);
+          renamed.push({ fromId: id, toId: freshId });
+          await flushIfFull();
+          layouts.push(renamedLayout);
+          catMeta.totalCount = (catMeta.totalCount || 0) + 1;
+          added.push(renamedLayout);
+          continue;
+        }
+        skipped.push({ id, reason: 'id_collision' });
+        continue;
+      }
+
+      if (existingKeys.has(contentKey)) {
+        skipped.push({ id, reason: 'duplicate_identical_different_id' });
+        continue;
+      }
+
+      const newLayout = {
+        id: id || `import_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        name: layoutData.name || layoutData.layoutName || 'imported layout',
+        filepath: layoutData.filepath ?? null,
+        created_at: layoutData.created_at || now,
+        layout_json: layoutData.layout_json,
+      };
+      existingById.set(newLayout.id, newLayout);
+      existingKeys.add(contentKey);
+      await flushIfFull();
+      layouts.push(newLayout);
+      catMeta.totalCount = (catMeta.totalCount || 0) + 1;
+      added.push(newLayout);
+    }
+
+    await writeJSONFileAtomic(partPath, layouts);
+    catMeta.activePartition = activePartition;
+    catalog.categories.savedLayouts = catMeta;
+    await saveCatalog(catalog);
+
+    savedLayoutsMemCache = null;
+    savedLayoutsCacheDirty = true;
+
+    return { added, skipped, renamed, total: added.length };
+  } finally {
+    resolveNext();
+  }
+}
+
 async function updateSavedLayout(id, layoutData) {
   const prev = savedLayoutsMutex;
   let resolveNext;

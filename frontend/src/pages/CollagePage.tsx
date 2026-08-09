@@ -386,8 +386,9 @@ export default function CollagePage() {
     setIsSavingPage(true);
     const saved = await GenerationService.saveCurrentPage(mode);
     if (saved > 0) {
-      setBufferCount(GenerationService.getBufferCount());
-      showToast("info", `✓ ${saved} combinations saved (${mode === "both" ? "Annotations + Images" : "Annotations Only"}) — next 100 loaded`);
+      const freshBufferCount = GenerationService.getBufferCount();
+      setBufferCount(freshBufferCount);
+      showToast("info", `✓ ${saved} combinations saved (${mode === "both" ? "Annotations + Images" : "Annotations Only"}) — display refreshed from buffer (${freshBufferCount.toLocaleString()} remaining)`);
     } else {
       showToast("info", `Failed to save combinations — please retry`);
     }

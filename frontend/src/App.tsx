@@ -1,10 +1,11 @@
 import { createBrowserRouter, RouterProvider, NavLink, useBlocker, Outlet, useLocation } from "react-router-dom";
-import { Grid3X3, Bookmark, Upload, Images } from "lucide-react";
+import { Grid3X3, Bookmark, Upload, Images, Loader } from "lucide-react";
 import UploadPage from "./pages/UploadPage";
 import CollagePage from "./pages/CollagePage";
 import CustomizationPage from "./pages/CustomizationPage";
 import LibraryPage from "./pages/LibraryPage";
 import SavedPage from "./pages/SavedPage";
+import LoadPage from "./pages/LoadPage";
 import { UploadProvider } from "./context/UploadContext";
 import { isUploadUnsaved } from "./lib/navigationGuard";
 import { loadCustomSubcategories } from "./config/categories";
@@ -139,6 +140,10 @@ function AppLayout() {
             <Bookmark size={15} />
             Saved
           </NavLink>
+          <NavLink to="/load" className={getNavLinkClass}>
+            <Loader size={15} />
+            Load
+          </NavLink>
         </div>
         </nav>
 
@@ -159,6 +164,7 @@ const router = createBrowserRouter([
       { path: "/collage", element: <CollagePage /> },
       { path: "/customize", element: <CustomizationPage /> },
       { path: "/saved", element: <SavedPage /> },
+      { path: "/load", element: <LoadPage /> },
     ],
   },
 ]);

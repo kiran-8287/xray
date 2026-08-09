@@ -87,7 +87,7 @@ export const GENERATION_LIMITS = {
   DEFAULT_BATCH_SIZE: 25_000,
   /** Maximum batch size to prevent memory issues */
   MAX_BATCH_SIZE: 50_000,
-  /** Maximum buffer size in memory */
+  /** Hard ceiling on in-memory combos (100 shown + 200 staged) */
   MAX_BUFFER_SIZE: 300,
   /** Memory check interval (ms) */
   MEMORY_CHECK_INTERVAL: 5000,

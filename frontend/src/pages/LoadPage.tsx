@@ -1,0 +1,913 @@
+/**
+ * LoadPage.tsx — "Save Historic Data" import / portability page.
+ *
+ * Recreates the data from a previous system without transferring the bulky
+ * rendered PNGs. The user uploads (or points the backend at) the original
+ * pixel-data folder (.npz, high/low energy) plus the folder of annotation /
+ * saved-layout / catalog JSONs. This page:
+ *
+ *   1. Uploads / scans the inputs.
+ *   2. Runs a pre-flight ANALYSIS (POST /api/import/analyze) — no mutations.
+ *      The report lists duplicates, items to add, unclassified pixels,
+ *      layouts to add / duplicate / collapse-rename, and MISSING objects.
+ *   3. Safety gate — if any layout references objects that are neither in the
+ *      current library nor among the uploaded pixel files, the page stops and
+ *      lists them. The user either re-uploads the missing objects and re-runs
+ *      analysis, or opts to "Skip missing" which purges those bad layouts
+ *      from a COPY of the annotations (the originals on the server are
+ *      untouched).
+ *   4. Runs the import (POST /api/import/run, NDJSON progress stream) with
+ *      options { autoValidRegions, copyPixelData, skipMissing,
+ *      categoryOverrides }.
+ *
+ * After import the items appear in the Library (images auto-generate on
+ * demand from .npz) and the combinations appear in the Saved page (each is
+ * re-rendered on demand from its pre-decided layout_json positions).
+ */
+
+import React, { useState, useRef, useEffect, useMemo } from "react";
+import {
+  FolderOpen,
+  Upload,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
+  AlertCircle,
+  X,
+  Play,
+  Database,
+  FileJson,
+  ArrowRight,
+  RefreshCw,
+  Layers,
+} from "lucide-react";
+import { API_BASE_URL } from "../config/api";
+import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
+
+const API_BASE = API_BASE_URL;
+
+/* ------------------------------------------------------------------ */
+/* Types                                                               */
+/* ------------------------------------------------------------------ */
+
+type Toast = { id: string; type: "success" | "error" | "info"; message: string };
+
+type MissingObject = { layoutId: string; missing: string[] };
+type JsonStats = {
+  annotationsFiles: number;
+  savedLayoutsFiles: number;
+  catalogFiles: number;
+  unknownFiles: number;
+  errors: { file: string; error: string }[];
+};
+type UnclassifiedItem = { id: string; category: string | null };
+
+type AnalyzeReport = {
+  pixel: {
+    total: number;
+    newFiles: string[];
+    duplicateFiles: string[];
+    noLowEnergy: string[];
+    highCount: number;
+  };
+  json: JsonStats;
+  items: {
+    toAdd: any[];
+    duplicates: any[];
+    unclassified: UnclassifiedItem[];
+  };
+  layouts: {
+    total: number;
+    toAdd: any[];
+    duplicates: number;
+    collisionRenames: number;
+    missingObjects: MissingObject[];
+  };
+  stats: {
+    pixelNew: number;
+    pixelDuplicate: number;
+    itemsToAdd: number;
+    itemsDuplicate: number;
+    unclassified: number;
+    layoutsToAdd: number;
+    layoutsDuplicate: number;
+    collisionRenames: number;
+    missingLayouts: number;
+  };
+};
+
+type RunSummary = {
+  pixel: { copied: number; skipped: number };
+  items: { added: number; skipped: number };
+  validRegions: { generated: number; failed: number };
+  layouts: { added: number; skipped: number; renamed: number; purged: number };
+};
+
+type ProgressState = {
+  stage: string;
+  message: string;
+  done: number;
+  total: number;
+};
+
+const CATEGORY_OPTIONS = [
+  { value: "", label: "— None (leave unclassified) —" },
+  { value: "bags", label: "Bags" },
+  { value: "threats", label: "Threats" },
+  { value: "non-threats", label: "Non-threats" },
+];
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
+
+function apiHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = { ...extra };
+  const apiKey = localStorage.getItem("apiKey");
+  if (apiKey) headers["X-API-Key"] = apiKey;
+  return headers;
+}
+
+/** Split the files selected from a folder/file picker into energy + json buckets. */
+function bucketFiles(files: File[]): {
+  high: File[];
+  low: File[];
+  json: File[];
+} {
+  const high: File[] = [];
+  const low: File[] = [];
+  const json: File[] = [];
+  for (const f of files) {
+    const rel = (f as any).webkitRelativePath || f.name;
+    const lower = rel.toLowerCase();
+    if (lower.endsWith(".npz")) {
+      if (/(^|\/)lowenergy\//.test(lower)) low.push(f);
+      else high.push(f);
+    } else if (lower.endsWith(".json")) {
+      json.push(f);
+    }
+  }
+  return { high, low, json };
+}
+
+/* ------------------------------------------------------------------ */
+/* Progress banner helper                                              */
+/* ------------------------------------------------------------------ */
+
+const STAGE_LABELS: Record<string, string> = {
+  start: "Starting",
+  pixel: "Copying pixel data",
+  items: "Registering library items",
+  "valid-region": "Generating valid regions",
+  layouts: "Importing saved layouts",
+  analyze: "Analyzing",
+};
+
+export default function LoadPage() {
+  /* ---- Input mode & file selection ---- */
+  const [mode, setMode] = useState<"upload" | "server-path">("upload");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [serverPixelDataPath, setServerPixelDataPath] = useState("");
+  const [serverJsonPath, setServerJsonPath] = useState("");
+
+  /* ---- Analysis & gating ---- */
+  const [analyzing, setAnalyzing] = useState(false);
+  const [report, setReport] = useState<AnalyzeReport | null>(null);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string>("");
+  const [skipMissing, setSkipMissing] = useState(false);
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
+
+  /* ---- Run / progress ---- */
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<ProgressState | null>(null);
+  const [summary, setSummary] = useState<RunSummary | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  /* ---- Toasts ---- */
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const showToast = (type: Toast["type"], message: string) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+  };
+
+  /* ---- Cleanup aborts on unmount ---- */
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
+  const wheel = useMemo(() => {
+    if (!selectedFiles.length) return { r: 0, l: 0, j: 0 };
+    const b = bucketFiles(selectedFiles);
+    return { r: b.high.length, l: b.low.length, j: b.json.length };
+  }, [selectedFiles]);
+
+  /* ------------------------------------------------------------------ */
+  /* Analysis (pre-flight)                                               */
+  /* ------------------------------------------------------------------ */
+  const handleAnalyze = async () => {
+    setAnalyzeError(null);
+    setReport(null);
+    setSummary(null);
+    setRunError(null);
+
+    if (mode === "upload" && selectedFiles.length === 0) {
+      setAnalyzeError("Please select a folder containing .npz pixel data and .json annotation files.");
+      return;
+    }
+    if (mode === "server-path" && !serverPixelDataPath.trim()) {
+      setAnalyzeError("A pixel-data path is required for server-path mode.");
+      return;
+    }
+
+    const newRunId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    setRunId(newRunId);
+    setAnalyzing(true);
+
+    try {
+      const body = new FormData();
+      body.append("runId", newRunId);
+
+      if (mode === "server-path") {
+        body.append("source", "server-path");
+        body.append("pixelDataPath", serverPixelDataPath.trim());
+        if (serverJsonPath.trim()) body.append("jsonPath", serverJsonPath.trim());
+      } else {
+        const b = bucketFiles(selectedFiles);
+        for (const f of b.high) body.append("pixelFiles", f, f.name);
+        for (const f of b.low) body.append("pixelFilesLow", f, f.name);
+        for (const f of b.json) body.append("jsonFiles", f, f.name);
+      }
+
+      setProgress({ stage: "analyze", message: "Uploading & analyzing inputs…", done: 0, total: 1 });
+
+      const res = await fetchWithTimeout(`${API_BASE}/api/import/analyze`, {
+        method: "POST",
+        headers: apiHeaders(),
+        body,
+      }, LONG_REQUEST_TIMEOUT_MS, 0);
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        if (res.status === 401) throw new Error("Authentication required. Configure your API key first.");
+        throw new Error(data?.error || `Analysis failed (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Analysis failed");
+
+      const r: AnalyzeReport = {
+        pixel: { total: 0, newFiles: [], duplicateFiles: [], noLowEnergy: [], highCount: 0, ...data.pixel },
+        json: data.json || { annotationsFiles: 0, savedLayoutsFiles: 0, catalogFiles: 0, unknownFiles: 0, errors: [] },
+        items: { toAdd: [], duplicates: [], unclassified: [], ...data.items },
+        layouts: { total: 0, toAdd: [], duplicates: 0, collisionRenames: 0, missingObjects: [], ...data.layouts },
+        stats: data.stats,
+      };
+      r.items.unclassified = (r.items.unclassified || []).map((u: any) => ({
+        id: typeof u === "string" ? u : (u && u.id) || u,
+        category: (u && u.category) || null,
+      }));
+
+      setReport(r);
+      setProgress(null);
+
+      if (r.json.errors && r.json.errors.length > 0) {
+        showToast("info", `${r.json.errors.length} JSON file(s) could not be parsed — see report.`);
+      }
+      const recognizedJson =
+        (r.json?.catalogFiles || 0) + (r.json?.annotationsFiles || 0) + (r.json?.savedLayoutsFiles || 0);
+      if (r.json?.unknownFiles) {
+        showToast("info", `${r.json.unknownFiles} JSON file(s) were not recognized as catalog / annotation and were ignored.`);
+      }
+      if (recognizedJson === 0 && (r.json?.unknownFiles || 0) === 0 && (r.json?.errors || []).length === 0) {
+        showToast("info",
+          "No annotation or catalog JSON was recognized — only pixel data was found. " +
+          "Files without an assigned category will be copied but not listed in the library.");
+      }
+      if (r.layouts.missingObjects.length > 0) {
+        showToast("error", `Analysis found ${r.layouts.missingObjects.length} layout(s) with missing objects.`);
+      } else if (r.items.toAdd.length === 0 && r.layouts.toAdd.length === 0) {
+        showToast("info", "Everything in the upload already exists — nothing new to import.");
+      } else {
+        showToast("success", "Analysis complete — no blocking issues.");
+      }
+    } catch (err) {
+      const m = err instanceof Error ? err.message : "Unknown error";
+      setAnalyzeError(m);
+      showToast("error", `Analysis failed: ${m}`);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  /* ------------------------------------------------------------------ */
+  /* Run / import (NDJSON stream)                                        */
+  /* ------------------------------------------------------------------ */
+  const handleRun = async () => {
+    if (!runId) return;
+    setRunError(null);
+    setSummary(null);
+    setRunning(true);
+    setProgress({ stage: "start", message: "Starting import…", done: 0, total: 0 });
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const payload: Record<string, unknown> = {
+        runId,
+        stagedId: runId,
+        options: {
+          autoValidRegions: true,
+          copyPixelData: true,
+          skipMissing: !!(skipMissing && report?.layouts.missingObjects.length),
+          categoryOverrides: overrides,
+        },
+      };
+      if (mode === "server-path") {
+        payload.source = "server-path";
+        payload.pixelDataPath = serverPixelDataPath.trim();
+        if (serverJsonPath.trim()) payload.jsonPath = serverJsonPath.trim();
+      }
+
+      const res = await fetchWithTimeout(`${API_BASE}/api/import/run`, {
+        method: "POST",
+        headers: apiHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      }, LONG_REQUEST_TIMEOUT_MS, 0);
+
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => null);
+        if (res.status === 401) throw new Error("Authentication required. Configure your API key first.");
+        throw new Error(data?.error || `Import failed (HTTP ${res.status})`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n")) !== -1) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line) continue;
+          let ev: any;
+          try { ev = JSON.parse(line); } catch { continue; }
+          if (!ev || typeof ev !== "object") continue;
+
+          if (ev.stage === "done") {
+            setSummary(ev.summary || null);
+            setProgress(null);
+            const s = ev.summary;
+            if (s) {
+              showToast("success",
+                `Import complete: +${s.items.added} items, +${s.layouts.added} layouts, ${s.pixel.copied} pixel file(s) copied, ${s.validRegions.generated} valid region(s).`);
+            } else {
+              showToast("success", "Import complete");
+            }
+            return;
+          }
+          if (ev.stage === "error") {
+            throw new Error(ev.message || "Import failed");
+          }
+          if (ev.stage === "cancelled") {
+            showToast("info", "Import cancelled.");
+            setProgress(null);
+            return;
+          }
+          setProgress({ stage: ev.stage, message: ev.message || "", done: ev.done || 0, total: ev.total || 0 });
+        }
+      }
+
+      // If the stream ended without a terminal event (done/error/cancelled),
+      // surface it instead of silently doing nothing.
+      setProgress(null);
+      throw new Error("Import stream ended unexpectedly without a completion event. Please check the backend logs.");
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        showToast("info", "Import stopped.");
+      } else {
+        const m = err instanceof Error ? err.message : "Unknown error";
+        setRunError(m);
+        showToast("error", `Import failed: ${m}`);
+      }
+      setProgress(null);
+    } finally {
+      setRunning(false);
+      abortRef.current = null;
+    }
+  };
+
+  const handleCancel = async () => {
+    if (runId) {
+      try {
+        await fetchWithTimeout(`${API_BASE}/api/import/cancel`, {
+          method: "POST",
+          headers: apiHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ jobId: runId }),
+        }, 10000).catch(() => { /* ignore */ });
+      } catch { /* ignore */ }
+    }
+    abortRef.current?.abort();
+  };
+
+  /* ------------------------------------------------------------------ */
+  /* Reset                                                               */
+  /* ------------------------------------------------------------------ */
+  const invalidateAnalysis = () => {
+    setReport(null);
+    setRunId("");
+    setSummary(null);
+    setRunError(null);
+    setOverrides({});
+    setSkipMissing(false);
+  };
+
+  const resetAll = () => {
+    setSelectedFiles([]);
+    setReport(null);
+    setRunId("");
+    setSummary(null);
+    setRunError(null);
+    setAnalyzeError(null);
+    setOverrides({});
+    setSkipMissing(false);
+    abortRef.current?.abort();
+  };
+
+  /* ------------------------------------------------------------------ */
+  /* Derived                                                             */
+  /* ------------------------------------------------------------------ */
+  const hasMissing = !!(report && report.layouts.missingObjects.length);
+  const importBlocked = hasMissing && !skipMissing;
+  const progressPct =
+    progress && progress.total > 0 ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : 0;
+
+  const toastStyles = `
+    @keyframes load-slide-down {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-load-slide-down { animation: load-slide-down 0.2s ease-out; }
+  `;
+
+  return (
+    <div className="p-6">
+      {toasts.length > 0 && (
+        <>
+          <style>{toastStyles}</style>
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 pointer-events-none">
+            {toasts.map((t) => (
+              <div
+                key={t.id}
+                className="flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg text-sm font-medium animate-load-slide-down"
+                style={{
+                  backgroundColor: t.type === 'success' ? '#ECFDF5' : t.type === 'error' ? '#FEF2F2' : '#EFF4FF',
+                  borderColor: t.type === 'success' ? '#6EE7B7' : t.type === 'error' ? '#FCA5A5' : '#BFDBFE',
+                  color: t.type === 'success' ? '#065F46' : t.type === 'error' ? '#991B1B' : '#1E40AF',
+                }}
+              >
+                {t.type === 'success' && <CheckCircle2 size={16} className="text-emerald-600" />}
+                {t.type === 'error' && <AlertCircle size={16} className="text-rose-600" />}
+                {t.type === 'info' && <AlertTriangle size={16} className="text-blue-600" />}
+                {t.message}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <div className="border-l-4 border-accent pl-4">
+          <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Save Historic Data — Load</h2>
+          <p className="text-sm text-muted mt-1">
+            Recreate library items and saved combinations on this system from the original pixel data + annotation JSONs.
+          </p>
+        </div>
+        <button
+          onClick={resetAll}
+          disabled={analyzing || running}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-white text-sm font-semibold text-ink hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <RefreshCw size={15} />
+          Reset
+        </button>
+      </div>
+
+      {/* Step 1 — choose input mode */}
+      <div className="mb-4 inline-flex rounded-xl border border-border bg-panel p-1 gap-1">
+        {([["upload", "Upload folder / files", Upload], ["server-path", "Server path", FolderOpen]] as const).map(([val, label, Icon]) => (
+          <button
+            key={val}
+            onClick={() => { setMode(val); setReport(null); setAnalyzeError(null); }}
+            disabled={analyzing || running}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${
+              mode === val ? "bg-accent text-white shadow-sm" : "text-muted hover:text-ink hover:bg-surface"
+            }`}
+          >
+            <Icon size={15} />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Step 2 — inputs */}
+      <div className="rounded-2xl border border-border bg-panel p-5 shadow-sm mb-6">
+        {mode === "upload" ? (
+          <>
+            <label
+              className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-border bg-surface p-10 text-center cursor-pointer hover:border-accent transition-colors"
+            >
+              <FolderOpen size={36} className="text-muted" />
+              <span className="text-lg font-semibold text-ink">Select the combined folder</span>
+              <span className="text-sm text-muted max-w-md">
+                Pick the <strong>top-level</strong> folder that contains your pixel-data folder and your annotations folder.
+                Browsers that support folder selection include sub-folders automatically.
+              </span>
+              <input
+                type="file"
+                multiple
+                {...({ webkitdirectory: "", directory: "" } as any)}
+                className="hidden"
+                onChange={(e) => { setSelectedFiles(Array.from(e.target.files || [])); invalidateAnalysis(); }}
+              />
+              <span className="mt-1 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-accent text-white text-sm font-semibold">
+                <Upload size={15} /> Select folder
+              </span>
+            </label>
+
+            <div className="mt-4 rounded-xl border border-border bg-white p-4">
+              <p className="text-[10px] uppercase tracking-wider text-muted mb-2">Expected combined-folder layout — the page reads it as:</p>
+              <pre className="text-[11px] text-muted font-mono leading-relaxed whitespace-pre">{`{pixel-data}/highenergy/*.npz
+{pixel-data}/lowenergy/*.npz
+{annotations}/annotations_1.json   <- combined (many layouts in one) and/or
+{annotations}/SB_<id>.json          <- one per saved design`}</pre>
+              <p className="text-[11px] text-muted mt-2">
+                Individual and combined annotation JSONs are both supported. High/low <span className="font-mono">.npz</span> and
+                <span className="font-mono"> .json</span> files are split automatically, so just select the one top-level folder.
+              </p>
+            </div>
+
+            {wheel.r > 0 || wheel.l > 0 || wheel.j > 0 ? (
+              <div className="mt-3 grid grid-cols-3 gap-3">
+                <div className="rounded-xl border border-border bg-white p-3 text-sm">
+                  <span className="font-semibold text-ink">{wheel.r}</span>
+                  <span className="text-muted ml-1">high-energy .npz</span>
+                </div>
+                <div className="rounded-xl border border-border bg-white p-3 text-sm">
+                  <span className="font-semibold text-ink">{wheel.l}</span>
+                  <span className="text-muted ml-1">low-energy .npz</span>
+                </div>
+                <div className="rounded-xl border border-border bg-white p-3 text-sm">
+                  <span className="font-semibold text-ink">{wheel.j}</span>
+                  <span className="text-muted ml-1">.json files</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-muted mt-3">
+                If your browser doesn't support folder selection, select the files individually — the page separates
+                <span className="font-mono"> lowenergy/</span> .npz, other .npz, and .json automatically.
+              </p>
+            )}
+          </>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-[10px] font-semibold text-muted uppercase tracking-wider mb-1.5">
+                Pixel data path (on the backend machine)
+              </label>
+              <input
+                type="text"
+                value={serverPixelDataPath}
+                onChange={(e) => { setServerPixelDataPath(e.target.value); invalidateAnalysis(); }}
+                disabled={analyzing || running}
+                placeholder="e.g. C:\xray_portable\pixel_data"
+                className="w-full px-4 py-2.5 rounded-lg border border-border bg-white text-sm text-ink font-mono focus:outline-none focus:border-accent"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-muted uppercase tracking-wider mb-1.5">
+                JSON / annotations path <span className="normal-case text-muted">(optional — defaults to the pixel path)</span>
+              </label>
+              <input
+                type="text"
+                value={serverJsonPath}
+                onChange={(e) => { setServerJsonPath(e.target.value); invalidateAnalysis(); }}
+                disabled={analyzing || running}
+                placeholder="e.g. C:\xray_portable\annotations"
+                className="w-full px-4 py-2.5 rounded-lg border border-border bg-white text-sm text-ink font-mono focus:outline-none focus:border-accent"
+              />
+            </div>
+            <p className="text-xs text-muted">
+              Use this when the data already lives on the backend server (e.g. a mounted portable drive) instead of
+              uploading through the browser. The folder is scanned recursively for <span className="font-mono">.npz</span> and <span className="font-mono">.json</span> files.
+            </p>
+          </div>
+        )}
+
+        <div className="mt-5 flex items-center gap-3">
+          <button
+            onClick={handleAnalyze}
+            disabled={analyzing || running || (mode === "upload" && selectedFiles.length === 0)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:bg-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {analyzing ? <Loader2 size={16} className="animate-spin" /> : <Play size={15} />}
+            {analyzing ? "Analyzing…" : "Analyze import"}
+          </button>
+          {analyzing && progress && <span className="text-xs text-muted">{progress.message}</span>}
+        </div>
+
+        {analyzeError && (
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+            <AlertCircle size={16} className="mt-0.5 shrink-0" />
+            <span>{analyzeError}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Step 3 — analysis report */}
+      {report && (
+        <div className="mb-6 rounded-2xl border border-border bg-panel p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-4">
+            <Database size={18} className="text-accent" />
+            <h3 className="text-lg font-bold text-ink font-heading">Analysis Report</h3>
+          </div>
+
+          {/* Missing objects gate */}
+          {hasMissing && (
+            <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
+              <div className="flex items-start gap-2 mb-2">
+                <AlertTriangle size={18} className="text-rose-600 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-rose-700">
+                    {report.layouts.missingObjects.length} layout(s) reference objects that are not in the current
+                    library nor among the uploaded pixel files.
+                  </p>
+                  <p className="text-xs text-rose-600 mt-1">
+                    Import is blocked until you either add those objects and re-analyze, or explicitly skip/remove the
+                    affected layouts below. Skipping purges them from a working copy only — your original annotation
+                    files on the server are never modified.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 space-y-1.5 max-h-56 overflow-auto">
+                {report.layouts.missingObjects.map((m, i) => (
+                  <div key={i} className="rounded-lg border border-rose-200 bg-white p-2.5">
+                    <p className="text-xs font-mono text-ink">Layout: <span className="font-semibold">{m.layoutId}</span></p>
+                    <p className="text-[11px] text-muted mt-0.5">
+                      Missing object id(s): {m.missing.join(", ")}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <label className="mt-3 flex items-center gap-2 text-sm text-ink cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={skipMissing}
+                  onChange={(e) => setSkipMissing(e.target.checked)}
+                  disabled={running}
+                  className="w-4 h-4 accent-rose-600"
+                />
+                <span>
+                  <span className="font-semibold">Skip missing files</span>
+                  <span className="text-xs text-muted ml-1">(removes the {report.layouts.missingObjects.length} affected layout(s) from this import copy)</span>
+                </span>
+              </label>
+            </div>
+          )}
+
+          {/* Summary stat tiles */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <Stat label="Pixel files" value={report.pixel.total} sub={`${report.stats?.pixelNew ?? 0} new · ${report.stats?.pixelDuplicate ?? 0} duplicate`} />
+            <Stat label="Items to add" value={report.stats?.itemsToAdd ?? 0} tone={report.stats?.itemsToAdd ? "ok" : "flat"} />
+            <Stat label="Duplicates" value={(report.stats?.itemsDuplicate ?? 0) + (report.stats?.pixelDuplicate ?? 0)} tone="flat" />
+            <Stat label="Layouts to add" value={report.stats?.layoutsToAdd ?? 0} tone={report.stats?.layoutsToAdd ? "ok" : "flat"} />
+          </div>
+
+          {report.json && <div className="mb-3 text-xs text-muted flex flex-wrap gap-x-4 gap-y-1">
+            <span className="font-semibold">Recognized JSON:</span>
+            <span className="font-mono">{report.json.catalogFiles ?? 0} catalog</span>
+            <span className="font-mono">{report.json.annotationsFiles ?? 0} annotation</span>
+            <span className="font-mono">{report.json.savedLayoutsFiles ?? 0} saved-layout</span>
+            <span className="font-mono">{report.json.unknownFiles ?? 0} unknown</span>
+            <span className="font-mono">{(report.json.errors || []).length} unreadable</span>
+          </div>}
+
+          {report.pixel.noLowEnergy && report.pixel.noLowEnergy.length > 0 && (
+            <div className="mb-3 text-xs text-amber-700">
+              <AlertTriangle size={13} className="inline mr-1 -mt-0.5" />
+              {report.pixel.noLowEnergy.length} high-energy file(s) have no low-energy counterpart — low-energy previews
+              for those items may be blank.
+            </div>
+          )}
+
+          {report.json && report.json.errors.length > 0 && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-semibold text-amber-800 mb-1.5">Unreadable JSON files (skipped):</p>
+              <ul className="space-y-1">
+                {report.json.errors.map((e, i) => (
+                  <li key={i} className="text-[11px] text-amber-700 font-mono">{e.file}: {e.error}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+            <div className="rounded-xl border border-border bg-white p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Layers size={15} className="text-accent" />
+                <span className="text-sm font-semibold text-ink">Library items</span>
+              </div>
+              <ul className="space-y-1 text-sm text-ink">
+                <li className="text-muted text-xs">
+                  +{report.stats?.itemsToAdd ?? 0} new item(s) · {report.stats?.itemsDuplicate ?? 0} existing (skipped, never re-created)
+                </li>
+                {report.items.toAdd.length > 0 && (
+                  <li className="mt-1">
+                    <span className="text-xs font-semibold text-muted">to add:</span>
+                    <span className="text-xs text-muted break-words">
+                      {" "}{report.items.toAdd.slice(0, 30).map((i: any) => i?.id ?? i).join(", ")}
+                      {report.items.toAdd.length > 30 ? ` +${report.items.toAdd.length - 30} more` : ""}
+                    </span>
+                  </li>
+                )}
+              </ul>
+            </div>
+
+            <div className="rounded-xl border border-border bg-white p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <FileJson size={15} className="text-accent" />
+                <span className="text-sm font-semibold text-ink">Saved combinations</span>
+              </div>
+              <ul className="space-y-1 text-sm text-ink">
+                <li className="text-muted text-xs">
+                  {report.layouts.total} found · +{report.stats?.layoutsToAdd ?? 0} to add · {report.stats?.layoutsDuplicate ?? 0} duplicate(s)
+                </li>
+                <li className="text-muted text-xs">
+                  {report.stats?.collisionRenames ?? 0} with a matching id but different content (imported under a fresh id)
+                </li>
+                {report.stats?.missingLayouts ? (
+                  <li className="text-rose-600 text-xs font-semibold">
+                    {report.stats.missingLayouts} blocked — missing objects
+                  </li>
+                ) : null}
+              </ul>
+            </div>
+          </div>
+
+          {report.items.unclassified.length > 0 && (
+            <div className="mb-4 rounded-xl border border-border bg-white p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle size={15} className="text-amber-500" />
+                <span className="text-sm font-semibold text-ink">
+                  {report.items.unclassified.length} pixel file(s) have no category in any catalog JSON
+                </span>
+              </div>
+              <p className="text-xs text-muted mb-2">
+                Pick a category to register them as library items. Files left as “None” are still copied to storage but
+                not shown in the library.
+              </p>
+              <div className="max-h-56 overflow-auto space-y-1.5">
+                {report.items.unclassified.slice(0, 60).map((u) => (
+                  <div key={u.id} className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-mono text-ink truncate">{u.id}</span>
+                    <select
+                      value={overrides[u.id] ?? ""}
+                      onChange={(e) => setOverrides((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                      disabled={running}
+                      className="text-xs rounded-lg border border-border bg-surface px-2 py-1.5 focus:outline-none focus:border-accent"
+                    >
+                      {CATEGORY_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+                {report.items.unclassified.length > 60 && (
+                  <p className="text-xs text-muted">+{report.items.unclassified.length - 60} more…</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Run / import */}
+          <div className="mt-5 flex items-center gap-3 border-t border-border pt-4">
+            <button
+              onClick={handleRun}
+              disabled={running || importBlocked}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title={importBlocked ? "Resolve (or skip) missing objects first" : "Import the analyzed items and combinations"}
+            >
+              {running ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+              {running ? "Importing…" : "Run Import"}
+            </button>
+            {importBlocked && (
+              <span className="text-xs text-rose-600">
+                Enable “Skip missing files” above (or upload the missing objects and re-analyze) to import.
+              </span>
+            )}
+            {!importBlocked && running && (
+              <button
+                onClick={handleCancel}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-rose-300 bg-rose-600 text-white text-sm font-semibold hover:bg-rose-700 transition-colors"
+              >
+                <X size={15} /> Stop
+              </button>
+            )}
+          </div>
+
+          {runError && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+              <AlertCircle size={16} className="mt-0.5 shrink-0" />
+              <span>{runError}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Step 4 — progress */}
+      {running && progress && (
+        <div className="mb-6 rounded-2xl border border-border bg-panel p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-semibold text-ink flex items-center gap-2">
+              <Loader2 size={16} className="animate-spin text-accent" />
+              {STAGE_LABELS[progress.stage] || progress.stage}
+            </span>
+            <span className="text-xs text-muted">
+              {progress.total > 0 ? `${progress.done}/${progress.total}` : "…"}
+            </span>
+          </div>
+          {progress.total > 0 && (
+            <div className="h-2 w-full rounded-full bg-surface overflow-hidden">
+              <div className="h-full bg-accent transition-all duration-300" style={{ width: `${progressPct}%` }} />
+            </div>
+          )}
+          {progress.message && <p className="text-xs text-muted mt-2">{progress.message}</p>}
+        </div>
+      )}
+
+      {/* Step 5 — result summary */}
+      {summary && (
+        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <CheckCircle2 size={20} className="text-emerald-600" />
+            <h3 className="text-lg font-bold text-emerald-800 font-heading">Import complete</h3>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Stat label="Items added" value={summary.items.added} tone="ok" sub={`${summary.items.skipped} skipped`} />
+            <Stat label="Layouts" value={summary.layouts.added} tone="ok" sub={`${summary.layouts.skipped} skipped · ${summary.layouts.renamed} renamed · ${summary.layouts.purged} purged`} />
+            <Stat label="Pixel files" value={summary.pixel.copied} sub={`${summary.pixel.skipped} skipped`} />
+            <Stat label="Valid regions" value={summary.validRegions.generated} sub={summary.validRegions.failed ? `${summary.validRegions.failed} failed` : "generated"} tone={summary.validRegions.failed ? "warn" : "ok"} />
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <a
+              href="#/library"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors"
+            >
+              <Layers size={15} /> Go to Library
+            </a>
+            <a
+              href="#/saved"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-300 bg-white text-emerald-700 text-sm font-semibold hover:bg-emerald-50 transition-colors"
+            >
+              <FileJson size={15} /> Go to Saved
+            </a>
+          </div>
+        </div>
+      )}
+
+      <p className="text-[11px] text-muted mt-6 leading-relaxed">
+        Only the lightweight pixel data (.npz) and annotation JSONs are transferred — no bulky rendered images.
+        Library thumbnails and saved combination previews regenerate on demand from the pre-decided layout positions.
+        Duplicates are skipped and never re-created; same-id/different-content combinations are imported under a fresh id;
+        “skip missing” only ever purges a working copy, never your originals.
+      </p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Small presentational helper                                         */
+/* ------------------------------------------------------------------ */
+
+function Stat({ label, value, sub, tone = "flat" }: {
+  label: string;
+  value: number;
+  sub?: string;
+  tone?: "ok" | "warn" | "flat";
+}) {
+  const toneClass = tone === "ok" ? "text-emerald-600" : tone === "warn" ? "text-amber-600" : "text-ink";
+  return (
+    <div className="rounded-xl border border-border bg-white p-3">
+      <p className="text-[11px] text-muted uppercase tracking-wider">{label}</p>
+      <p className={`text-2xl font-bold ${toneClass}`}>{value}</p>
+      {sub && <p className="text-[11px] text-muted mt-0.5">{sub}</p>}
+    </div>
+  );
+}

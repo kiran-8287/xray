@@ -422,7 +422,7 @@ export default function LibraryPage() {
       for (let i = 0; i < ids.length; i += chunkSize) {
         const chunk = ids.slice(i, i + chunkSize);
         await Promise.all(
-          chunk.map((id) => fetch(`${API_BASE_URL}/api/items/${id}`, { method: "DELETE" }))
+          chunk.map((id) => fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(id)}`, { method: "DELETE" }))
         );
       }
       return ids.length;
@@ -510,7 +510,21 @@ export default function LibraryPage() {
     if (!confirmed) return;
 
     try {
-      await fetch(`${API_BASE_URL}/api/items/${itemId}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+      if (res.status === 404) {
+        showNotification("warning", "This item no longer exists. It may have already been deleted.");
+        await fetchCategorizedItems();
+        setSelectedItems((prev) => {
+          const next = new Set(prev);
+          next.delete(itemId);
+          return next;
+        });
+        return;
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to delete item");
+      }
       await fetchCategorizedItems();
       setSelectedItems((prev) => {
         const next = new Set(prev);
@@ -618,12 +632,15 @@ export default function LibraryPage() {
     setIsItemSaving(true);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/items/${editingItem.id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(editingItem.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editDraft),
       });
       const data = await res.json();
+      if (res.status === 404) {
+        throw new Error("This item no longer exists. It may have been deleted.");
+      }
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to save item details");
       }
@@ -632,7 +649,8 @@ export default function LibraryPage() {
       closeItemDetail();
     } catch (err) {
       console.error("Failed to save item details:", err);
-      showNotification("error", "Failed to save item details. Please try again.");
+      const message = err instanceof Error ? err.message : "Failed to save item details. Please try again.";
+      showNotification("error", message);
       setIsItemSaving(false);
     }
   };
@@ -640,12 +658,15 @@ export default function LibraryPage() {
   const handleValidRegionSave = async (points: any[]) => {
     if (!editingRegionItem) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/items/${editingRegionItem.id}/valid-region`, {
+      const res = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(editingRegionItem.id)}/valid-region`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ points, simplifiedPoints: points }),
       });
       const data = await res.json();
+      if (res.status === 404) {
+        throw new Error("This item no longer exists. It may have been deleted.");
+      }
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to save valid region");
       }
@@ -655,17 +676,21 @@ export default function LibraryPage() {
       setEditingRegionItem(null);
     } catch (err) {
       console.error("Failed to save valid region:", err);
-      showNotification("error", "Failed to save valid region. Please try again.");
+      const message = err instanceof Error ? err.message : "Failed to save valid region. Please try again.";
+      showNotification("error", message);
     }
   };
 
   const handleValidRegionDelete = async () => {
     if (!editingRegionItem) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/items/${editingRegionItem.id}/valid-region`, {
+      const res = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(editingRegionItem.id)}/valid-region`, {
         method: "DELETE",
       });
       const data = await res.json();
+      if (res.status === 404) {
+        throw new Error("This item no longer exists. It may have been deleted.");
+      }
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to delete valid region");
       }
@@ -675,7 +700,8 @@ export default function LibraryPage() {
       setEditingRegionItem(null);
     } catch (err) {
       console.error("Failed to delete valid region:", err);
-      showNotification("error", "Failed to delete valid region. Please try again.");
+      const message = err instanceof Error ? err.message : "Failed to delete valid region. Please try again.";
+      showNotification("error", message);
     }
   };
 
