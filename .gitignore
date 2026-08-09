@@ -26,6 +26,7 @@ backend/data/storage/customSubcategories.json
 # IDE
 .vscode/
 .idea/
+.kilo/
 
 # OS
 .DS_Store
