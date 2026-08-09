@@ -569,8 +569,8 @@ export default function SavedPage() {
   }, []);
 
   // Save exports path configuration
-  const saveExportsPath = async () => {
-    if (!exportsPath || savingExportsPath) return;
+  const saveExportsPath = async (allowEmpty = false) => {
+    if ((!exportsPath && !allowEmpty) || savingExportsPath) return;
 
     setSavingExportsPath(true);
     try {
@@ -578,7 +578,7 @@ export default function SavedPage() {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
-      
+
       if (apiKey) {
         headers['X-API-Key'] = apiKey;
       }
@@ -599,7 +599,9 @@ export default function SavedPage() {
         setExportsPathConfigured(true);
         localStorage.setItem('exportsPathConfigured', 'true');
         setShowExportsPathModal(false);
-        showToast('success', `Exports folder configured successfully at:\n${exportsPath}`);
+        showToast('success', exportsPath
+          ? `Exports folder configured successfully at:\n${exportsPath}`
+          : 'Exports folder configured successfully. Using default location.');
       } else {
         throw new Error(result.error || 'Failed to save exports path');
       }
@@ -910,12 +912,25 @@ export default function SavedPage() {
         const fileCountMsg = fileCount
           ? ` (${fileCount.high} high, ${fileCount.low} low${fileCount.annotations > 0 ? `, ${fileCount.annotations} annotations${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}` : ''})`
           : '';
+        
+        let toastMessage = '';
         if (result.cancelled) {
-          showToast('info', `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`);
+          toastMessage = `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`;
+          showToast('info', toastMessage);
         } else if (summary.failed > 0) {
-          showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)${fileCountMsg}`);
+          toastMessage = `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)${fileCountMsg}`;
+          showToast('info', toastMessage);
         } else {
-          showToast('success', `Successfully exported ${summary.success} layout(s)${fileCountMsg}`);
+          toastMessage = `Successfully exported ${summary.success} layout(s)${fileCountMsg}`;
+          showToast('success', toastMessage);
+        }
+        
+        // Show file paths in a second toast
+        const pathsMsg = formatSavedPaths(savedPaths);
+        if (pathsMsg) {
+          setTimeout(() => {
+            showToast('info', `Saved to:\n${pathsMsg}`);
+          }, 300);
         }
         
         // Log the saved paths for debugging
@@ -1005,12 +1020,25 @@ export default function SavedPage() {
         const fileCountMsg = fileCount
           ? ` (${fileCount.high} high, ${fileCount.low} low${fileCount.annotations > 0 ? `, ${fileCount.annotations} annotations${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}` : ''})`
           : '';
+        
+        let toastMessage = '';
         if (result.cancelled) {
-          showToast('info', `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`);
+          toastMessage = `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`;
+          showToast('info', toastMessage);
         } else if (summary.failed > 0) {
-          showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)${fileCountMsg}`);
+          toastMessage = `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)${fileCountMsg}`;
+          showToast('info', toastMessage);
         } else {
-          showToast('success', `Successfully exported all ${summary.success} layouts${fileCountMsg}`);
+          toastMessage = `Successfully exported all ${summary.success} layouts${fileCountMsg}`;
+          showToast('success', toastMessage);
+        }
+        
+        // Show file paths in a second toast
+        const pathsMsg = formatSavedPaths(savedPaths);
+        if (pathsMsg) {
+          setTimeout(() => {
+            showToast('info', `Saved to:\n${pathsMsg}`);
+          }, 300);
         }
         
         // Log the saved paths
@@ -1111,6 +1139,30 @@ export default function SavedPage() {
     }
     .animate-slide-down { animation: slide-down 0.2s ease-out; }
   `;
+
+  // Helper function to format saved paths for display
+  const formatSavedPaths = (savedPaths: any): string => {
+    if (!savedPaths) return '';
+    
+    const parts: string[] = [];
+    
+    if (savedPaths.high && savedPaths.high.length > 0) {
+      const highPath = savedPaths.high[0];
+      parts.push(`High-res: ${highPath}`);
+    }
+    
+    if (savedPaths.low && savedPaths.low.length > 0) {
+      const lowPath = savedPaths.low[0];
+      parts.push(`Low-res: ${lowPath}`);
+    }
+    
+    if (savedPaths.annotations && savedPaths.annotations.length > 0) {
+      const annotPath = savedPaths.annotations[0];
+      parts.push(`Annotations: ${annotPath}`);
+    }
+    
+    return parts.join('\n');
+  };
 
   return (
     <div className="p-6">
@@ -1432,6 +1484,15 @@ export default function SavedPage() {
                                     const result = await res.json();
                                     if (result.ok) {
                                       showToast('success', `Exported layout ${layout.id}`);
+                                      
+                                      // Show file paths
+                                      const pathsMsg = formatSavedPaths(result.savedPaths);
+                                      if (pathsMsg) {
+                                        setTimeout(() => {
+                                          showToast('info', `Saved to:\n${pathsMsg}`);
+                                        }, 300);
+                                      }
+                                      
                                       console.log('Single export completed:', result);
                                     } else {
                                       throw new Error(result.error || 'Export failed');
@@ -1746,13 +1807,13 @@ export default function SavedPage() {
                   type="text"
                   value={exportsPath}
                   onChange={(e) => setExportsPath(e.target.value)}
-                  placeholder={exportsPath || "e.g., C:\\xray_exports"}
+                  placeholder={exportsPath || "e.g., C:\\xray_exports or my_exports"}
                   className="w-full px-4 py-2.5 rounded-lg border border-border bg-white text-sm text-ink font-mono focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                   disabled={savingExportsPath}
                   autoFocus
                 />
                 <p className="text-xs text-muted mt-1.5">
-                  Enter an absolute path where you want to save exported files. The backend will create subfolders automatically.
+                  Enter an absolute path (e.g., C:\xray_exports) or a relative path (e.g., data/my_exports). Relative paths are resolved from the backend directory. The backend will create subfolders automatically.
                 </p>
               </div>
 
@@ -1769,7 +1830,7 @@ export default function SavedPage() {
                 onClick={() => {
                   // Use default path
                   setExportsPath('');
-                  saveExportsPath();
+                  saveExportsPath(true);
                 }}
                 disabled={savingExportsPath}
                 className="px-4 py-2 rounded-lg border border-border bg-white text-sm text-ink hover:bg-surface transition-colors disabled:cursor-not-allowed disabled:opacity-40"
@@ -1777,7 +1838,7 @@ export default function SavedPage() {
                 Use Default
               </button>
               <button
-                onClick={saveExportsPath}
+                onClick={() => saveExportsPath()}
                 disabled={savingExportsPath || !exportsPath}
                 className="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm font-medium hover:bg-sky-700 transition-colors disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-2"
               >

@@ -108,6 +108,10 @@ const uploadFileDuration = new client.Histogram({
 await fs.mkdir(config.dataDir, { recursive: true });
 
 const LOG_PATH = path.join(config.dataDir, 'monitoring.log');
+
+// IMPORTANT: monitoring.log must NEVER be cleared or deleted.
+// These logs are used for presentations and historical analysis.
+// The 'a' flag ensures we only append, never truncate or overwrite.
 const logStream = createWriteStream(LOG_PATH, { flags: 'a' });
 let inFlightCounter = 0;
 
@@ -900,24 +904,30 @@ app.get('/api/user-config/exports-path', async (_req, res) => {
 app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
   try {
     const { exportsPath } = req.body || {};
-    
-    if (!exportsPath || typeof exportsPath !== 'string') {
+
+    if (typeof exportsPath !== 'string') {
       return res.status(400).json({ ok: false, error: 'exportsPath is required and must be a string' });
     }
-    
-    // Validate the path is absolute
-    if (!path.isAbsolute(exportsPath)) {
-      return res.status(400).json({ ok: false, error: 'exportsPath must be an absolute path' });
+
+    // Allow empty string to use the default exports path
+    if (exportsPath === '') {
+      const userConfig = await setExportsPath(null);
+      return res.json({ ok: true, exportsPath: userConfig.exportsPath });
     }
-    
-    const userConfig = await setExportsPath(exportsPath);
-    
+
+    // Resolve relative paths against the backend directory
+    const resolvedPath = path.isAbsolute(exportsPath)
+      ? exportsPath
+      : path.resolve(path.join(__dirname, '..'), exportsPath);
+
+    const userConfig = await setExportsPath(resolvedPath);
+
     // Create the directories if they don't exist
-    await fs.mkdir(exportsPath, { recursive: true });
-    await fs.mkdir(path.join(exportsPath, 'high'), { recursive: true });
-    await fs.mkdir(path.join(exportsPath, 'low'), { recursive: true });
-    await fs.mkdir(path.join(exportsPath, 'annotations'), { recursive: true });
-    
+    await fs.mkdir(resolvedPath, { recursive: true });
+    await fs.mkdir(path.join(resolvedPath, 'high'), { recursive: true });
+    await fs.mkdir(path.join(resolvedPath, 'low'), { recursive: true });
+    await fs.mkdir(path.join(resolvedPath, 'annotations'), { recursive: true });
+
     res.json({ ok: true, exportsPath: userConfig.exportsPath });
   } catch (err) {
     console.error('[user-config/exports-path] Error:', err);
@@ -1435,6 +1445,9 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
     const saveMode = typeof req.query.saveMode === 'string' && req.query.saveMode.trim()
         ? req.query.saveMode.trim().toLowerCase()
         : 'selected';
+    const includeImages = typeof req.query.includeImages === 'string'
+        ? req.query.includeImages.trim().toLowerCase() !== 'false'
+        : true;
     const BATCH_THRESHOLD = 50; // Save Selected uses batch strategy when count exceeds this
     const useBatchAnnotations = saveMode === 'all';
     let cancelled = false;
@@ -1546,26 +1559,38 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                 }
 
                 if (flatObjects.length > 0) {
-                    const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
-                    const lowEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
-                    for (const obj of lowEnergyObjects) {
-                        if (obj.pixel_data_path) {
-                            obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
-                        }
-                    }
-                    
                     const safeLayoutId = String(layout.id || 'layout').replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'layout';
                     const baseName = `SB_${safeLayoutId}`;
 
-                    const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, 'highenergy');
-                    const highExportPath = path.join(exportsHighRoot, `${baseName}_high.png`);
-                    await fs.writeFile(highExportPath, highPngBuffer);
-                    savedPaths.high.push(highExportPath);
+                    let highEnergyPath = null;
+                    let lowEnergyPath = null;
+                    let highEnergyFilename = null;
+                    let lowEnergyFilename = null;
 
-                    const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, 'lowenergy');
-                    const lowExportPath = path.join(exportsLowRoot, `${baseName}_low.png`);
-                    await fs.writeFile(lowExportPath, lowPngBuffer);
-                    savedPaths.low.push(lowExportPath);
+                    if (includeImages) {
+                        const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
+                        const lowEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
+                        for (const obj of lowEnergyObjects) {
+                            if (obj.pixel_data_path) {
+                                obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
+                            }
+                        }
+                        
+                        const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, 'highenergy');
+                        const highExportPath = path.join(exportsHighRoot, `${baseName}_high.png`);
+                        await fs.writeFile(highExportPath, highPngBuffer);
+                        savedPaths.high.push(highExportPath);
+
+                        const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, 'lowenergy');
+                        const lowExportPath = path.join(exportsLowRoot, `${baseName}_low.png`);
+                        await fs.writeFile(lowExportPath, lowPngBuffer);
+                        savedPaths.low.push(lowExportPath);
+
+                        highEnergyPath = highExportPath;
+                        lowEnergyPath = lowExportPath;
+                        highEnergyFilename = `${baseName}_high.png`;
+                        lowEnergyFilename = `${baseName}_low.png`;
+                    }
 
                     // Build the annotation record for this layout (the full object data
                     // from the saved layout, plus references to the rendered images).
@@ -1574,8 +1599,8 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                         layoutName: layout.name,
                         createdAt: layout.created_at || null,
                         exportedAt: new Date().toISOString(),
-                        highEnergyImage: `${baseName}_high.png`,
-                        lowEnergyImage: `${baseName}_low.png`,
+                        highEnergyImage: highEnergyFilename,
+                        lowEnergyImage: lowEnergyFilename,
                         objects: layout.layout_json?.objects || null
                     };
                     // Per-layout annotation file — always written for all modes.
@@ -1610,10 +1635,10 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     exported.push({
                         layoutId: layout.id,
                         layoutName: layout.name,
-                        highEnergyPath: highExportPath,
-                        lowEnergyPath: lowExportPath,
-                        highEnergyFilename: `${baseName}_high.png`,
-                        lowEnergyFilename: `${baseName}_low.png`,
+                        highEnergyPath,
+                        lowEnergyPath,
+                        highEnergyFilename,
+                        lowEnergyFilename,
                         annotationPath
                     });
                 }
