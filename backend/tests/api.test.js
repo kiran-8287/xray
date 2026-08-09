@@ -219,6 +219,49 @@ describe('API Tests', () => {
       expect(res.body).toHaveProperty('message');
       expect(res.body).toHaveProperty('savedPaths');
     }, 5000);
+
+    it('should export catalog files alongside annotations and images when library has items', async () => {
+      // Seed a few items directly into storage so the export has something to catalog.
+      const { createItemsBatch } = await import('../src/lib/storage.js');
+      await createItemsBatch([
+        { id: 'export-test-bag-1', category: 'bags', subcategory: 'backpack' },
+        { id: 'export-test-threat-1', category: 'threats', subcategory: 'Razor' },
+        { id: 'export-test-non-1', category: 'non-threats', subcategory: 'Laptop' },
+      ]);
+
+      const res = await request(app).get('/api/saved-layouts/export?saveMode=all&includeImages=false');
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('ok', true);
+      expect(res.body).toHaveProperty('savedPaths');
+      expect(res.body.savedPaths).toHaveProperty('catalogs');
+      expect(Array.isArray(res.body.savedPaths.catalogs)).toBe(true);
+      // All three category catalog files should be present when items exist
+      const catalogBasenames = res.body.savedPaths.catalogs.map((p) => path.basename(p));
+      expect(catalogBasenames).toEqual(
+        expect.arrayContaining(['bags_1.json', 'threats_1.json', 'non_threats_1.json'])
+      );
+    }, 10000);
+
+    it('should write catalog files that contain the seeded library items', async () => {
+      const res = await request(app).get('/api/saved-layouts/export?saveMode=all&includeImages=false');
+      expect(res.status).toBe(200);
+      const catalogPaths = res.body.savedPaths?.catalogs || [];
+      expect(catalogPaths.length).toBeGreaterThan(0);
+
+      const bagsCatalog = catalogPaths.find((p) => path.basename(p) === 'bags_1.json');
+      if (bagsCatalog) {
+        const content = JSON.parse(await fsPromises.readFile(bagsCatalog, 'utf-8'));
+        expect(Array.isArray(content)).toBe(true);
+        expect(content.length).toBeGreaterThan(0);
+        expect(content[0]).toHaveProperty('id');
+        expect(content[0]).toHaveProperty('category');
+        // Our seeded item should be present
+        const seeded = content.find((it) => it.id === 'export-test-bag-1');
+        expect(seeded).toBeDefined();
+        expect(seeded.category).toBe('bags');
+        expect(seeded.subcategory).toBe('backpack');
+      }
+    }, 10000);
   });
 
   describe('GET /api/custom-subcategories', () => {

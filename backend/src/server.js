@@ -1432,6 +1432,17 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
   }
 });
 
+// Local category-key helper (matches storage.normalizeCategoryKey) so the export
+// can group items into catalog partitions the import service will re-detect.
+function normalizeCategoryKeyLocal(cat) {
+  if (!cat) return 'non_threats';
+  const c = String(cat).toLowerCase().trim();
+  if (/^non[- ]?threat/.test(c)) return 'non_threats';
+  if (c.includes('bag')) return 'bags';
+  if (c.includes('threat') || c.includes('electronic')) return 'threats';
+  return 'non_threats';
+}
+
 // Export saved layout images as a JSON summary and write PNG files to exports folder.
 // This route must be registered before /api/saved-layouts/:id so /export is not swallowed.
 // Supports optional ?jobId= query param so the client can cancel a running bulk
@@ -1486,15 +1497,45 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
         const exportsHighRoot = path.join(exportsRoot, 'high');
         const exportsLowRoot = path.join(exportsRoot, 'low');
         const exportsAnnotationsRoot = path.join(exportsRoot, 'annotations');
+        // Catalog root: stores the authoritative item list (category / subcategory /
+        // pixel refs / valid regions) so a fresh system can rebuild the EXACT library
+        // instead of re-deriving possibly-conflicting labels from annotations alone.
+        const exportsCatalogRoot = path.join(exportsRoot, 'catalog');
         
         await fs.mkdir(exportsHighRoot, { recursive: true });
         await fs.mkdir(exportsLowRoot, { recursive: true });
         await fs.mkdir(exportsAnnotationsRoot, { recursive: true });
+        await fs.mkdir(exportsCatalogRoot, { recursive: true });
 
         const exported = [];
-        const savedPaths = { high: [], low: [], annotations: [] };
+        const savedPaths = { high: [], low: [], annotations: [], catalogs: [] };
         const annotationRecords = [];
         const ANNOTATION_PARTITION_CAP = 5000;
+
+        // ---- NEW: always export the current library catalog so a re-import on a
+        // fresh machine reproduces the exact items (category + subcategory + pixels +
+        // valid regions) instead of deriving them from annotation copies.
+        // Files are written per category partition so the import service auto-detects
+        // them via detectJsonType (bags_1.json / threats_1.json / non_threats_1.json).
+        try {
+            const allItems = await getItems();
+            const catBins = { bags: [], threats: [], non_threats: [] };
+            for (const it of allItems) {
+                const key = normalizeCategoryKeyLocal(it.category);
+                if (catBins[key]) catBins[key].push(it);
+            }
+            const catFileNames = { bags: 'bags_1.json', threats: 'threats_1.json', non_threats: 'non_threats_1.json' };
+            for (const [key, items] of Object.entries(catBins)) {
+                if (items.length === 0) continue;
+                const catName = catFileNames[key];
+                // Rewrite the partition so each run reflects the CURRENT library state.
+                const catPath = path.join(exportsCatalogRoot, catName);
+                await fs.writeFile(catPath, JSON.stringify(items, null, 2));
+                savedPaths.catalogs.push(catPath);
+            }
+        } catch (err) {
+            console.warn('[export] Failed to write catalog files:', err);
+        }
 
         // Determine the starting partition number by scanning existing annotation files.
         // This prevents overwriting previous exports (e.g., annotations_1.json, annotations_2.json).
@@ -1701,6 +1742,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     high: savedPaths.high.length,
                     low: savedPaths.low.length,
                     annotations: savedPaths.annotations.length,
+                    catalogs: savedPaths.catalogs.length,
                     annotationPartitions: annotationPartitions.length
                 }
             }
