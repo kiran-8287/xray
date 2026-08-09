@@ -6,6 +6,7 @@ import type { CombinatorialResult, FailureLog } from "../types/customization";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 import { GenerationService } from "../lib/generationService";
+import { addCombos, addFailures, getAllCombos, getAllFailures, clearAll as storageClearAll } from "../lib/storageService";
 import { getCategoryConfig, normalizeCategoryName, normalizeCategorizedItems, LIBRARIES_UI, getLibrarySubcategories, clearCustomSubcategoriesCache } from "../config/categories";
 import AddSubcategoryModal from "../components/common/AddSubcategoryModal";
 import Pagination from "../components/library/Pagination";
@@ -139,29 +140,29 @@ export default function LibraryPage() {
     }
   }, [maxNonThreats]);
 
-  const [combinations, setCombinations] = useState<CombinatorialResult[]>(() => {
-    try {
-      const cached = sessionStorage.getItem("collageCombinations");
-      if (cached) {
-        return JSON.parse(cached);
-      }
-    } catch {
-      // ignore
-    }
-    return [];
-  });
+  const [combinations, setCombinations] = useState<CombinatorialResult[]>([]);
+  const [failures, setFailures] = useState<FailureLog[]>([]);
 
-  const [failures, setFailures] = useState<FailureLog[]>(() => {
-    try {
-      const cached = sessionStorage.getItem("collageFailures");
-      if (cached) {
-        return JSON.parse(cached);
+  // Restore from IndexedDB on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const [idbCombos, idbFailures] = await Promise.all([
+          getAllCombos(),
+          getAllFailures(),
+        ]);
+
+        if (idbCombos.length > 0) {
+          setCombinations(idbCombos as any);
+        }
+        if (idbFailures.length > 0) {
+          setFailures(idbFailures);
+        }
+      } catch (err) {
+        console.warn("[LibraryPage] restore from IndexedDB failed:", err);
       }
-    } catch {
-      // ignore
-    }
-    return [];
-  });
+    })();
+  }, []);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState("");
@@ -421,7 +422,7 @@ export default function LibraryPage() {
       for (let i = 0; i < ids.length; i += chunkSize) {
         const chunk = ids.slice(i, i + chunkSize);
         await Promise.all(
-          chunk.map((id) => fetch(`${API_BASE_URL}/api/items/${id}`, { method: "DELETE" }))
+          chunk.map((id) => fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(id)}`, { method: "DELETE" }))
         );
       }
       return ids.length;
@@ -509,7 +510,21 @@ export default function LibraryPage() {
     if (!confirmed) return;
 
     try {
-      await fetch(`${API_BASE_URL}/api/items/${itemId}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+      if (res.status === 404) {
+        showNotification("warning", "This item no longer exists. It may have already been deleted.");
+        await fetchCategorizedItems();
+        setSelectedItems((prev) => {
+          const next = new Set(prev);
+          next.delete(itemId);
+          return next;
+        });
+        return;
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to delete item");
+      }
       await fetchCategorizedItems();
       setSelectedItems((prev) => {
         const next = new Set(prev);
@@ -617,12 +632,15 @@ export default function LibraryPage() {
     setIsItemSaving(true);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/items/${editingItem.id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(editingItem.id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editDraft),
       });
       const data = await res.json();
+      if (res.status === 404) {
+        throw new Error("This item no longer exists. It may have been deleted.");
+      }
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to save item details");
       }
@@ -631,7 +649,8 @@ export default function LibraryPage() {
       closeItemDetail();
     } catch (err) {
       console.error("Failed to save item details:", err);
-      showNotification("error", "Failed to save item details. Please try again.");
+      const message = err instanceof Error ? err.message : "Failed to save item details. Please try again.";
+      showNotification("error", message);
       setIsItemSaving(false);
     }
   };
@@ -639,12 +658,15 @@ export default function LibraryPage() {
   const handleValidRegionSave = async (points: any[]) => {
     if (!editingRegionItem) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/items/${editingRegionItem.id}/valid-region`, {
+      const res = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(editingRegionItem.id)}/valid-region`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ points, simplifiedPoints: points }),
       });
       const data = await res.json();
+      if (res.status === 404) {
+        throw new Error("This item no longer exists. It may have been deleted.");
+      }
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to save valid region");
       }
@@ -654,17 +676,21 @@ export default function LibraryPage() {
       setEditingRegionItem(null);
     } catch (err) {
       console.error("Failed to save valid region:", err);
-      showNotification("error", "Failed to save valid region. Please try again.");
+      const message = err instanceof Error ? err.message : "Failed to save valid region. Please try again.";
+      showNotification("error", message);
     }
   };
 
   const handleValidRegionDelete = async () => {
     if (!editingRegionItem) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/items/${editingRegionItem.id}/valid-region`, {
+      const res = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(editingRegionItem.id)}/valid-region`, {
         method: "DELETE",
       });
       const data = await res.json();
+      if (res.status === 404) {
+        throw new Error("This item no longer exists. It may have been deleted.");
+      }
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to delete valid region");
       }
@@ -674,7 +700,8 @@ export default function LibraryPage() {
       setEditingRegionItem(null);
     } catch (err) {
       console.error("Failed to delete valid region:", err);
-      showNotification("error", "Failed to delete valid region. Please try again.");
+      const message = err instanceof Error ? err.message : "Failed to delete valid region. Please try again.";
+      showNotification("error", message);
     }
   };
 
@@ -966,22 +993,21 @@ export default function LibraryPage() {
     };
   }, []);
 
-  // Persist combinations and failures to sessionStorage
+  // Persist combinations and failures to IndexedDB
   useEffect(() => {
-    try {
-      if (combinations.length > 0) {
-        sessionStorage.setItem("collageCombinations", JSON.stringify(combinations));
-      }
-      if (failures.length > 0) {
-        sessionStorage.setItem("collageFailures", JSON.stringify(failures));
-      }
-    } catch (err) {
-      // Silently ignore storage quota exceeded - expected with large datasets
-      if (err instanceof DOMException && err.name === "QuotaExceededError") {
-        console.warn("Storage quota exceeded for sessionStorage - this is expected with large datasets");
-      } else {
-        console.error("Error saving to sessionStorage:", err);
-      }
+    const lightweightCombos = combinations.map(combo => ({
+      id: combo.id,
+      bag: combo.bag ? { id: combo.bag.id } : null,
+      threats: combo.threats?.map(t => ({ id: t.id })) || [],
+      others: combo.others?.map(o => ({ id: o.id })) || [],
+    }));
+
+    if (lightweightCombos.length > 0) {
+      addCombos(lightweightCombos);
+    }
+
+    if (failures.length > 0) {
+      addFailures(failures);
     }
   }, [combinations, failures]);
 

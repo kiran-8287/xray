@@ -16,7 +16,7 @@ export async function fetchPixelData(itemId: string, energyType: string = "highe
   }
 
   try {
-    const res = await fetch(`${API_BASE_URL}/api/items/${itemId}/pixel-data?energy=${energyType}`);
+    const res = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(itemId)}/pixel-data?energy=${encodeURIComponent(energyType)}`);
     if (!res.ok) return null;
     const data = await res.json();
     if (!data.ok || !data.pixel_data) return null;

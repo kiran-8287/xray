@@ -11,7 +11,7 @@ import Jimp from "jimp";
 import sharp from "sharp";
 import WorkerPool from "./lib/workerPool.js";
 import pino from 'pino';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, mkdirSync } from 'node:fs';
 import client from 'prom-client';
 import config from './lib/config.js';
 import { requireAuth, protectWriteRoutes } from './lib/auth.js';
@@ -46,6 +46,13 @@ import { PipelineTimer, PIPELINE_STAGES, generateOperationId } from "./lib/instr
 import { initializeSystemConfig, getWorkerCount, checkMemoryAvailability } from "./lib/systemInfo.js";
 import { Semaphore, chunked, withSemaphore } from "./lib/concurrency.js";
 import { enqueue as enqueueDiskWrite, getDiskWriteQueueStatus, drain as drainDiskQueue } from './lib/diskWriteQueue.js';
+import { getExportsPath, setExportsPath, hasConfiguredExportsPath } from './lib/userConfig.js';
+import {
+  analyzeImport,
+  runImport,
+  scanPixelDir,
+  scanJsonDir,
+} from './lib/importService.js';
 
 const app = express();
 app.use(cors());
@@ -60,6 +67,9 @@ const logger = pino({
 // Keyed by a client-generated jobId so a Stop Saving request can abort a running export
 // at the next layout boundary.
 const exportCancellations = new Map();
+
+// In-memory cancellation flags for long-running import (Save Historic Data) jobs.
+const importCancellations = new Map();
 
 // Prometheus metrics
 const collectDefaultMetrics = client.collectDefaultMetrics;
@@ -359,6 +369,37 @@ const rawUpload = multer({
   }
 });
 
+// Multer setup for import (Save Historic Data) uploads.
+// Files are staged flat under data/temp/import/<runId>/<kind>/ where <kind> is
+// pixel/highenergy, pixel/lowenergy or json — chosen from the field name so the
+// energy-level is preserved without needing directory upload support on the client.
+const importStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const runId = String((req.body && req.body.runId) || `r_${Date.now()}`);
+        const kind =
+            file.fieldname === 'pixelFiles' ? 'pixel/highenergy'
+            : file.fieldname === 'pixelFilesLow' ? 'pixel/lowenergy'
+            : file.fieldname === 'jsonFiles' ? 'json'
+            : 'other';
+        const dir = path.join(tempDir, 'import', runId, kind);
+        try {
+            mkdirSync(dir, { recursive: true });
+        } catch { /* ignore */ }
+        cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+        const safe = sanitizeFilename(file.originalname) || `file_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.bin`;
+        cb(null, safe);
+    },
+});
+const uploadImport = multer({
+    storage: importStorage,
+    limits: {
+        fileSize: 4 * 1024 * 1024 * 1024, // 4GB per file ceiling (npz are small, but stay generous)
+        files: 200000,
+    },
+});
+
 function safeNowStamp() {
     return new Date().toISOString().replace(/[:.]/g, "-");
 }
@@ -388,14 +429,17 @@ app.get("/", (_req, res) => {
     version: "1.0.0",
     status: "running",
     endpoints: {
-      health: "GET /api/items/categorized",
-      upload: "POST /api/upload",
-      processRaw: "POST /api/process-raw-files",
+      health: "GET /api/health",
       items: "GET /api/items/:id",
       savedLayouts: "GET /api/saved-layouts",
       customSubcategories: "GET /api/custom-subcategories"
     }
   });
+});
+
+// Health check endpoint
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, status: "healthy", timestamp: new Date().toISOString() });
 });
 
 // Prometheus metrics endpoint
@@ -841,6 +885,179 @@ app.get('/api/storage/catalog', async (_req, res) => {
   }
 });
 
+// User configuration endpoints for export path settings
+app.get('/api/user-config/exports-path', async (_req, res) => {
+  try {
+    const exportsPath = await getExportsPath();
+    const configured = await hasConfiguredExportsPath();
+    res.json({ ok: true, exportsPath, configured });
+  } catch (err) {
+    console.error('[user-config/exports-path] Error:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
+  try {
+    const { exportsPath } = req.body || {};
+    
+    if (!exportsPath || typeof exportsPath !== 'string') {
+      return res.status(400).json({ ok: false, error: 'exportsPath is required and must be a string' });
+    }
+    
+    // Validate the path is absolute
+    if (!path.isAbsolute(exportsPath)) {
+      return res.status(400).json({ ok: false, error: 'exportsPath must be an absolute path' });
+    }
+    
+    const userConfig = await setExportsPath(exportsPath);
+    
+    // Create the directories if they don't exist
+    await fs.mkdir(exportsPath, { recursive: true });
+    await fs.mkdir(path.join(exportsPath, 'high'), { recursive: true });
+    await fs.mkdir(path.join(exportsPath, 'low'), { recursive: true });
+    await fs.mkdir(path.join(exportsPath, 'annotations'), { recursive: true });
+    
+    res.json({ ok: true, exportsPath: userConfig.exportsPath });
+  } catch (err) {
+    console.error('[user-config/exports-path] Error:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.get('/api/user-config/has-exports-path', async (_req, res) => {
+  try {
+    const configured = await hasConfiguredExportsPath();
+    res.json({ ok: true, configured });
+  } catch (err) {
+    console.error('[user-config/has-exports-path] Error:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// ============================================================================
+// Import / "Save Historic Data" endpoints
+// ============================================================================
+
+// Analyze uploaded (or server-path) pixel data + annotation/catalog folder and
+// return a pre-flight report: duplicates, missing objects, unclassified files.
+app.post('/api/import/analyze', requireAuth, uploadImport.any(), async (req, res) => {
+  try {
+    let pixelFiles = [];
+    let jsonFiles = [];
+
+    const body = req.body || {};
+    if (body.source === 'server-path') {
+      if (!body.pixelDataPath || typeof body.pixelDataPath !== 'string') {
+        return res.status(400).json({ ok: false, error: 'pixelDataPath is required for server-path mode' });
+      }
+      pixelFiles = await scanPixelDir(body.pixelDataPath);
+      jsonFiles = await scanJsonDir(body.jsonPath || body.pixelDataPath);
+      if (pixelFiles.length === 0 && jsonFiles.length === 0) {
+        return res.status(400).json({ ok: false, error: `No .npz / .json files found under ${body.pixelDataPath}` });
+      }
+    } else {
+      const files = Array.isArray(req.files) ? req.files : [];
+      const high = files.filter((f) => f.fieldname === 'pixelFiles');
+      const low = files.filter((f) => f.fieldname === 'pixelFilesLow');
+      const json = files.filter((f) => f.fieldname === 'jsonFiles');
+      pixelFiles = [
+        ...high.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'highenergy', absPath: f.path, originalName: f.originalname })),
+        ...low.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'lowenergy', absPath: f.path, originalName: f.originalname })),
+      ];
+      jsonFiles = json.map((f) => ({ filename: f.originalname, absPath: f.path }));
+
+      if (pixelFiles.length === 0 && jsonFiles.length === 0) {
+        return res.status(400).json({ ok: false, error: 'No pixel data or JSON files provided' });
+      }
+    }
+
+    const report = await analyzeImport({ pixelFiles, jsonFiles });
+    res.json({
+      ok: report.ok,
+      runId: body.runId || null,
+      mode: body.source === 'server-path' ? 'server-path' : 'upload',
+      ...report,
+    });
+  } catch (err) {
+    console.error('[import/analyze] Error:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// Execute the import. Streams NDJSON progress lines; cancellable via jobId.
+app.post('/api/import/run', requireAuth, async (req, res) => {
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Transfer-Encoding', 'chunked');
+
+  let runId = null;
+  let stagedDir = null;
+  try {
+    const body = req.body || {};
+    runId = String(body.runId || `run_${Date.now()}`);
+    const cancelState = { cancelled: false };
+    importCancellations.set(runId, cancelState);
+
+    let pixelFiles = [];
+    let jsonFiles = [];
+
+    if (body.source === 'server-path') {
+      if (!body.pixelDataPath || typeof body.pixelDataPath !== 'string') {
+        throw new Error('pixelDataPath is required for server-path mode');
+      }
+      res.write(JSON.stringify({ stage: 'start', message: 'Scanning server folders…' }) + '\n');
+      pixelFiles = await scanPixelDir(body.pixelDataPath);
+      jsonFiles = await scanJsonDir(body.jsonPath || body.pixelDataPath);
+    } else {
+      stagedDir = path.join(tempDir, 'import', String(body.stagedId || runId));
+      res.write(JSON.stringify({ stage: 'start', message: 'Reading staged upload…' }) + '\n');
+      pixelFiles = await scanPixelDir(stagedDir);
+      jsonFiles = await scanJsonDir(path.join(stagedDir, 'json'));
+    }
+
+    const options = (body.options && typeof body.options === 'object') ? body.options : {};
+    await runImport({
+      pixelFiles,
+      jsonFiles,
+      options: { ...options, cancelState },
+      progress: (o) => {
+        try { res.write(JSON.stringify(o) + '\n'); } catch { /* client gone */ }
+      },
+    });
+
+    res.write(JSON.stringify({ stage: 'done', message: 'Import complete' }) + '\n');
+    res.end();
+  } catch (err) {
+    console.error('[import/run] Error:', err);
+    try {
+      res.write(JSON.stringify({ stage: 'error', message: String((err && err.message) || err) }) + '\n');
+      res.end();
+    } catch { /* response already ended */ }
+  } finally {
+    if (runId) importCancellations.delete(runId);
+    if (stagedDir) {
+      try { await fs.rm(stagedDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  }
+});
+
+// Cancel a running import job (checked between import stages).
+app.post('/api/import/cancel', requireAuth, async (req, res) => {
+  try {
+    const { jobId } = req.body || {};
+    if (!jobId || typeof jobId !== 'string' || !jobId.trim()) {
+      return res.status(400).json({ ok: false, error: 'Missing jobId' });
+    }
+    const state = importCancellations.get(jobId.trim());
+    if (state) state.cancelled = true;
+    else importCancellations.set(jobId.trim(), { cancelled: true });
+    res.json({ ok: true, cancelled: true });
+  } catch (err) {
+    console.error('[import/cancel] Error:', err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 // Saved layouts endpoints
 app.get('/api/saved-layouts', async (_req, res) => {
     try {
@@ -1248,9 +1465,15 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             });
         }
 
-        await fs.mkdir(config.exportsHighRoot, { recursive: true });
-        await fs.mkdir(config.exportsLowRoot, { recursive: true });
-        await fs.mkdir(config.exportsAnnotationsRoot, { recursive: true });
+        // Get user-configured exports path (or fall back to default)
+        const userExportsRoot = await getExportsPath();
+        const exportsHighRoot = path.join(userExportsRoot, 'high');
+        const exportsLowRoot = path.join(userExportsRoot, 'low');
+        const exportsAnnotationsRoot = path.join(userExportsRoot, 'annotations');
+        
+        await fs.mkdir(exportsHighRoot, { recursive: true });
+        await fs.mkdir(exportsLowRoot, { recursive: true });
+        await fs.mkdir(exportsAnnotationsRoot, { recursive: true });
 
         const exported = [];
         const savedPaths = { high: [], low: [], annotations: [] };
@@ -1335,12 +1558,12 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     const baseName = `SB_${safeLayoutId}`;
 
                     const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, 'highenergy');
-                    const highExportPath = path.join(config.exportsHighRoot, `${baseName}_high.png`);
+                    const highExportPath = path.join(exportsHighRoot, `${baseName}_high.png`);
                     await fs.writeFile(highExportPath, highPngBuffer);
                     savedPaths.high.push(highExportPath);
 
                     const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, 'lowenergy');
-                    const lowExportPath = path.join(config.exportsLowRoot, `${baseName}_low.png`);
+                    const lowExportPath = path.join(exportsLowRoot, `${baseName}_low.png`);
                     await fs.writeFile(lowExportPath, lowPngBuffer);
                     savedPaths.low.push(lowExportPath);
 
@@ -1365,7 +1588,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                         (saveMode === 'selected' && targetLayouts.length > BATCH_THRESHOLD);
 
                     let annotationPath = null;
-                    annotationPath = path.join(config.exportsAnnotationsRoot, `${baseName}.json`);
+                    annotationPath = path.join(exportsAnnotationsRoot, `${baseName}.json`);
                     await fs.writeFile(annotationPath, JSON.stringify(annotation, null, 2));
                     savedPaths.annotations.push(annotationPath);
                     annotationRecords.push(annotation);
@@ -1375,7 +1598,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     if (shouldCreateBatchAnnotations) {
                         currentAnnotationPartition.push(annotation);
                         if (currentAnnotationPartition.length >= ANNOTATION_PARTITION_CAP) {
-                            const partPath = path.join(config.exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
+                            const partPath = path.join(exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
                             await fs.writeFile(partPath, JSON.stringify(currentAnnotationPartition, null, 2));
                             annotationPartitions.push(partPath);
                             savedPaths.annotations.push(partPath);
@@ -1407,7 +1630,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
         // Flush remaining annotations in the partition buffer
         if (currentAnnotationPartition.length > 0) {
             try {
-                const partPath = path.join(config.exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
+                const partPath = path.join(exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
                 await fs.writeFile(partPath, JSON.stringify(currentAnnotationPartition, null, 2));
                 annotationPartitions.push(partPath);
                 savedPaths.annotations.push(partPath);
@@ -2032,6 +2255,9 @@ app.post('/api/temp-files/batch-delete', requireAuth, async (req, res) => {
 });
 
 // Auto-generate valid region from raw pixel data (for pre-upload staged items)
+app.get("/api/auto-valid-region", (req, res) => {
+    res.status(405).json({ ok: false, error: "Method Not Allowed: use POST /api/auto-valid-region" });
+});
 app.post("/api/auto-valid-region", requireAuth, async (req, res) => {
     try {
         const { itemId, pixelDataPath } = req.body;

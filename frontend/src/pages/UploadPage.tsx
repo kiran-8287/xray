@@ -699,9 +699,6 @@ export default function UploadPage() {
     <div className="w-full py-6 px-6 animate-fade-in">
       <div className="border-l-4 border-accent pl-4 mb-8">
         <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Upload Images</h2>
-        <p className="text-sm text-muted mt-1">
-          100-file batches with automatic look-ahead pre-processing — next batch is always buffered and ready
-        </p>
       </div>
 
       <div className="space-y-6 max-w-5xl mx-auto">

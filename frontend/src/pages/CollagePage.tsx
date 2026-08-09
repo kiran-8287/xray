@@ -5,6 +5,7 @@ import { IoMdPhotos } from "react-icons/io";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
 import { GenerationService } from "../lib/generationService";
+import { clearAll as storageClearAll, addFailures } from "../lib/storageService";
 import type { Item } from "../types/library";
 import type { CombinatorialResult, FailureLog } from "../types/customization";
 import SyntheticPreview from "../components/collage/SyntheticPreview";
@@ -179,12 +180,14 @@ export default function CollagePage() {
     if (locationState && locationState.selectedBags && locationState.selectedBags.length > 0) {
       return;
     }
-    const serviceState = GenerationService.getState();
-    if (serviceState.combinations.length > 0) {
-      setCombinations(serviceState.combinations);
-      setFailures(serviceState.failures);
-      return;
-    }
+
+    (async () => {
+      const serviceState = GenerationService.getState();
+      if (serviceState.combinations.length > 0) {
+        setCombinations(serviceState.combinations);
+        setFailures(serviceState.failures);
+        return;
+      }
 
     const restoredCombos: any[] = [];
     const restoredFailures: any[] = [];
@@ -196,8 +199,27 @@ export default function CollagePage() {
     const readJSON = (raw: string | null) => { if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } };
 
     try {
-      restoredCombos.push(...(readJSON(sessionStorage.getItem("collageCombinations")) || []));
-      restoredFailures.push(...(readJSON(sessionStorage.getItem("collageFailures")) || []));
+      // Try IndexedDB first (handles large datasets)
+      const [idbCombos, idbFailures] = await Promise.all([
+        import("../lib/storageService").then(m => m.getAllCombos()),
+        import("../lib/storageService").then(m => m.getAllFailures()),
+      ]);
+
+      if (idbCombos.length > 0) {
+        restoredCombos.push(...idbCombos);
+      }
+      if (idbFailures.length > 0) {
+        restoredFailures.push(...idbFailures);
+      }
+
+      // Fallback to sessionStorage if IndexedDB is empty (first-time users)
+      if (restoredCombos.length === 0) {
+        restoredCombos.push(...(readJSON(sessionStorage.getItem("collageCombinations")) || []));
+      }
+      if (restoredFailures.length === 0) {
+        restoredFailures.push(...(readJSON(sessionStorage.getItem("collageFailures")) || []));
+      }
+
       restoredBags.push(...(readJSON(localStorage.getItem("selectedBags")) || []));
       restoredThreats.push(...(readJSON(localStorage.getItem("selectedThreats")) || []));
       restoredOthers.push(...(readJSON(localStorage.getItem("selectedOthers")) || []));
@@ -221,8 +243,8 @@ export default function CollagePage() {
       setFailures(restoredFailures);
       setSelectedBags(bags); setSelectedThreats(threats); setSelectedOthers(others);
       if (restoreError) console.warn("[CollagePage] " + restoreError);
+      // Note: combos and failures are now persisted to IndexedDB by generationService/storageService
       try {
-        sessionStorage.setItem("collageFailures", JSON.stringify(restoredFailures));
         localStorage.setItem("selectedBags", JSON.stringify(bags));
         localStorage.setItem("selectedThreats", JSON.stringify(threats));
         localStorage.setItem("selectedOthers", JSON.stringify(others));
@@ -268,6 +290,7 @@ export default function CollagePage() {
     }
 
     applyRestore(null, null, null);
+    })(); // Close outer async IIFE
   }, []);
 
   useEffect(() => {
@@ -299,16 +322,8 @@ export default function CollagePage() {
   }, [locationState]);
 
   useEffect(() => {
-    try {
-      if (failures.length > 0) {
-        sessionStorage.setItem("collageFailures", JSON.stringify(failures));
-      } else {
-        sessionStorage.removeItem("collageFailures");
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name !== 'QuotaExceededError') {
-        console.error("Error saving to sessionStorage:", err);
-      }
+    if (failures.length > 0) {
+      addFailures(failures);
     }
   }, [failures]);
 
@@ -371,8 +386,9 @@ export default function CollagePage() {
     setIsSavingPage(true);
     const saved = await GenerationService.saveCurrentPage(mode);
     if (saved > 0) {
-      setBufferCount(GenerationService.getBufferCount());
-      showToast("info", `✓ ${saved} combinations saved (${mode === "both" ? "Annotations + Images" : "Annotations Only"}) — next 100 loaded`);
+      const freshBufferCount = GenerationService.getBufferCount();
+      setBufferCount(freshBufferCount);
+      showToast("info", `✓ ${saved} combinations saved (${mode === "both" ? "Annotations + Images" : "Annotations Only"}) — display refreshed from buffer (${freshBufferCount.toLocaleString()} remaining)`);
     } else {
       showToast("info", `Failed to save combinations — please retry`);
     }
@@ -607,9 +623,9 @@ export default function CollagePage() {
         setSelectedThreats([]);
         setSelectedOthers([]);
         setBufferCount(0);
+        // Clear IndexedDB storage
+        storageClearAll();
         try {
-          sessionStorage.removeItem("collageCombinations");
-          sessionStorage.removeItem("collageFailures");
           localStorage.removeItem("selectedBags");
           localStorage.removeItem("selectedThreats");
           localStorage.removeItem("selectedOthers");
@@ -796,9 +812,9 @@ export default function CollagePage() {
       setSelectedThreats([]);
       setSelectedOthers([]);
       setBufferCount(0);
+      // Clear IndexedDB storage
+      storageClearAll();
       try {
-        sessionStorage.removeItem("collageCombinations");
-        sessionStorage.removeItem("collageFailures");
         localStorage.removeItem("selectedBags");
         localStorage.removeItem("selectedThreats");
         localStorage.removeItem("selectedOthers");
