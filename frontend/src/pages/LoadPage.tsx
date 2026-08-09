@@ -1,29 +1,4 @@
-/**
- * LoadPage.tsx — "Save Historic Data" import / portability page.
- *
- * Recreates the data from a previous system without transferring the bulky
- * rendered PNGs. The user uploads (or points the backend at) the original
- * pixel-data folder (.npz, high/low energy) plus the folder of annotation /
- * saved-layout / catalog JSONs. This page:
- *
- *   1. Uploads / scans the inputs.
- *   2. Runs a pre-flight ANALYSIS (POST /api/import/analyze) — no mutations.
- *      The report lists duplicates, items to add, unclassified pixels,
- *      layouts to add / duplicate / collapse-rename, and MISSING objects.
- *   3. Safety gate — if any layout references objects that are neither in the
- *      current library nor among the uploaded pixel files, the page stops and
- *      lists them. The user either re-uploads the missing objects and re-runs
- *      analysis, or opts to "Skip missing" which purges those bad layouts
- *      from a COPY of the annotations (the originals on the server are
- *      untouched).
- *   4. Runs the import (POST /api/import/run, NDJSON progress stream) with
- *      options { autoValidRegions, copyPixelData, skipMissing,
- *      categoryOverrides }.
- *
- * After import the items appear in the Library (images auto-generate on
- * demand from .npz) and the combinations appear in the Saved page (each is
- * re-rendered on demand from its pre-decided layout_json positions).
- */
+/** LoadPage — import pixel data + JSONs from a previous system. */
 
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
@@ -485,9 +460,9 @@ export default function LoadPage() {
 
       <div className="mb-6 flex items-center justify-between gap-4">
         <div className="border-l-4 border-accent pl-4">
-          <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Save Historic Data — Load</h2>
+          <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Load Data</h2>
           <p className="text-sm text-muted mt-1">
-            Recreate library items and saved combinations on this system from the original pixel data + annotation JSONs.
+            Import items and layouts from a previous system.
           </p>
         </div>
         <button
@@ -502,7 +477,7 @@ export default function LoadPage() {
 
       {/* Step 1 — choose input mode */}
       <div className="mb-4 inline-flex rounded-xl border border-border bg-panel p-1 gap-1">
-        {([["upload", "Upload folder / files", Upload], ["server-path", "Server path", FolderOpen]] as const).map(([val, label, Icon]) => (
+        {([["upload", "Upload", Upload], ["server-path", "Server Path", FolderOpen]] as const).map(([val, label, Icon]) => (
           <button
             key={val}
             onClick={() => { setMode(val); setReport(null); setAnalyzeError(null); }}
@@ -525,10 +500,9 @@ export default function LoadPage() {
               className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-border bg-surface p-10 text-center cursor-pointer hover:border-accent transition-colors"
             >
               <FolderOpen size={36} className="text-muted" />
-              <span className="text-lg font-semibold text-ink">Select the combined folder</span>
+              <span className="text-lg font-semibold text-ink">Select folder</span>
               <span className="text-sm text-muted max-w-md">
-                Pick the <strong>top-level</strong> folder that contains your pixel-data folder and your annotations folder.
-                Browsers that support folder selection include sub-folders automatically.
+                Pick the folder with <strong>pixel-data</strong> and <strong>annotations</strong> inside.
               </span>
               <input
                 type="file"
@@ -538,19 +512,17 @@ export default function LoadPage() {
                 onChange={(e) => { setSelectedFiles(Array.from(e.target.files || [])); invalidateAnalysis(); }}
               />
               <span className="mt-1 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-accent text-white text-sm font-semibold">
-                <Upload size={15} /> Select folder
+                <Upload size={15} /> Select
               </span>
             </label>
 
             <div className="mt-4 rounded-xl border border-border bg-white p-4">
-              <p className="text-[10px] uppercase tracking-wider text-muted mb-2">Expected combined-folder layout — the page reads it as:</p>
+              <p className="text-[10px] uppercase tracking-wider text-muted mb-2">Expected structure:</p>
               <pre className="text-[11px] text-muted font-mono leading-relaxed whitespace-pre">{`{pixel-data}/highenergy/*.npz
 {pixel-data}/lowenergy/*.npz
-{annotations}/annotations_1.json   <- combined (many layouts in one) and/or
-{annotations}/SB_<id>.json          <- one per saved design`}</pre>
+{annotations}/*.json`}</pre>
               <p className="text-[11px] text-muted mt-2">
-                Individual and combined annotation JSONs are both supported. High/low <span className="font-mono">.npz</span> and
-                <span className="font-mono"> .json</span> files are split automatically, so just select the one top-level folder.
+                .npz and .json files are split automatically. Just pick the top folder.
               </p>
             </div>
 
@@ -580,7 +552,7 @@ export default function LoadPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-[10px] font-semibold text-muted uppercase tracking-wider mb-1.5">
-                Pixel data path (on the backend machine)
+                Pixel data path
               </label>
               <input
                 type="text"
@@ -593,7 +565,7 @@ export default function LoadPage() {
             </div>
             <div>
               <label className="block text-[10px] font-semibold text-muted uppercase tracking-wider mb-1.5">
-                JSON / annotations path <span className="normal-case text-muted">(optional — defaults to the pixel path)</span>
+                JSON path (optional)
               </label>
               <input
                 type="text"
@@ -605,8 +577,7 @@ export default function LoadPage() {
               />
             </div>
             <p className="text-xs text-muted">
-              Use this when the data already lives on the backend server (e.g. a mounted portable drive) instead of
-              uploading through the browser. The folder is scanned recursively for <span className="font-mono">.npz</span> and <span className="font-mono">.json</span> files.
+              Use this when data is already on the server. It scans for .npz and .json files.
             </p>
           </div>
         )}
@@ -618,7 +589,7 @@ export default function LoadPage() {
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:bg-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {analyzing ? <Loader2 size={16} className="animate-spin" /> : <Play size={15} />}
-            {analyzing ? "Analyzing…" : "Analyze import"}
+            {analyzing ? "Analyzing..." : "Analyze"}
           </button>
           {analyzing && progress && <span className="text-xs text-muted">{progress.message}</span>}
         </div>
@@ -646,13 +617,10 @@ export default function LoadPage() {
                 <AlertTriangle size={18} className="text-rose-600 mt-0.5 shrink-0" />
                 <div>
                   <p className="text-sm font-semibold text-rose-700">
-                    {report.layouts.missingObjects.length} layout(s) reference objects that are not in the current
-                    library nor among the uploaded pixel files.
+                    {report.layouts.missingObjects.length} layout(s) need missing objects.
                   </p>
                   <p className="text-xs text-rose-600 mt-1">
-                    Import is blocked until you either add those objects and re-analyze, or explicitly skip/remove the
-                    affected layouts below. Skipping purges them from a working copy only — your original annotation
-                    files on the server are never modified.
+                    Add the objects and re-analyze, or skip them. Skipping removes from this import only.
                   </p>
                 </div>
               </div>
@@ -684,32 +652,32 @@ export default function LoadPage() {
 
           {/* Summary stat tiles */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <Stat label="Pixel files" value={report.pixel.total} sub={`${report.stats?.pixelNew ?? 0} new · ${report.stats?.pixelDuplicate ?? 0} duplicate`} />
-            <Stat label="Items to add" value={report.stats?.itemsToAdd ?? 0} tone={report.stats?.itemsToAdd ? "ok" : "flat"} />
-            <Stat label="Duplicates" value={(report.stats?.itemsDuplicate ?? 0) + (report.stats?.pixelDuplicate ?? 0)} tone="flat" />
-            <Stat label="Layouts to add" value={report.stats?.layoutsToAdd ?? 0} tone={report.stats?.layoutsToAdd ? "ok" : "flat"} />
+            <Stat label="Pixel" value={report.pixel.total} sub={`${report.stats?.pixelNew ?? 0} new`} />
+            <Stat label="Items" value={report.stats?.itemsToAdd ?? 0} tone={report.stats?.itemsToAdd ? "ok" : "flat"} sub={`${report.stats?.itemsDuplicate ?? 0} skip`} />
+            <Stat label="Dupes" value={(report.stats?.itemsDuplicate ?? 0) + (report.stats?.pixelDuplicate ?? 0)} tone="flat" />
+            <Stat label="Layouts" value={report.stats?.layoutsToAdd ?? 0} tone={report.stats?.layoutsToAdd ? "ok" : "flat"} sub={`${report.stats?.layoutsDuplicate ?? 0} skip`} />
           </div>
 
-          {report.json && <div className="mb-3 text-xs text-muted flex flex-wrap gap-x-4 gap-y-1">
-            <span className="font-semibold">Recognized JSON:</span>
-            <span className="font-mono">{report.json.catalogFiles ?? 0} catalog</span>
-            <span className="font-mono">{report.json.annotationsFiles ?? 0} annotation</span>
-            <span className="font-mono">{report.json.savedLayoutsFiles ?? 0} saved-layout</span>
-            <span className="font-mono">{report.json.unknownFiles ?? 0} unknown</span>
-            <span className="font-mono">{(report.json.errors || []).length} unreadable</span>
-          </div>}
+          {report.json && (
+            <div className="mb-3 text-xs text-muted flex flex-wrap gap-x-4 gap-y-1">
+              <span className="font-semibold">JSON:</span>
+              <span className="font-mono">{report.json.catalogFiles ?? 0} catalog</span>
+              <span className="font-mono">{report.json.annotationsFiles ?? 0} annotation</span>
+              <span className="font-mono">{report.json.savedLayoutsFiles ?? 0} layout</span>
+              <span className="font-mono">{(report.json.errors || []).length} errors</span>
+            </div>
+          )}
 
           {report.pixel.noLowEnergy && report.pixel.noLowEnergy.length > 0 && (
             <div className="mb-3 text-xs text-amber-700">
               <AlertTriangle size={13} className="inline mr-1 -mt-0.5" />
-              {report.pixel.noLowEnergy.length} high-energy file(s) have no low-energy counterpart — low-energy previews
-              for those items may be blank.
+              {report.pixel.noLowEnergy.length} file(s) missing low-energy partner.
             </div>
           )}
 
           {report.json && report.json.errors.length > 0 && (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
-              <p className="text-xs font-semibold text-amber-800 mb-1.5">Unreadable JSON files (skipped):</p>
+              <p className="text-xs font-semibold text-amber-800 mb-1.5">Skipped files:</p>
               <ul className="space-y-1">
                 {report.json.errors.map((e, i) => (
                   <li key={i} className="text-[11px] text-amber-700 font-mono">{e.file}: {e.error}</li>
@@ -750,7 +718,7 @@ export default function LoadPage() {
                   {report.layouts.total} found · +{report.stats?.layoutsToAdd ?? 0} to add · {report.stats?.layoutsDuplicate ?? 0} duplicate(s)
                 </li>
                 <li className="text-muted text-xs">
-                  {report.stats?.collisionRenames ?? 0} with a matching id but different content (imported under a fresh id)
+                  {report.stats?.collisionRenames ?? 0} same id, different content (fresh id)
                 </li>
                 {report.stats?.missingLayouts ? (
                   <li className="text-rose-600 text-xs font-semibold">
@@ -766,11 +734,11 @@ export default function LoadPage() {
               <div className="flex items-center gap-2 mb-1">
                 <AlertTriangle size={15} className="text-amber-500" />
                 <span className="text-sm font-semibold text-ink">
-                  {report.items.unclassified.length} pixel file(s) have no category in any catalog JSON
+                  {report.items.unclassified.length} pixel file(s) need a category
                 </span>
               </div>
               <p className="text-xs text-muted mb-2">
-                Pick a category to register them as library items. Files left as “None” are still copied to storage but
+                Pick a category below. Files left as “None” are still copied to storage but
                 not shown in the library.
               </p>
               <div className="max-h-56 overflow-auto space-y-1.5">
@@ -805,11 +773,11 @@ export default function LoadPage() {
               title={importBlocked ? "Resolve (or skip) missing objects first" : "Import the analyzed items and combinations"}
             >
               {running ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
-              {running ? "Importing…" : "Run Import"}
+              {running ? "Importing..." : "Import"}
             </button>
             {importBlocked && (
               <span className="text-xs text-rose-600">
-                Enable “Skip missing files” above (or upload the missing objects and re-analyze) to import.
+                Enable "Skip missing files" above to import.
               </span>
             )}
             {!importBlocked && running && (
@@ -861,7 +829,7 @@ export default function LoadPage() {
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Stat label="Items added" value={summary.items.added} tone="ok" sub={`${summary.items.skipped} skipped`} />
-            <Stat label="Layouts" value={summary.layouts.added} tone="ok" sub={`${summary.layouts.skipped} skipped · ${summary.layouts.renamed} renamed · ${summary.layouts.purged} purged`} />
+            <Stat label="Layouts" value={summary.layouts.added} tone="ok" sub={`${summary.layouts.skipped} skip · ${summary.layouts.renamed} renamed`} />
             <Stat label="Pixel files" value={summary.pixel.copied} sub={`${summary.pixel.skipped} skipped`} />
             <Stat label="Valid regions" value={summary.validRegions.generated} sub={summary.validRegions.failed ? `${summary.validRegions.failed} failed` : "generated"} tone={summary.validRegions.failed ? "warn" : "ok"} />
           </div>
@@ -883,10 +851,10 @@ export default function LoadPage() {
       )}
 
       <p className="text-[11px] text-muted mt-6 leading-relaxed">
-        Only the lightweight pixel data (.npz) and annotation JSONs are transferred — no bulky rendered images.
-        Library thumbnails and saved combination previews regenerate on demand from the pre-decided layout positions.
-        Duplicates are skipped and never re-created; same-id/different-content combinations are imported under a fresh id;
-        “skip missing” only ever purges a working copy, never your originals.
+        Only pixel data (.npz) and JSONs are transferred — no bulky rendered images.
+        Thumbnails and previews regenerate on demand.
+        Duplicates are skipped.
+        "Skip missing" removes only from this import.
       </p>
     </div>
   );

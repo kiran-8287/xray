@@ -1,13 +1,13 @@
 /**
  * API Configuration
- * Dynamically determines API URL based on current hostname for browser requests
+ * Uses 127.0.0.1 instead of localhost to avoid browser DNS resolution issues
  */
 
-// Determine API base URL - prioritize runtime hostname detection for browser environments
+// Determine API base URL - use 127.0.0.1 to avoid localhost resolution issues in browsers
 export const API_BASE_URL = 
   (typeof window !== 'undefined'
-    ? `http://${window.location.hostname}:8080`
-    : (import.meta.env.VITE_API_URL || 'http://localhost:8080'));
+    ? `http://127.0.0.1:8080`
+    : (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080'));
 
 console.log('[API Config] Using API_BASE_URL:', API_BASE_URL);
 

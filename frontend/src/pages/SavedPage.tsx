@@ -420,6 +420,13 @@ export default function SavedPage() {
   // References for cancelling a running bulk export (Save All / Save Selected)
   const exportAbortRef = useRef<AbortController | null>(null);
   const exportJobIdRef = useRef<string | null>(null);
+
+  // Save-options modal state
+  const [showSaveOptionsModal, setShowSaveOptionsModal] = useState(false);
+  const [pendingSaveAction, setPendingSaveAction] = useState<{
+    type: 'all' | 'selected' | 'individual';
+    layoutId?: string;
+  } | null>(null);
   
   const [toasts, setToasts] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
   
@@ -569,8 +576,8 @@ export default function SavedPage() {
   }, []);
 
   // Save exports path configuration
-  const saveExportsPath = async () => {
-    if (!exportsPath || savingExportsPath) return;
+  const saveExportsPath = async (allowEmpty = false) => {
+    if ((!exportsPath && !allowEmpty) || savingExportsPath) return;
 
     setSavingExportsPath(true);
     try {
@@ -578,7 +585,7 @@ export default function SavedPage() {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
-      
+
       if (apiKey) {
         headers['X-API-Key'] = apiKey;
       }
@@ -599,7 +606,9 @@ export default function SavedPage() {
         setExportsPathConfigured(true);
         localStorage.setItem('exportsPathConfigured', 'true');
         setShowExportsPathModal(false);
-        showToast('success', `Exports folder configured successfully at:\n${exportsPath}`);
+        showToast('success', exportsPath
+          ? `Exports folder configured successfully at:\n${exportsPath}`
+          : 'Exports folder configured successfully. Using default location.');
       } else {
         throw new Error(result.error || 'Failed to save exports path');
       }
@@ -857,8 +866,75 @@ export default function SavedPage() {
     showToast('info', 'Save process stopped.');
   };
 
+  // Export a single layout by id.
+  const exportIndividual = async (layoutId: string, includeImages: boolean = true) => {
+    if (exporting) return;
+    setExporting(true);
+    setExportMode('single');
+
+    try {
+      const apiKey = localStorage.getItem('apiKey');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['X-API-Key'] = apiKey;
+
+      const res = await fetchWithTimeout(
+        `${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(layoutId)}&saveMode=individual&includeImages=${includeImages}`,
+        { headers }
+      );
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        if (res.status === 401) {
+          throw new Error('Authentication required. Please configure your API key in Settings.');
+        }
+        throw new Error(data?.error || `Export failed (HTTP ${res.status})`);
+      }
+
+      const result = await res.json();
+      if (result.ok) {
+        showToast('success', `Exported layout ${layoutId}`);
+        const pathsMsg = formatSavedPaths(result.savedPaths);
+        if (pathsMsg) {
+          setTimeout(() => showToast('info', `Saved to:\n${pathsMsg}`), 300);
+        }
+        console.log('Single export completed:', result);
+      } else {
+        throw new Error(result.error || 'Export failed');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      console.error('Error exporting layout:', err);
+      showToast('error', `Failed to export: ${errorMessage}`);
+    } finally {
+      setExporting(false);
+      setExportMode(null);
+    }
+  };
+
+  // Helper to open the save-options modal before triggering any export.
+  const openSaveOptions = (type: 'all' | 'selected' | 'individual', layoutId?: string) => {
+    setPendingSaveAction({ type, layoutId });
+    setShowSaveOptionsModal(true);
+  };
+
+  // Confirm handler for the save-options modal.
+  const handleSaveOptionConfirm = async (includeImages: boolean) => {
+    setShowSaveOptionsModal(false);
+    if (!pendingSaveAction) return;
+    const { type, layoutId } = pendingSaveAction;
+    setPendingSaveAction(null);
+
+    if (type === 'all') {
+      await exportAll(includeImages);
+    } else if (type === 'selected') {
+      await exportSelected(includeImages);
+    } else if (type === 'individual' && layoutId) {
+      await exportIndividual(layoutId, includeImages);
+    }
+  };
+
   // Export selected layouts - saves to exports folder with high/low resolution
-  const exportSelected = async () => {
+  const exportSelected = async (includeImages: boolean = true) => {
     if (selectedForExport.size === 0) {
       showToast('error', 'No layouts selected for export');
       return;
@@ -875,20 +951,20 @@ export default function SavedPage() {
 
     try {
       const ids = Array.from(selectedForExport).join(',');
-      
+
       // Get API key from localStorage
       const apiKey = localStorage.getItem('apiKey');
-      
+
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
-      
+
       // Add API key header if available
       if (apiKey) {
         headers['X-API-Key'] = apiKey;
       }
-      
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}&saveMode=selected`, {
+
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}&saveMode=selected&includeImages=${includeImages}`, {
         headers,
         signal: controller.signal,
       }, 300000);
@@ -907,17 +983,36 @@ export default function SavedPage() {
         // Show detailed success message
         const { summary, savedPaths } = result;
         const fileCount = summary?.fileCount;
-        const fileCountMsg = fileCount
-          ? ` (${fileCount.high} high, ${fileCount.low} low${fileCount.annotations > 0 ? `, ${fileCount.annotations} annotations${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}` : ''})`
-          : '';
-        if (result.cancelled) {
-          showToast('info', `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`);
-        } else if (summary.failed > 0) {
-          showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)${fileCountMsg}`);
-        } else {
-          showToast('success', `Successfully exported ${summary.success} layout(s)${fileCountMsg}`);
+        const counts: string[] = [];
+        if (fileCount) {
+          if (fileCount.high > 0) counts.push(`${fileCount.high} high`);
+          if (fileCount.low > 0) counts.push(`${fileCount.low} low`);
+          if (fileCount.annotations > 0) {
+            counts.push(`${fileCount.annotations} annotation${fileCount.annotations === 1 ? '' : 's'}${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}`);
+          }
         }
-        
+        const fileCountMsg = counts.length > 0 ? ` (${counts.join(', ')})` : '';
+
+        let toastMessage = '';
+        if (result.cancelled) {
+          toastMessage = `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`;
+          showToast('info', toastMessage);
+        } else if (summary.failed > 0) {
+          toastMessage = `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)${fileCountMsg}`;
+          showToast('info', toastMessage);
+        } else {
+          toastMessage = `Successfully exported ${summary.success} layout(s)${fileCountMsg}`;
+          showToast('success', toastMessage);
+        }
+
+        // Show file paths in a second toast
+        const pathsMsg = formatSavedPaths(savedPaths);
+        if (pathsMsg) {
+          setTimeout(() => {
+            showToast('info', `Saved to:\n${pathsMsg}`);
+          }, 300);
+        }
+
         // Log the saved paths for debugging
         console.log('Export completed:', {
           summary,
@@ -949,24 +1044,25 @@ export default function SavedPage() {
 
   // Export all layouts - saves to exports folder with high/low resolution.
   // Supports cancellation via the Stop Saving button (jobId + AbortController).
-  const exportAll = async () => {
+  const exportAll = async (includeImages: boolean = true) => {
     if (!pagination || pagination.total === 0) {
       showToast('error', 'No layouts to export');
       return;
     }
     if (exporting) return;
-    
+
+    const action = includeImages ? 'export layouts with images' : 'export annotations only';
     const confirmed = window.confirm(
-      `Export all ${pagination.total} layouts?\n\nThis will render and save high and low resolution images for each layout to the exports folder.`
+      `Export all ${pagination.total} layouts?\n\nThis will ${action}.`
     );
-    
+
     if (!confirmed) return;
 
     const jobId = `exp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     const controller = new AbortController();
     exportAbortRef.current = controller;
     exportJobIdRef.current = jobId;
-    
+
     setExporting(true);
     setExportMode('all');
 
@@ -983,7 +1079,7 @@ export default function SavedPage() {
         headers['X-API-Key'] = apiKey;
       }
       
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}&saveMode=all`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}&saveMode=all&includeImages=${includeImages}`, {
         headers,
         signal: controller.signal,
       }, 300000); // 5 minute timeout
@@ -1002,17 +1098,36 @@ export default function SavedPage() {
         // Show detailed success message
         const { summary, savedPaths } = result;
         const fileCount = summary?.fileCount;
-        const fileCountMsg = fileCount
-          ? ` (${fileCount.high} high, ${fileCount.low} low${fileCount.annotations > 0 ? `, ${fileCount.annotations} annotations${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}` : ''})`
-          : '';
-        if (result.cancelled) {
-          showToast('info', `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`);
-        } else if (summary.failed > 0) {
-          showToast('info', `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)${fileCountMsg}`);
-        } else {
-          showToast('success', `Successfully exported all ${summary.success} layouts${fileCountMsg}`);
+        const counts: string[] = [];
+        if (fileCount) {
+          if (fileCount.high > 0) counts.push(`${fileCount.high} high`);
+          if (fileCount.low > 0) counts.push(`${fileCount.low} low`);
+          if (fileCount.annotations > 0) {
+            counts.push(`${fileCount.annotations} annotation${fileCount.annotations === 1 ? '' : 's'}${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}`);
+          }
         }
-        
+        const fileCountMsg = counts.length > 0 ? ` (${counts.join(', ')})` : '';
+
+        let toastMessage = '';
+        if (result.cancelled) {
+          toastMessage = `Save stopped. Exported ${summary.success}/${summary.total} layouts so far.`;
+          showToast('info', toastMessage);
+        } else if (summary.failed > 0) {
+          toastMessage = `Exported ${summary.success}/${summary.total} layouts (${summary.failed} failed)${fileCountMsg}`;
+          showToast('info', toastMessage);
+        } else {
+          toastMessage = `Successfully exported all ${summary.success} layouts${fileCountMsg}`;
+          showToast('success', toastMessage);
+        }
+
+        // Show file paths in a second toast
+        const pathsMsg = formatSavedPaths(savedPaths);
+        if (pathsMsg) {
+          setTimeout(() => {
+            showToast('info', `Saved to:\n${pathsMsg}`);
+          }, 300);
+        }
+
         // Log the saved paths
         console.log('Export all completed:', {
           summary,
@@ -1112,6 +1227,32 @@ export default function SavedPage() {
     .animate-slide-down { animation: slide-down 0.2s ease-out; }
   `;
 
+  // Helper function to format saved paths for display
+  const formatSavedPaths = (savedPaths: any): string => {
+    if (!savedPaths) return '';
+
+    const parts: string[] = [];
+
+    if (savedPaths.high && savedPaths.high.length > 0) {
+      parts.push(`High-res: ${savedPaths.high[0]}`);
+    }
+
+    if (savedPaths.low && savedPaths.low.length > 0) {
+      parts.push(`Low-res: ${savedPaths.low[0]}`);
+    }
+
+    if (savedPaths.annotations && savedPaths.annotations.length > 0) {
+      if (savedPaths.annotations.length === 1) {
+        parts.push(`Annotations: ${savedPaths.annotations[0]}`);
+      } else {
+        parts.push(`Annotations (${savedPaths.annotations.length} files):`);
+        savedPaths.annotations.forEach((p: string) => parts.push(`  ${p}`));
+      }
+    }
+
+    return parts.join('\n');
+  };
+
   return (
     <div className="p-6">
       {/* Toast Notifications */}
@@ -1152,7 +1293,7 @@ export default function SavedPage() {
       {/* Export Actions */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
-          onClick={exportAll}
+          onClick={() => openSaveOptions('all')}
           disabled={exporting || !pagination || pagination.total === 0}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-white text-sm font-semibold text-ink hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title="Export all layouts as ZIP"
@@ -1161,7 +1302,7 @@ export default function SavedPage() {
           Save All
         </button>
         <button
-          onClick={exportSelected}
+          onClick={() => openSaveOptions('selected')}
           disabled={exporting || selectedForExport.size === 0}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-white text-sm font-semibold text-ink hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title={`Export ${selectedForExport.size} selected layout(s) as ZIP`}
@@ -1400,49 +1541,9 @@ export default function SavedPage() {
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1">
                               <button
-                                onClick={async (e) => {
+                                onClick={(e) => {
                                   e.stopPropagation();
-                                  // Export single layout
-                                  try {
-                                    setExporting(true);
-
-                                    // Get API key from localStorage
-                                    const apiKey = localStorage.getItem('apiKey');
-
-                                    const headers: Record<string, string> = {
-                                      'Content-Type': 'application/json',
-                                    };
-
-                                    // Add API key header if available
-                                    if (apiKey) {
-                                      headers['X-API-Key'] = apiKey;
-                                    }
-
-                                    const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(layout.id)}&saveMode=individual`, {
-                                      headers,
-                                    });
-
-                                    if (!res.ok) {
-                                      const data = await res.json().catch(() => null);
-                                      if (res.status === 401) {
-                                        throw new Error('Authentication required. Please configure your API key in Settings.');
-                                      }
-                                      throw new Error(data?.error || `Export failed (HTTP ${res.status})`);
-                                    }
-                                    const result = await res.json();
-                                    if (result.ok) {
-                                      showToast('success', `Exported layout ${layout.id}`);
-                                      console.log('Single export completed:', result);
-                                    } else {
-                                      throw new Error(result.error || 'Export failed');
-                                    }
-                                  } catch (err) {
-                                    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-                                    console.error('Error exporting layout:', err);
-                                    showToast('error', `Failed to export: ${errorMessage}`);
-                                  } finally {
-                                    setExporting(false);
-                                  }
+                                  openSaveOptions('individual', layout.id);
                                 }}
                                 disabled={exporting}
                                 className="p-1.5 rounded-md bg-panel border border-border text-muted hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1709,6 +1810,53 @@ export default function SavedPage() {
         </div>
       )}
 
+      {/* Save Options Modal */}
+      {showSaveOptionsModal && (
+        <div className="fixed inset-0 z-[60] bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4"
+             onClick={() => { setShowSaveOptionsModal(false); setPendingSaveAction(null); }}>
+          <div
+            className="w-full max-w-md bg-panel rounded-2xl border border-border shadow-2xl p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-sky-100 flex items-center justify-center">
+                <Download size={20} className="text-sky-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-ink">Choose what to export</h3>
+                <p className="text-xs text-muted">Select what you want to include</p>
+              </div>
+            </div>
+
+            <div className="space-y-2 mb-6">
+              <button
+                onClick={() => handleSaveOptionConfirm(false)}
+                className="w-full px-4 py-3 rounded-xl border border-border bg-white text-sm text-ink hover:bg-surface transition-colors text-left"
+              >
+                <span className="font-medium">Annotations only</span>
+                <span className="block text-xs text-muted mt-0.5">Save JSON annotation files only</span>
+              </button>
+              <button
+                onClick={() => handleSaveOptionConfirm(true)}
+                className="w-full px-4 py-3 rounded-xl border border-accent bg-accent/5 text-sm text-ink hover:bg-accent/10 transition-colors text-left"
+              >
+                <span className="font-medium">Annotations + Images</span>
+                <span className="block text-xs text-muted mt-0.5">Save annotations, high-res, and low-res PNG images</span>
+              </button>
+            </div>
+
+            <div className="flex items-center justify-end">
+              <button
+                onClick={() => { setShowSaveOptionsModal(false); setPendingSaveAction(null); }}
+                className="px-4 py-2 rounded-lg border border-border bg-white text-sm text-ink hover:bg-surface transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Exports Path Configuration Modal */}
       {showExportsPathModal && (
         <div className="fixed inset-0 z-[70] bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1746,13 +1894,13 @@ export default function SavedPage() {
                   type="text"
                   value={exportsPath}
                   onChange={(e) => setExportsPath(e.target.value)}
-                  placeholder={exportsPath || "e.g., C:\\xray_exports"}
+                  placeholder={exportsPath || "e.g., C:\\xray_exports or my_exports"}
                   className="w-full px-4 py-2.5 rounded-lg border border-border bg-white text-sm text-ink font-mono focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                   disabled={savingExportsPath}
                   autoFocus
                 />
                 <p className="text-xs text-muted mt-1.5">
-                  Enter an absolute path where you want to save exported files. The backend will create subfolders automatically.
+                  Enter an absolute path (e.g., C:\xray_exports) or a relative path (e.g., data/my_exports). Relative paths are resolved from the backend directory. The backend will create subfolders automatically.
                 </p>
               </div>
 
@@ -1769,7 +1917,7 @@ export default function SavedPage() {
                 onClick={() => {
                   // Use default path
                   setExportsPath('');
-                  saveExportsPath();
+                  saveExportsPath(true);
                 }}
                 disabled={savingExportsPath}
                 className="px-4 py-2 rounded-lg border border-border bg-white text-sm text-ink hover:bg-surface transition-colors disabled:cursor-not-allowed disabled:opacity-40"
@@ -1777,7 +1925,7 @@ export default function SavedPage() {
                 Use Default
               </button>
               <button
-                onClick={saveExportsPath}
+                onClick={() => saveExportsPath()}
                 disabled={savingExportsPath || !exportsPath}
                 className="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm font-medium hover:bg-sky-700 transition-colors disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-2"
               >

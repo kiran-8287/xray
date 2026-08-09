@@ -7,7 +7,12 @@ import ImageWithPlaceholder from "../common/ImageWithPlaceholder";
 
 function formatDisplayName(name: string | null | undefined) {
   if (!name) return "";
-  return name.replace(/\.[^.]+$/i, "");
+  // Strip all extensions (handles multi-part extensions like .dump.pgm)
+  const parts = name.split('.');
+  // If there's only one part (no extension), return as-is
+  if (parts.length === 1) return name;
+  // Return just the first part (the ID/base name without any extensions)
+  return parts[0];
 }
 
 function parseValidRegionPoints(validRegionPoints: any) {
