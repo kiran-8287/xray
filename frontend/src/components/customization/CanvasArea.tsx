@@ -203,7 +203,7 @@ export default function CanvasArea({
                       left: obj.transform.x,
                     }}
                   >
-                    {obj.name}
+                    {obj.name || obj.id}
                   </div>
                 )}
               </React.Fragment>

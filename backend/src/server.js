@@ -339,11 +339,21 @@ app.use('/data', express.static(path.join(__dirname, '..', 'data')));
 // Catalog field `pixel_data_path` may be NULL for historical/upload-flow reasons
 // (e.g. standard upload createItem at ~L1007 never populated it). We fall back
 // to the convention `highenergy/<sanitizedItemId>.npz` and verify the file exists.
+// Also accepts the legacy camelCase `pixelDataFilename` for robustness.
 async function resolvePixelDataPath(itemId, catalogPixelDataPath) {
-    if (catalogPixelDataPath) {
-        const r = safeJoin(pixelDataRoot, catalogPixelDataPath);
+    let pathToCheck = catalogPixelDataPath;
+    if (!pathToCheck) {
+        // Defensive: if the item was stored with the legacy camelCase field,
+        // resolvePixelDataPath would otherwise miss it and return null.
+        const item = await getItemById(itemId);
+        if (item) {
+            pathToCheck = item.pixelDataFilename || null;
+        }
+    }
+    if (pathToCheck) {
+        const r = safeJoin(pixelDataRoot, pathToCheck);
         if (r.safe) {
-            try { await fs.access(r.fullPath); return catalogPixelDataPath; } catch {}
+            try { await fs.access(r.fullPath); return pathToCheck; } catch {}
         }
     }
     if (!itemId) return null;

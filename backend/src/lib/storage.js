@@ -534,6 +534,9 @@ async function createItemsBatch(itemsArray) {
       created_at: rawItem.created_at || new Date().toISOString(),
       ...rawItem,
       id, // id must come AFTER the spread so a rawItem.id can never clobber our unique ID
+      // Normalize frontend camelCase to backend snake_case so downstream
+      // resolvePixelDataPath() always finds the stored path.
+      pixel_data_path: rawItem.pixelDataFilename || rawItem.pixel_data_path || null,
     };
     grouped[catKey].push(item);
     createdItems.push(item);
@@ -1039,6 +1042,9 @@ export async function importItemsBatch(itemsArray, { skipExisting = true } = {})
       created_at: rawItem.created_at || new Date().toISOString(),
       ...rawItem,
       category: catDisplay,
+      // Normalize frontend camelCase to backend snake_case so downstream
+      // resolvePixelDataPath() always finds the stored path.
+      pixel_data_path: rawItem.pixelDataFilename || rawItem.pixel_data_path || null,
     };
     grouped[catKey].push(item);
     added.push(item);
