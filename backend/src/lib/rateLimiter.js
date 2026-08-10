@@ -128,7 +128,7 @@ export const generalRateLimiter = new RateLimiter({
 export const publicApiRateLimiter = new RateLimiter({
   windowMs: 1000,
   maxRequests: 20, // 20 requests per second for public APIs
-  maxConcurrent: 10 // 10 concurrent requests
+  maxConcurrent: 15 // 15 concurrent requests — raised from 10 to prevent 429s during normal multi-page frontend fetches
 });
 
 export const strictRateLimiter = new RateLimiter({

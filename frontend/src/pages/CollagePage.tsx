@@ -868,6 +868,7 @@ export default function CollagePage() {
   const handleUnsavedModalAction = (action: "discard" | "cancel") => {
     if (action === "discard") {
       setShowUnsavedModal(false);
+      GenerationService.clear();
       if (pendingNavigation) {
         pendingNavigation();
         setPendingNavigation(null);
