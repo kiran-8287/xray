@@ -148,14 +148,14 @@ export default function ScannedBagsSidebar({
 
   if (searchLower) {
     for (const [subKey, items] of Object.entries(threatsBySubcategory)) {
-      const filtered = items.filter(item => item.name.toLowerCase().includes(searchLower));
+      const filtered = items.filter(item => (item.name || item.id).toLowerCase().includes(searchLower));
       if (filtered.length > 0) {
         filteredThreatsBySubcategory[subKey] = filtered;
         filteredThreatCount += filtered.length;
       }
     }
     for (const [subKey, items] of Object.entries(nonThreatsBySubcategory)) {
-      const filtered = items.filter(item => item.name.toLowerCase().includes(searchLower));
+      const filtered = items.filter(item => (item.name || item.id).toLowerCase().includes(searchLower));
       if (filtered.length > 0) {
         filteredNonThreatsBySubcategory[subKey] = filtered;
         filteredNonThreatCount += filtered.length;
@@ -270,7 +270,7 @@ export default function ScannedBagsSidebar({
                       {obj.library === "bag" ? "B" : obj.library === "threat" ? "T" : "N"}
                     </div>
                     <span className={`text-[11px] font-medium truncate flex-1 ${isSelected ? "text-accent" : "text-ink"}`}>
-                      {obj.name}
+                      {obj.name || obj.id}
                     </span>
                     {obj.library !== "bag" && (
                       <button
@@ -325,9 +325,9 @@ export default function ScannedBagsSidebar({
                               className="group h-28 overflow-hidden rounded-2xl border border-border bg-panel p-2.5 text-left transition-all hover:border-rose-400 hover:bg-rose-50 hover:shadow-sm"
                             >
                               <div className="h-14 bg-white rounded-xl overflow-hidden flex items-center justify-center mb-2 border border-border/50 group-hover:border-rose-200">
-                                <img src={`${API_BASE_URL}/data/library_images/${item.filepath}`} alt={item.name} className="max-h-full max-w-full object-contain" />
+                                <img src={`${API_BASE_URL}/data/library_images/${item.filepath}`} alt={item.name || item.id} className="max-h-full max-w-full object-contain" />
                               </div>
-                              <p className="text-[11px] font-bold text-ink truncate group-hover:text-rose-700">{item.name}</p>
+                              <p className="text-[11px] font-bold text-ink truncate group-hover:text-rose-700">{item.name || item.id}</p>
                             </button>
                           ))}
                         </div>
@@ -368,9 +368,9 @@ export default function ScannedBagsSidebar({
                               className="group h-28 overflow-hidden rounded-2xl border border-border bg-panel p-2.5 text-left transition-all hover:border-accent/40 hover:bg-accent/4 hover:shadow-sm"
                             >
                               <div className="h-14 bg-white rounded-xl overflow-hidden flex items-center justify-center mb-2 border border-border/50 group-hover:border-accent/20">
-                                <img src={`${API_BASE_URL}/data/library_images/${item.filepath}`} alt={item.name} className="max-h-full max-w-full object-contain" />
+                                <img src={`${API_BASE_URL}/data/library_images/${item.filepath}`} alt={item.name || item.id} className="max-h-full max-w-full object-contain" />
                               </div>
-                              <p className="text-[11px] font-bold text-ink truncate group-hover:text-accent">{item.name}</p>
+                              <p className="text-[11px] font-bold text-ink truncate group-hover:text-accent">{item.name || item.id}</p>
                             </button>
                           ))}
                         </div>
@@ -437,12 +437,12 @@ export default function ScannedBagsSidebar({
                   <div className="w-10 h-10 aspect-square flex items-center justify-center overflow-hidden">
                     <img
                       src={`${API_BASE_URL}/data/library_images/${item.filepath}`}
-                      alt={item.name}
+                      alt={item.name || item.id}
                       className="max-w-full max-h-full object-contain filter opacity-70 group-hover:opacity-95 transition-opacity"
                     />
                   </div>
                   <span className="text-[10px] font-semibold text-ink text-center leading-tight truncate w-full">
-                    {item.name}
+                    {item.name || item.id}
                   </span>
                 </button>
               ))}

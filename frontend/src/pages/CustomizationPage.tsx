@@ -293,7 +293,7 @@ export default function CustomizationPage() {
 
       bagObject = {
         id: "initial-bag",
-        name: bagItem.name,
+        name: bagItem.name || bagItem.id,
         library: getStencilKind(bagItem.category),
         subcategory: bagItem.subcategory,
         originalPixelValue: bagItem.pixel_value,
@@ -325,7 +325,7 @@ export default function CustomizationPage() {
       if (!pos) pos = { x: 50 + Math.random() * (CANVAS_W - 100), y: 50 + Math.random() * (CANVAS_H - 100), rotation: Math.random() * 360 };
       newObjects.push({
         id: `random-object-${i}`,
-        name: item.name,
+        name: item.name || item.id,
         library: getStencilKind(item.category),
         subcategory: item.subcategory,
         originalPixelValue: item.pixel_value,
@@ -355,7 +355,7 @@ export default function CustomizationPage() {
       if (!pos) pos = { x: 50 + Math.random() * (CANVAS_W - 100), y: 50 + Math.random() * (CANVAS_H - 100), rotation: Math.random() * 360 };
       newObjects.push({
         id: `initial-threat-${i}`,
-        name: threatItem.name,
+        name: threatItem.name || threatItem.id,
         library: getStencilKind(threatItem.category),
         subcategory: threatItem.subcategory,
         originalPixelValue: threatItem.pixel_value,
@@ -414,7 +414,7 @@ export default function CustomizationPage() {
 
     const newObject: SceneObject = {
       id: `custom-object-${Date.now()}`,
-      name: item.name,
+      name: item.name || item.id,
       library: getStencilKind(item.category),
       subcategory: item.subcategory,
       originalPixelValue: item.pixel_value,
@@ -535,8 +535,8 @@ export default function CustomizationPage() {
 
     setSaveState({ status: "saving", message: "Saving..." });
     try {
-      const threatNames = objects.filter(o => o.library === "threat").map(o => o.name);
-      const otherNames = objects.filter(o => o.library !== "bag" && o.library !== "threat").map(o => o.name);
+      const threatNames = objects.filter(o => o.library === "threat").map(o => o.name || o.id);
+      const otherNames = objects.filter(o => o.library !== "bag" && o.library !== "threat").map(o => o.name || o.id);
       const allObjects = [...threatNames, ...otherNames];
       const annotation = `${bagObjectNow?.name || "Workspace"}${allObjects.length > 0 ? ` containing ${allObjects.join(", ")}` : ""}`;
 
@@ -856,7 +856,7 @@ export default function CustomizationPage() {
                     <div className="space-y-1.5">
                       <div className="bg-panel rounded-xl border border-border px-3 py-2 space-y-1">
                         <span className="text-[11px] text-muted uppercase tracking-wider block">Name</span>
-                        <span className="text-xs font-semibold text-ink max-w-[100px] truncate">{selectedObj.name}</span>
+                        <span className="text-xs font-semibold text-ink max-w-[100px] truncate">{selectedObj.name || selectedObj.id}</span>
                       </div>
                       <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
                         <span className="text-[11px] text-muted uppercase tracking-wider">Category</span>
@@ -922,7 +922,7 @@ export default function CustomizationPage() {
                   <div className="space-y-1">
                     {outOfBoundsObjects.map((obj) => (
                       <div key={obj.id} onClick={() => setSelectedObjectId(obj.id)} className="bg-rose-50 border border-rose-100 rounded-lg p-2 text-rose-800 text-xs font-medium cursor-pointer hover:bg-rose-100/50 transition-colors">
-                        {obj.name}
+                        {obj.name || obj.id}
                       </div>
                     ))}
                   </div>
