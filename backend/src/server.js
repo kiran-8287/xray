@@ -942,7 +942,9 @@ app.get('/api/user-config/exports-path', async (_req, res) => {
   try {
     const exportsPath = await getExportsPath();
     const configured = await hasConfiguredExportsPath();
-    res.json({ ok: true, exportsPath, configured });
+    // `platform` tells the UI which path convention (Windows drive vs POSIX /) to
+    // expect, so the client can show the right format instructions.
+    res.json({ ok: true, exportsPath, configured, platform: process.platform });
   } catch (err) {
     console.error('[user-config/exports-path] Error:', err);
     res.status(500).json({ ok: false, error: String(err) });
@@ -957,25 +959,44 @@ app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
       return res.status(400).json({ ok: false, error: 'exportsPath is required and must be a string' });
     }
 
-    // Allow empty string to use the default exports path
-    if (exportsPath === '') {
+    // Empty string (or whitespace-only) resets to the default exports folder.
+    if (exportsPath.trim() === '') {
       const userConfig = await setExportsPath(null);
       return res.json({ ok: true, exportsPath: userConfig.exportsPath });
     }
 
-    // Resolve relative paths against the backend directory
-    const resolvedPath = path.isAbsolute(exportsPath)
-      ? exportsPath
-      : path.resolve(path.join(__dirname, '..'), exportsPath);
+    const trimmed = exportsPath.trim().replace(/[\\/]+$/, '');
+
+    // Reject directory traversal.
+    if (trimmed.split(/[\\/]+/).includes('..')) {
+      return res.status(400).json({ ok: false, error: 'Invalid path — directory traversal ("..") is not allowed.' });
+    }
+
+    // Only absolute paths are accepted so the destination is never ambiguous.
+    if (!path.isAbsolute(trimmed)) {
+      const hint = process.platform === 'win32'
+        ? 'On Windows use an absolute path like C:\\XrayExports or C:/XrayExports (drive letter required).'
+        : 'On Linux/macOS use an absolute path like /home/you/XrayExports (must start with /).';
+      return res.status(400).json({ ok: false, error: `Not an absolute path. ${hint}` });
+    }
+
+    const resolvedPath = path.resolve(trimmed);
+
+    // Create the folder and standard subfolders up front so mistakes surface now.
+    try {
+      await fs.mkdir(path.join(resolvedPath, 'high'), { recursive: true });
+      await fs.mkdir(path.join(resolvedPath, 'low'), { recursive: true });
+      await fs.mkdir(path.join(resolvedPath, 'annotations'), { recursive: true });
+      await fs.mkdir(path.join(resolvedPath, 'catalog'), { recursive: true });
+    } catch (err) {
+      console.error('[user-config/exports-path] Failed to create folder:', err);
+      return res.status(400).json({
+        ok: false,
+        error: `Could not create the export folder. Check that the drive exists and is writable. (${err && err.code ? err.code : String(err)})`,
+      });
+    }
 
     const userConfig = await setExportsPath(resolvedPath);
-
-    // Create the directories if they don't exist
-    await fs.mkdir(resolvedPath, { recursive: true });
-    await fs.mkdir(path.join(resolvedPath, 'high'), { recursive: true });
-    await fs.mkdir(path.join(resolvedPath, 'low'), { recursive: true });
-    await fs.mkdir(path.join(resolvedPath, 'annotations'), { recursive: true });
-
     res.json({ ok: true, exportsPath: userConfig.exportsPath });
   } catch (err) {
     console.error('[user-config/exports-path] Error:', err);

@@ -3,6 +3,7 @@ import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check, CheckCircle2, Loade
 import { getLibrarySubcategories } from "../config/categories";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
+import ExportLocationSelector from "../components/common/ExportLocationSelector";
 
 interface SavedLayout {
   id: string;
@@ -411,12 +412,6 @@ export default function SavedPage() {
   const [exportMode, setExportMode] = useState<'all' | 'selected' | 'single' | null>(null);
   const [selectedForExport, setSelectedForExport] = useState<Set<string>>(new Set());
   
-  // Exports path configuration state
-  const [showExportsPathModal, setShowExportsPathModal] = useState(false);
-  const [exportsPath, setExportsPath] = useState('');
-  const [savingExportsPath, setSavingExportsPath] = useState(false);
-  const [exportsPathConfigured, setExportsPathConfigured] = useState(false);
-  
   // References for cancelling a running bulk export (Save All / Save Selected)
   const exportAbortRef = useRef<AbortController | null>(null);
   const exportJobIdRef = useRef<string | null>(null);
@@ -544,82 +539,6 @@ export default function SavedPage() {
   //   
   //   checkIntegrity();
   // }, [layouts.length]);
-
-  // Check if exports path is configured on mount
-  useEffect(() => {
-    const checkExportsPathConfig = async () => {
-      // Check localStorage first to avoid unnecessary API calls
-      const storedConfigured = localStorage.getItem('exportsPathConfigured');
-      if (storedConfigured === 'true') {
-        setExportsPathConfigured(true);
-        return;
-      }
-
-      try {
-        const res = await fetchWithTimeout(`${API_BASE}/api/user-config/has-exports-path`);
-        const data = await res.json();
-        if (data.ok && data.configured) {
-          setExportsPathConfigured(true);
-          localStorage.setItem('exportsPathConfigured', 'true');
-        } else {
-          // Show modal to configure exports path
-          setShowExportsPathModal(true);
-        }
-      } catch (err) {
-        console.error('Failed to check exports path configuration:', err);
-        // On error, still show the modal
-        setShowExportsPathModal(true);
-      }
-    };
-
-    checkExportsPathConfig();
-  }, []);
-
-  // Save exports path configuration
-  const saveExportsPath = async (allowEmpty = false) => {
-    if ((!exportsPath && !allowEmpty) || savingExportsPath) return;
-
-    setSavingExportsPath(true);
-    try {
-      const apiKey = localStorage.getItem('apiKey');
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-
-      if (apiKey) {
-        headers['X-API-Key'] = apiKey;
-      }
-
-      const res = await fetchWithTimeout(`${API_BASE}/api/user-config/exports-path`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ exportsPath }),
-      }, 30000);
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error || `Failed to save exports path (HTTP ${res.status})`);
-      }
-
-      const result = await res.json();
-      if (result.ok) {
-        setExportsPathConfigured(true);
-        localStorage.setItem('exportsPathConfigured', 'true');
-        setShowExportsPathModal(false);
-        showToast('success', exportsPath
-          ? `Exports folder configured successfully at:\n${exportsPath}`
-          : 'Exports folder configured successfully. Using default location.');
-      } else {
-        throw new Error(result.error || 'Failed to save exports path');
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      console.error('Error saving exports path:', err);
-      showToast('error', `Failed to save exports path: ${errorMessage}`);
-    } finally {
-      setSavingExportsPath(false);
-    }
-  };
 
   const getObjects = (layout: SavedLayout): LayoutObject[] => {
     try {
@@ -1284,9 +1203,20 @@ export default function SavedPage() {
         <div className="border-l-4 border-accent pl-4">
           <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Saved Layouts</h2>
         </div>
-        <div className="inline-flex items-center gap-2 rounded-xl border border-border bg-panel px-4 py-3 text-sm text-muted">
-          <FolderOpen size={18} />
-          {pagination ? `${pagination.total} layouts` : '...'}
+        <div className="flex items-center gap-3">
+          <ExportLocationSelector
+            autoOpen
+            onPathSaved={(p, configured) => {
+              showToast(
+                'success',
+                configured && p ? `Exports folder configured successfully at:\n${p}` : 'Using the default export folder.'
+              );
+            }}
+          />
+          <div className="inline-flex items-center gap-2 rounded-xl border border-border bg-panel px-4 py-3 text-sm text-muted">
+            <FolderOpen size={18} />
+            {pagination ? `${pagination.total} layouts` : '...'}
+          </div>
         </div>
       </div>
 
@@ -1851,95 +1781,6 @@ export default function SavedPage() {
                 className="px-4 py-2 rounded-lg border border-border bg-white text-sm text-ink hover:bg-surface transition-colors"
               >
                 Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Exports Path Configuration Modal */}
-      {showExportsPathModal && (
-        <div className="fixed inset-0 z-[70] bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div
-            className="w-full max-w-2xl bg-panel rounded-2xl border border-border shadow-2xl p-6"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-sky-100 flex items-center justify-center">
-                <FolderOpen size={20} className="text-sky-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-ink">Configure Exports Folder</h3>
-                <p className="text-xs text-muted">This will only be asked once</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="rounded-xl border border-border bg-surface p-4">
-                <p className="text-sm text-ink mb-3">
-                  Where would you like to store exported layouts and images? This folder will contain:
-                </p>
-                <ul className="space-y-1.5 text-xs text-muted ml-4 list-disc">
-                  <li><span className="font-mono text-ink">high/</span> - High-resolution PNG images</li>
-                  <li><span className="font-mono text-ink">low/</span> - Low-resolution PNG images</li>
-                  <li><span className="font-mono text-ink">annotations/</span> - JSON annotation files</li>
-                </ul>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-ink mb-2">
-                  Exports Folder Path <span className="text-rose-600">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={exportsPath}
-                  onChange={(e) => setExportsPath(e.target.value)}
-                  placeholder={exportsPath || "e.g., C:\\xray_exports or my_exports"}
-                  className="w-full px-4 py-2.5 rounded-lg border border-border bg-white text-sm text-ink font-mono focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
-                  disabled={savingExportsPath}
-                  autoFocus
-                />
-                <p className="text-xs text-muted mt-1.5">
-                  Enter an absolute path (e.g., C:\xray_exports) or a relative path (e.g., data/my_exports). Relative paths are resolved from the backend directory. The backend will create subfolders automatically.
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                <p className="text-xs text-amber-800">
-                  <span className="font-semibold">Default location:</span> If you don't specify a path, exports will be saved to{' '}
-                  <span className="font-mono">data/exports</span> in the backend directory.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 mt-6">
-              <button
-                onClick={() => {
-                  // Use default path
-                  setExportsPath('');
-                  saveExportsPath(true);
-                }}
-                disabled={savingExportsPath}
-                className="px-4 py-2 rounded-lg border border-border bg-white text-sm text-ink hover:bg-surface transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Use Default
-              </button>
-              <button
-                onClick={() => saveExportsPath()}
-                disabled={savingExportsPath || !exportsPath}
-                className="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm font-medium hover:bg-sky-700 transition-colors disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-2"
-              >
-                {savingExportsPath ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Check size={14} />
-                    Save Configuration
-                  </>
-                )}
               </button>
             </div>
           </div>

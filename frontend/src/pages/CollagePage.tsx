@@ -11,6 +11,7 @@ import type { CombinatorialResult, FailureLog } from "../types/customization";
 import SyntheticPreview from "../components/collage/SyntheticPreview";
 import { getRectCorners, getTransformedPolygon } from "../lib/geometry";
 import ConfirmModal from "../components/common/ConfirmModal";
+import ExportLocationSelector from "../components/common/ExportLocationSelector";
 
 import type { GenerationProgress, GenerationState, AutoSaveStatus, AutoSaveMode } from "../types/generation";
 
@@ -31,7 +32,7 @@ function buildLayoutPayload(comb: CombinatorialResult) {
   const threatNames = comb.threats?.map(t => t.name) ?? [];
   const otherNames = comb.others.map((o) => o.name);
   const allObjects = [...threatNames, ...otherNames];
-  const annotation = `${comb.bag.name}${allObjects.length > 0 ? ` containing ${allObjects.join(", ")}` : ""}`;
+  const annotation = comb.id;
   const bagObject = comb.objects.find((o: any) => o.library === "bag");
   let validRegionPolygon: any[] = [];
   if (bagObject?.polygonOutline) {
@@ -692,7 +693,7 @@ export default function CollagePage() {
           const threatNames = comb.threats && comb.threats.length > 0 ? comb.threats.map(t => t.name) : [];
           const otherNames = comb.others.map(o => o.name);
           const allObjects = [...threatNames, ...otherNames];
-          const annotation = `${comb.bag.name}${allObjects.length > 0 ? ` containing ${allObjects.join(", ")}` : ""}`;
+          const annotation = comb.id;
           const bagObject = comb.objects.find((o: any) => o.library === "bag");
           let validRegionPolygon: any[] = [];
           if (bagObject?.polygonOutline) {
@@ -896,7 +897,9 @@ export default function CollagePage() {
         <div>
           <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Collage Images</h2>
         </div>
-        {(totalPending > 0 || isGenerating) && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <ExportLocationSelector />
+          {(totalPending > 0 || isGenerating) && (
           <div className="flex items-center gap-3 flex-wrap">
             {/* Save this page button */}
             <button
@@ -927,7 +930,8 @@ export default function CollagePage() {
               </label>
             </div>
           </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Generation Progress Banner */}
