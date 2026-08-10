@@ -3,6 +3,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    # Run the container as the host user (defaults to uid/gid 1000) instead of
+    # root. Without this, every file the app writes into the bind-mounted
+    # ./backend/data is owned by root and shows a "locked / read-only" (red
+    # lock) state for normal users, who then can't create/delete/rename files.
+    user: "${UID:-1000}:${GID:-1000}"
     ports:
       - "8080:8080"
     volumes:

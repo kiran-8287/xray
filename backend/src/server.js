@@ -586,10 +586,11 @@ function classifyFileType(filename) {
     const lower = filename.toLowerCase();
     if (lower.endsWith(".dump.pgm") || lower.endsWith(".pgm") || lower.endsWith(".dump")) return "dump";
     if (lower.endsWith(".tip")) return "tip";
+    if (lower.endsWith(".npz")) return "npz";
     return null;
 }
 
-// Endpoint to process raw files (.dump.pgm and .tip) with worker pool
+// Endpoint to process raw files (.dump.pgm, .tip) and extract .npz pixel data with worker pool
 app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), async (req, res) => {
     res.setHeader("Content-Type", "application/x-ndjson");
     res.setHeader("Transfer-Encoding", "chunked");
@@ -622,7 +623,7 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
             const fileType = classifyFileType(file.originalname);
             if (!fileType) {
                 logger.debug({ operationId, filename: file.originalname }, 'Skipped file: unrecognized extension');
-                skippedFiles.push({ filename: file.originalname, reason: "Unrecognized file extension (expected .dump.pgm or .tip)" });
+                skippedFiles.push({ filename: file.originalname, reason: "Unrecognized file extension (expected .dump.pgm, .tip, or .npz)" });
                 continue;
             }
 

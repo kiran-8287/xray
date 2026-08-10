@@ -1,0 +1,7 @@
+# DO NOT DELETE.
+# This marker keeps the backend/data directory present in the git repository.
+# Without it a fresh clone has no backend/data folder, and when that folder is
+# used as a Docker bind-mount Docker (running as root) auto-creates it as
+# root:root, which shows a red "locked / read-only" icon and blocks users from
+# creating/renaming/deleting files. With this marker present, the folder is
+# checked out owned by the cloning user and stays writable.

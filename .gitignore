@@ -95,3 +95,9 @@ create*main*test*
 
 # System configuration and runtime data
 backend/data/
+
+# Keep the data directory itself in the repository so a fresh clone has it
+# (owned by the cloning user) and Docker does NOT auto-create it as root,
+# which would otherwise show a red "locked / read-only" lock and block writes.
+!backend/data/
+!backend/data/.gitkeep
