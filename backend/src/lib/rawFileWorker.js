@@ -1,5 +1,5 @@
 // rawFileWorker.js — ESM Worker Thread that spawns a Python subprocess
-// to process .dump.pgm and .tip files.
+// to process .dump.pgm, .tip files, and extract .npz pixel data.
 // Supports batch processing: receives an array of tasks, sends as stdin JSON,
 // and streams NDJSON results back per-file.
 

@@ -150,8 +150,8 @@ const ItemCard = memo(function ItemCard({
 
       {/* Meta Section */}
       <div className="p-3 border-t border-surface">
-        <h5 className="font-semibold text-ink text-xs truncate" title={item.name}>
-          {formatDisplayName(item.name)}
+        <h5 className="font-semibold text-ink text-xs truncate" title={item.name || item.id}>
+          {formatDisplayName(item.name || item.id)}
         </h5>
         
         {/* Tags Display - only for bags */}

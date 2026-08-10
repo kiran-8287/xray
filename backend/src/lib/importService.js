@@ -163,6 +163,8 @@ function addItemTo(map, canCat, o, allowedIds) {
   if (allowedIds && !allowedIds.has(id)) return;
   map.set(id, {
     id,
+    name: id,
+    filename: id,
     category: displayCategory(canCat),
     subcategory: o.subcategory ? titleCase(o.subcategory) : 'General',
     filepath: o.filepath || `${id}.png`,
@@ -273,6 +275,8 @@ function itemsFromCatalog(category, parsed) {
     if (!it || !it.id) continue;
     out.push({
       ...it,
+      name: it.name || it.id,
+      filename: it.filename || it.id,
       category: cat,
       pixelDataFilename: it.pixelDataFilename || it.pixel_data_path || `highenergy/${it.id}.npz`,
       _fromCatalog: true,
@@ -742,6 +746,8 @@ export async function runImport({ pixelFiles = [], jsonFiles = [], options = {},
     const energy = pixelEnergyMap.get(base) || 'highenergy';
     itemsToAdd.push({
       id: base,
+      name: base,
+      filename: base,
       category: displayCategory(category),
       subcategory: 'General',
       filepath: `${base}.png`,

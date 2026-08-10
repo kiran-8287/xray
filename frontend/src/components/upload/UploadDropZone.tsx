@@ -47,6 +47,7 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       lower.endsWith(".pgm") ||
       lower.endsWith(".tip") ||
       lower.endsWith(".dump") ||
+      lower.endsWith(".npz") ||
       lower.endsWith(".png") ||
       lower.endsWith(".jpg") ||
       lower.endsWith(".jpeg")
@@ -135,7 +136,7 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       <input
         id="fileInput"
         type="file"
-        accept=".pgm,.tip,.dump,.png,.jpg,.jpeg"
+        accept=".pgm,.tip,.dump,.npz,.png,.jpg,.jpeg"
         multiple
         className="hidden"
         onChange={handleFileChange}

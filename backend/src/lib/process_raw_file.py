@@ -1,4 +1,5 @@
-"""process_raw_file.py — Process .dump.pgm and .tip files via Python readers.
+"""process_raw_file.py — Process .dump.pgm and .tip files via Python readers,
+and extract pixel data directly from .npz files.
 
 Single-file mode (CLI):
     python process_raw_file.py \\
@@ -7,6 +8,10 @@ Single-file mode (CLI):
         --item-id P01X010-2024101200923 \\
         --library-images-dir /path/to/library_images \\
         --pixel-data-dir /path/to/pixel_data
+
+For ``--file-type npz`` no dump/tip parsing is performed: the uploaded .npz
+already contains the pixel data under ``high`` and ``low`` keys, which are
+extracted directly and written to the pixel data folder.
 
 Batch mode (stdin JSON):
     echo '[{"filePath":"...","fileType":"dump","itemId":"...","libraryImagesDir":"...","pixelDataDir":"..."},...]' \\
@@ -112,7 +117,7 @@ def process_single_file(file_path, file_type, item_id, library_images_dir, pixel
         del high, low, R
 
         img = high_u16  # preview PNG from high-energy channel
-    else:  # file_type == "tip"
+    elif file_type == "tip":
         tipread = _get_tipread()
         low_raw, high_raw = tipread.read_tip(file_path)
 
@@ -121,6 +126,21 @@ def process_single_file(file_path, file_type, item_id, library_images_dir, pixel
         rows, cols = high_u16.shape
 
         del high_raw, low_raw
+
+        img = high_u16
+    else:  # file_type == "npz"
+        # Pixel data is already present in the uploaded .npz file under the
+        # 'high' and 'low' keys. No dump/tip processing is required — the arrays
+        # are extracted directly, separated, and written to the pixel data folder.
+        npz = np.load(file_path)
+        try:
+            if "high" not in npz.files or "low" not in npz.files:
+                raise ValueError("Invalid .npz file: expected 'high' and 'low' array keys")
+            high_u16 = ensure_uint16(npz["high"])
+            low_u16  = ensure_uint16(npz["low"])
+            rows, cols = high_u16.shape
+        finally:
+            npz.close()
 
         img = high_u16
 
@@ -159,7 +179,7 @@ def main():
     parser = argparse.ArgumentParser(description="Process raw .dump.pgm and .tip files")
     parser.add_argument("--batch", action="store_true", help="Read batch JSON from stdin")
     parser.add_argument("--file-path", help="Absolute path to the uploaded temp raw file")
-    parser.add_argument("--file-type", choices=["dump", "tip"], help="Type of the raw file")
+    parser.add_argument("--file-type", choices=["dump", "tip", "npz"], help="Type of the raw file")
     parser.add_argument("--item-id", help="Derived item ID")
     parser.add_argument("--library-images-dir", help="Output directory for generated PNG")
     parser.add_argument("--pixel-data-dir", help="Output directory for pixel data")
