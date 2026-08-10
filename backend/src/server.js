@@ -46,6 +46,7 @@ import { PipelineTimer, PIPELINE_STAGES, generateOperationId } from "./lib/instr
 import { initializeSystemConfig, getWorkerCount, checkMemoryAvailability } from "./lib/systemInfo.js";
 import { Semaphore, chunked, withSemaphore } from "./lib/concurrency.js";
 import { enqueue as enqueueDiskWrite, getDiskWriteQueueStatus, drain as drainDiskQueue } from './lib/diskWriteQueue.js';
+import { publicApiRateLimiter } from './lib/rateLimiter.js';
 import { getExportsPath, setExportsPath, hasConfiguredExportsPath } from './lib/userConfig.js';
 import {
   analyzeImport,
@@ -451,6 +452,27 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, status: "healthy", timestamp: new Date().toISOString() });
 });
 
+// Rate limiter status endpoint (for monitoring)
+app.get('/api/rate-limit-status', (req, res) => {
+  try {
+    const stats = publicApiRateLimiter.getStats();
+    res.json({
+      ok: true,
+      rateLimiter: {
+        trackedIPs: stats.trackedIPs,
+        concurrentConnections: stats.concurrentConnections,
+        limits: {
+          windowMs: 1000,
+          maxRequestsPerSecond: 20,
+          maxConcurrentPerIP: 10
+        }
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 // Prometheus metrics endpoint
 app.get('/metrics', async (_req, res) => {
     try {
@@ -521,8 +543,8 @@ setInterval(() => {
 // Initialize system configuration (detect CPU cores, etc.)
 await initializeSystemConfig();
 
-// System Hardware Information & Dynamic Worker Config Endpoint
-app.get("/api/system/info", async (_req, res) => {
+// System Hardware Information & Dynamic Worker Config Endpoint - rate limited
+app.get("/api/system/info", publicApiRateLimiter.middleware(), async (_req, res) => {
     try {
         const config = await initializeSystemConfig();
         res.json({
@@ -803,7 +825,8 @@ function normalizeCategory(cat) {
 }
 
 // Get all items organized by category and subcategory (with pagination)
-app.get("/api/items/categorized", async (req, res) => {
+// Rate limited to prevent abuse (max 20 requests/second, max 10 concurrent per IP)
+app.get("/api/items/categorized", publicApiRateLimiter.middleware(), async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 100));
@@ -1070,8 +1093,8 @@ app.post('/api/import/cancel', requireAuth, async (req, res) => {
   }
 });
 
-// Saved layouts endpoints
-app.get('/api/saved-layouts', async (_req, res) => {
+// Saved layouts endpoints - rate limited to prevent abuse
+app.get('/api/saved-layouts', publicApiRateLimiter.middleware(), async (_req, res) => {
     try {
         const layouts = await getSavedLayouts();
         res.json({ ok: true, layouts });
@@ -1081,7 +1104,7 @@ app.get('/api/saved-layouts', async (_req, res) => {
     }
 });
 
-app.get('/api/saved-layouts/ids', async (_req, res) => {
+app.get('/api/saved-layouts/ids', publicApiRateLimiter.middleware(), async (_req, res) => {
     try {
         const layouts = await getSavedLayouts();
         const ids = layouts.map((l) => l.id).filter(Boolean);
@@ -1092,7 +1115,7 @@ app.get('/api/saved-layouts/ids', async (_req, res) => {
     }
 });
 
-app.get('/api/saved-layouts/filtered', async (req, res) => {
+app.get('/api/saved-layouts/filtered', publicApiRateLimiter.middleware(), async (req, res) => {
     try {
       const page = Math.max(1, parseInt(req.query.page) || 1);
       const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
@@ -1840,8 +1863,8 @@ app.post('/api/saved-layouts/batch-delete', requireAuth, async (req, res) => {
     }
 });
 
-// Custom subcategories endpoints
-app.get('/api/custom-subcategories', async (req, res) => {
+// Custom subcategories endpoints - rate limited to prevent abuse
+app.get('/api/custom-subcategories', publicApiRateLimiter.middleware(), async (req, res) => {
     try {
         const customSubs = await getCustomSubcategories();
         res.json({ ok: true, customSubcategories: customSubs });
