@@ -986,26 +986,46 @@ app.post('/api/import/analyze', requireAuth, uploadImport.any(), async (req, res
     const high = files.filter((f) => f.fieldname === 'pixelFiles');
     const low = files.filter((f) => f.fieldname === 'pixelFilesLow');
     const json = files.filter((f) => f.fieldname === 'jsonFiles');
-    const pixelFiles = [
+    
+    let pixelFiles = [
       ...high.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'highenergy', absPath: f.path, originalName: f.originalname })),
       ...low.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'lowenergy', absPath: f.path, originalName: f.originalname })),
     ];
-    const jsonFiles = json.map((f) => ({ filename: f.originalname, absPath: f.path }));
+    let jsonFiles = json.map((f) => ({ filename: f.originalname, absPath: f.path }));
+
+    const body = req.body || {};
+    const runId = body.runId;
+
+    // If no files uploaded but runId provided, scan temp directory for already-uploaded files
+    if (pixelFiles.length === 0 && jsonFiles.length === 0 && runId) {
+      const stagedDir = path.join(tempDir, 'import', String(runId));
+      try {
+        const pixelDir = path.join(stagedDir, 'highenergy'); // Default to highenergy
+        pixelFiles = await scanPixelDir(pixelDir);
+        jsonFiles = await scanJsonDir(path.join(stagedDir, 'json'));
+      } catch (err) {
+        console.error('[import/analyze] Error scanning staged dir:', err);
+      }
+    }
 
     if (pixelFiles.length === 0 && jsonFiles.length === 0) {
-      res.write(JSON.stringify({ stage: 'error', message: 'No pixel data or JSON files provided' }) + '\n');
+      res.write(JSON.stringify({ stage: 'error', message: 'No pixel data or JSON files provided. Upload files first or provide a runId.' }) + '\n');
       res.end();
       return;
     }
 
-    const body = req.body || {};
-    res.write(JSON.stringify({ stage: 'start', message: 'Starting analysis…', runId: body.runId || null }) + '\n');
+    res.write(JSON.stringify({ stage: 'start', message: 'Starting analysis…', runId: runId || null }) + '\n');
 
     const report = await analyzeImport({
       pixelFiles,
       jsonFiles,
       progress: (o) => {
-        try { res.write(JSON.stringify(o) + '\n'); } catch { /* client gone */ }
+        try { 
+          const line = JSON.stringify(o) + '\n';
+          res.write(line);
+          // Force flush to prevent buffering multiple lines together
+          res.flush?.();
+        } catch { /* client gone */ }
       },
     });
 
@@ -1044,7 +1064,12 @@ app.post('/api/import/run', requireAuth, async (req, res) => {
       jsonFiles,
       options: { ...options, cancelState },
       progress: (o) => {
-        try { res.write(JSON.stringify(o) + '\n'); } catch { /* client gone */ }
+        try { 
+          const line = JSON.stringify(o) + '\n';
+          res.write(line);
+          // Force flush to prevent buffering multiple lines together
+          res.flush?.();
+        } catch { /* client gone */ }
       },
     });
 
@@ -1052,8 +1077,25 @@ app.post('/api/import/run', requireAuth, async (req, res) => {
     res.end();
   } catch (err) {
     console.error('[import/run] Error:', err);
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorStack = err instanceof Error ? err.stack : undefined;
+    
+    // Log detailed error for debugging
+    console.error('[import/run] Full error details:', {
+      message: errorMessage,
+      stack: errorStack,
+      runId,
+      stagedDir,
+    });
+    
     try {
-      res.write(JSON.stringify({ stage: 'error', message: String((err && err.message) || err) }) + '\n');
+      // Send detailed error to frontend
+      res.write(JSON.stringify({ 
+        stage: 'error', 
+        message: `Import failed: ${errorMessage}`,
+        details: process.env.NODE_ENV === 'development' ? errorStack : undefined,
+        runId 
+      }) + '\n');
       res.end();
     } catch { /* response already ended */ }
   } finally {
