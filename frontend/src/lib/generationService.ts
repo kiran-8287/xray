@@ -198,7 +198,7 @@ function comboToLayout(combo: CombinatorialResult): any {
   const threatNames = combo.threats?.map(t => t.name) || [];
   const otherNames = combo.others?.map(o => o.name) || [];
   const allNames = [...threatNames, ...otherNames];
-  const name = `${combo.bag?.name || "bag"}${allNames.length > 0 ? ` containing ${allNames.join(", ")}` : ""}`;
+  const name = combo.id;
 
   const bagObj = bagObject ? {
     id: bagObject.id,

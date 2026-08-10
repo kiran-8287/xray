@@ -8,6 +8,7 @@ import {
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
 import ConfirmModal from "../components/common/ConfirmModal";
+import ExportLocationSelector, { ExportLocationSelectorHandle } from "../components/common/ExportLocationSelector";
 
 const API_BASE = API_BASE_URL;
 const PAGE_SIZE = 100;
@@ -22,6 +23,7 @@ export default function LoadPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportAbortRef = useRef<AbortController | null>(null);
   const exportJobIdRef = useRef<string | null>(null);
+  const exportLocationRef = useRef<ExportLocationSelectorHandle>(null);
 
   const [phase, setPhase] = useState<"upload" | "analyzing" | "report" | "generating" | "results">("upload");
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -44,9 +46,7 @@ export default function LoadPage() {
   const [showSaveOptions, setShowSaveOptions] = useState(false);
   const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "all" | "selected" | "individual"; combo?: Combination } | null>(null);
   const [exportsPathConfigured, setExportsPathConfigured] = useState(false);
-  const [showExportsPathModal, setShowExportsPathModal] = useState(false);
   const [exportsPath, setExportsPath] = useState("");
-  const [savingExportsPath, setSavingExportsPath] = useState(false);
 
   const showToast = (type: Toast["type"], message: string) => {
     const id = Math.random().toString(36).slice(2);
@@ -91,36 +91,6 @@ export default function LoadPage() {
     };
     loadLibraryIds();
   }, []);
-
-  /** Check exports path configuration */
-  useEffect(() => {
-    const checkExportsPath = async () => {
-      const storedConfigured = localStorage.getItem("exportsPathConfigured");
-      if (storedConfigured === "true") { setExportsPathConfigured(true); return; }
-      try {
-        const res = await fetchWithTimeout(`${API_BASE}/api/user-config/has-exports-path`);
-        const data = await res.json();
-        if (data.ok && data.configured) { setExportsPathConfigured(true); localStorage.setItem("exportsPathConfigured", "true"); }
-        else { setShowExportsPathModal(true); }
-      } catch { setShowExportsPathModal(true); }
-    };
-    checkExportsPath();
-  }, []);
-
-  const saveExportsPath = async (allowEmpty = false) => {
-    if ((!exportsPath && !allowEmpty) || savingExportsPath) return;
-    setSavingExportsPath(true);
-    try {
-      const apiKey = localStorage.getItem("apiKey");
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (apiKey) headers["X-API-Key"] = apiKey;
-      const res = await fetchWithTimeout(`${API_BASE}/api/user-config/exports-path`, { method: "POST", headers, body: JSON.stringify({ exportsPath }) }, 30000);
-      if (!res.ok) { const data = await res.json().catch(() => null); throw new Error(data?.error || `Failed (HTTP ${res.status})`); }
-      setExportsPathConfigured(true); localStorage.setItem("exportsPathConfigured", "true"); setShowExportsPathModal(false);
-      showToast("success", "Export path saved");
-    } catch (err) { showToast("error", `Failed to save export path: ${err instanceof Error ? err.message : String(err)}`); }
-    finally { setSavingExportsPath(false); }
-  };
 
   const handleFilesSelected = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -241,7 +211,7 @@ export default function LoadPage() {
 
 /** Export combinations to exports folder (high + low resolution images) */
   const exportCombinations = async (combos: Combination[], mode: "all" | "selected" | "individual") => {
-    if (!exportsPathConfigured) { setShowSaveOptions(false); setShowExportsPathModal(true); return; }
+    if (!exportsPathConfigured) { setShowSaveOptions(false); exportLocationRef.current?.open(); return; }
     if (exporting || combos.length === 0) return;
     setExporting(true);
     setExportMode(mode);
@@ -254,7 +224,7 @@ export default function LoadPage() {
       const apiKey = localStorage.getItem("apiKey");
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (apiKey) headers["X-API-Key"] = apiKey;
-      const res = await fetchWithTimeout(`${API_BASE}/api/load/export-combinations?jobId=${encodeURIComponent(jobId)}`, { method: "POST", headers, body: JSON.stringify({ combinations: combos }), signal: controller.signal }, LONG_REQUEST_TIMEOUT_MS);
+      const res = await fetchWithTimeout(`${API_BASE}/api/load/export-combinations?jobId=${encodeURIComponent(jobId)}`, { method: "POST", headers, body: JSON.stringify({ combinations: combos, scope: 'load' }), signal: controller.signal }, LONG_REQUEST_TIMEOUT_MS);
       const data = await res.json();
       if (data.ok) {
         const fileCountMsg = data.summary?.fileCount ? ` (${data.summary.fileCount.high} high, ${data.summary.fileCount.low} low)` : "";
@@ -319,11 +289,24 @@ return (
             <h1 className="text-2xl font-bold text-ink font-heading">Load Annotations</h1>
             <p className="text-sm text-muted mt-1">Upload annotation files, check library availability, and generate combination images.</p>
           </div>
-          {phase !== "upload" && (
-            <button onClick={handleReset} className="px-4 py-2 rounded-xl border border-border bg-white text-sm font-semibold text-ink hover:bg-surface transition-colors">
-              <RefreshCw size={16} className="inline mr-1.5" /> New Upload
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <ExportLocationSelector
+              ref={exportLocationRef}
+              scope="load"
+              autoOpen
+              onConfigLoaded={(p, configured) => { setExportsPath(p ?? ""); setExportsPathConfigured(configured); }}
+              onPathSaved={(p, configured) => {
+                setExportsPath(p ?? "");
+                setExportsPathConfigured(configured);
+                showToast(configured && p ? "success" : "info", configured && p ? `Export location saved: ${p}` : "Using the default export folder.");
+              }}
+            />
+            {phase !== "upload" && (
+              <button onClick={handleReset} className="px-4 py-2 rounded-xl border border-border bg-white text-sm font-semibold text-ink hover:bg-surface transition-colors">
+                <RefreshCw size={16} className="inline mr-1.5" /> New Upload
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -527,22 +510,6 @@ return (
             <div className="p-4 border-t border-border">
               <h3 className="text-sm font-semibold text-ink">{showHighRes.combo.layoutName}</h3>
               <p className="text-xs text-muted font-mono">{showHighRes.combo.layoutId}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Exports path modal */}
-      {showExportsPathModal && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
-          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl border border-border p-6">
-            <button onClick={() => setShowExportsPathModal(false)} className="absolute top-4 right-4 p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface transition-colors"><X size={18} /></button>
-            <h3 className="text-lg font-semibold text-ink mb-1">Export Path</h3>
-            <p className="text-xs text-muted mb-4">Choose where to save generated images (leave empty for default exports folder).</p>
-            <input type="text" value={exportsPath} onChange={(e) => setExportsPath(e.target.value)} placeholder="e.g. C:\\MyXrayExports or leave empty" className="w-full px-4 py-2.5 rounded-xl border border-border bg-surface text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent/50 mb-4" />
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => saveExportsPath(true)} disabled={savingExportsPath} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50">{savingExportsPath ? <Loader2 size={16} className="animate-spin" /> : "Use Default"}</button>
-              <button onClick={() => saveExportsPath(false)} disabled={savingExportsPath || !exportsPath} className="px-4 py-2 rounded-xl bg-accent text-white text-sm font-semibold hover:bg-accent/90 transition-colors disabled:opacity-50">{savingExportsPath ? <Loader2 size={16} className="animate-spin" /> : "Save Path"}</button>
             </div>
           </div>
         </div>

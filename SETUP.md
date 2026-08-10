@@ -10,46 +10,78 @@ This repository contains a full-stack application for generating and reviewing s
 
 ---
 
-## Prerequisites
+## Installation
 
-Install the following before proceeding:
+The recommended way to run the application is with Docker Compose.
 
-| Tool | Required Version | Purpose |
-|------|-----------------|---------|
-| Docker Desktop | Latest stable | Run the application with Docker Compose (primary method) |
-| Git | Any recent version | Clone the repository |
-| Python | 3.8+ | Backend image-processing scripts |
-| pip | Comes with Python | Install Python packages |
-| Node.js | 20+ | (Optional) Run the application without Docker |
-| npm | Comes with Node.js 20+ | (Optional) Install JavaScript dependencies |
-
-### Python packages
-
-The backend spawns Python scripts that process raw pixel data. The required packages are listed in `backend/requirements.txt`:
-
-- `numpy >= 1.24` — array processing
-- `scipy >= 1.10` — connected-component labeling and morphology
-- `opencv-python >= 4.8` — polygon simplification and contour operations
-- `Pillow >= 10.0` — image conversion (`.npz` → `.png`)
-
----
-
-## Step 1: Clone the repository
+### Step 1: Clone the repository
 
 ```bash
 git clone <your-repository-url>
 cd xray
 ```
 
+### Step 2: Run with Docker
+
+From the repository root:
+
+```bash
+docker compose up --build
+```
+
+Once the containers are healthy:
+
+- **Frontend:** http://localhost:5174
+- **Backend:** http://localhost:8080
+
+To stop:
+
+```bash
+docker compose down
+```
+
+### Step 3: Verify the setup
+
+1. Open http://localhost:5174 in your browser.
+2. Confirm the frontend loads without errors.
+3. Confirm the backend health endpoint responds:
+
+```bash
+curl http://localhost:8080/api/items/categorized
+```
+
 ---
 
-## Step 2: Environment configuration
+## Versions used
 
-The backend reads settings from `.env` in the project root. Copy the example file and edit it:
+These are the versions currently used in this project. You do not need to install them manually when using Docker.
+
+| Component | Version / Constraint |
+|-----------|---------------------|
+| Docker image base | `node:20-alpine` |
+| Node.js | 20 |
+| React | ^18.3.1 |
+| TypeScript | ^5.9.3 |
+| Vite | ^5.4.20 |
+| Tailwind CSS | ^3.4.17 |
+| Express | ^4.22.2 |
+| Python | 3.11 (container) |
+| numpy | >= 1.24 |
+| scipy | >= 1.10 |
+| opencv-python | >= 4.8 |
+| Pillow | >= 10.0 |
+
+---
+
+## Environment configuration (optional)
+
+The application works out of the box with built-in defaults. If you want to customize paths or limits, copy the example environment file:
 
 ```bash
 cp .env.example .env
 ```
+
+Then edit `.env` in the project root.
 
 ### What you need to set
 
@@ -71,7 +103,7 @@ Most variables have safe built-in defaults. You only need to change them if you 
 | `MAX_FILES_PER_UPLOAD` | `5000` | Only if you need to raise/lower the max files per request for `/api/upload` |
 | `UPLOAD_TIMEOUT_MS` | `1800000` (30 min) | Only if you need a longer/shorter timeout for `/api/upload` |
 
-> **Note for Windows users:** Use absolute Windows paths (e.g. `B:\xray_data`) and escape backslashes in `.env` (e.g. `B:\\xray_data`).
+> **Note for Windows users:** Use absolute Windows paths (e.g. `B:\\xray_data`) and escape backslashes in `.env` (e.g. `B:\\\\xray_data`).
 
 ### Storage paths
 
@@ -90,18 +122,17 @@ The backend enforces upload limits to protect against resource exhaustion. These
 - **UPLOAD_TIMEOUT_MS** — Request timeout for `/api/upload` (default: 30 minutes). If exceeded, the server returns a clean `408` error instead of crashing.
 
 **For the current frontend upload flow**, files are sent to `/api/process-raw-files` in pages of 100. That endpoint uses a separate hardcoded limit of 5,000 files per request and does not use the timeout setting above. So for typical use, the defaults are sufficient and these settings only need changing if you are using the `/api/upload` endpoint directly.
+From the repository root:
 
 ---
 
-## Step 3: Install dependencies
+## Run without Docker (optional)
 
-### Docker (primary)
+If Docker is not available, you can run the application locally with Node.js.
 
-If you have Docker Desktop installed, skip manual dependency installation. Docker Compose will build images with all required dependencies pre-installed, including Python and all Python packages.
+### Node.js
 
-### Node.js (optional, for local development without Docker)
-
-Install JavaScript dependencies for all three `package.json` files:
+Install JavaScript dependencies for all `package.json` files:
 
 ```bash
 npm install --no-audit --no-fund
@@ -123,44 +154,9 @@ Or equivalently:
 cd backend && pip install -r requirements.txt
 ```
 
----
-
-## Step 4: Run the application
-
-### Docker Compose (primary)
+### Start the application
 
 From the repository root:
-
-```bash
-docker compose up --build
-```
-
-Once the containers are healthy:
-
-- **Frontend:** http://localhost:5174
-- **Backend:** http://localhost:8080
-
-To stop:
-
-```bash
-docker compose down
-```
-
-#### Windows note
-
-If `docker compose up --build` fails due to the Docker BuildKit bug on Windows, use the fallback bootstrap script:
-
-```bat
-bootstrap.bat
-```
-
-This script attempts Docker first, then falls back to the Node.js setup automatically.
-
----
-
-### Node.js (optional, local development)
-
-If Docker is not available, you can run both services directly with Node.js from the repository root:
 
 ```bash
 npm run dev
@@ -187,38 +183,15 @@ cd frontend
 npm run dev
 ```
 
----
+#### Windows fallback
 
-## Step 5: Verify the setup
+If `docker compose up --build` fails due to the Docker BuildKit bug on Windows, use the fallback bootstrap script:
 
-1. Open http://localhost:5174 in your browser.
-2. Confirm the frontend loads without errors.
-3. Confirm the backend health endpoint responds:
-
-```bash
-curl http://localhost:8080/api/items/categorized
+```bat
+bootstrap.bat
 ```
 
----
-
-## Key versions and tools used
-
-| Component | Version / Constraint |
-|-----------|---------------------|
-| Docker Desktop | Latest stable |
-| Node.js | 20+ (optional, for local development without Docker) |
-| npm | Comes with Node.js 20+ (optional) |
-| React | ^18.3.1 |
-| TypeScript | ^5.9.3 |
-| Vite | ^5.4.20 |
-| Tailwind CSS | ^3.4.17 |
-| Express | ^4.22.2 |
-| Python | 3.8+ (included in Docker image) |
-| numpy | >= 1.24 |
-| scipy | >= 1.10 |
-| opencv-python | >= 4.8 |
-| Pillow | >= 10.0 |
-| Docker image base | node:20-alpine |
+This script attempts Docker first, then falls back to the Node.js setup automatically.
 
 ---
 

@@ -106,11 +106,10 @@ function layoutFromAnnotation(a) {
   const threats = Array.isArray(objects.threats) ? objects.threats : [];
   const nonThreats = Array.isArray(objects['non-threats']) ? objects['non-threats'] : [];
 
-  const names = [...threats, ...nonThreats].map((o) => o && o.subcategory).filter(Boolean).map(titleCase);
   const name =
     (a.layoutName && String(a.layoutName).trim().length > 0)
       ? a.layoutName
-      : `bag containing ${names.join(', ')}`.replace(/\s*,\s*$/, '');
+      : (a.layoutId || a.id);
 
   return {
     id: a.layoutId || a.id,
