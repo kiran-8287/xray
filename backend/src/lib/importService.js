@@ -282,7 +282,7 @@ function itemsFromCatalog(category, parsed) {
 }
 
 // ---------------------------------------------------------------------------
-// Pixel file sources (server-path scan OR browser multipart uploads)
+// Pixel file sources (browser multipart uploads)
 // ---------------------------------------------------------------------------
 
 /**
@@ -438,6 +438,18 @@ function buildAvailableSet(existingItems, parsed) {
 // Analysis (pre-flight / safety check)
 // ---------------------------------------------------------------------------
 
+/** Trim large arrays for the analysis report to keep the payload small. */
+function trimReportArray(arr, maxItems = 100) {
+  if (!Array.isArray(arr)) return arr;
+  if (arr.length <= maxItems) return arr;
+  return {
+    _trimmed: true,
+    _total: arr.length,
+    _sample: arr.slice(0, maxItems),
+    _message: `Showing ${maxItems} of ${arr.length} items. Full list available in backend logs.`,
+  };
+}
+
 export async function analyzeImport({ pixelFiles = [], jsonFiles = [], progress } = {}) {
   const emit = (o) => { if (typeof progress === 'function') progress(o); };
   emit({ stage: 'analyze', message: 'Parsing JSON sources…', done: 0 });
@@ -520,25 +532,25 @@ export async function analyzeImport({ pixelFiles = [], jsonFiles = [], progress 
     ok: true,
     pixel: {
       total: pixelFiles.length,
-      newFiles: pixelNew,
-      duplicateFiles: pixelDup,
+      newFiles: trimReportArray(pixelNew),
+      duplicateFiles: trimReportArray(pixelDup),
       noLowEnergy,
       highCount: parsed.highBases.size,
     },
     json: parsed.jsonStats,
     items: {
-      toAdd: itemsToAdd,
-      duplicates: itemsDuplicate,
-      unclassified,
+      toAdd: trimReportArray(itemsToAdd),
+      duplicates: trimReportArray(itemsDuplicate),
+      unclassified: trimReportArray(unclassified),
     },
     layouts: {
       total: parsed.layouts.length,
-      toAdd: layoutsToAdd,
+      toAdd: trimReportArray(layoutsToAdd),
       duplicates: layoutsDuplicate,
       collisionRenames,
-      missingObjects,
+      missingObjects: trimReportArray(missingObjects, 50),
     },
-    itemDerivation: parsed.itemDerivation || { conflicts: 0, reconciled: [] },
+    itemDerivation: parsed.itemDerivation || { conflicts: 0, reconciled: trimReportArray([]) },
     stats: {
       pixelNew: pixelNew.length,
       pixelDuplicate: pixelDup.length,
@@ -623,7 +635,11 @@ async function generateValidRegionsForNewBags(addedItems, progress) {
 
   let done = 0;
   const failed = [...failedMissing];
-  const concurrency = 2;
+  // Use a reasonable concurrency for valid region generation.
+  // BATCH_FILES_PER_PROCESS already batches individual files internally,
+  // so we can safely run multiple batches in parallel without overwhelming
+  // the system. This significantly speeds up large imports (e.g. 25k bags).
+  const concurrency = Math.min(4, Math.max(2, tasks.length > 100 ? 4 : tasks.length > 10 ? 3 : 2));
   const chunks = [];
   for (let i = 0; i < tasks.length; i += BATCH_FILES_PER_PROCESS) {
     chunks.push(tasks.slice(i, i + BATCH_FILES_PER_PROCESS));
