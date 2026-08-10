@@ -282,7 +282,7 @@ function itemsFromCatalog(category, parsed) {
 }
 
 // ---------------------------------------------------------------------------
-// Pixel file sources (server-path scan OR browser multipart uploads)
+// Pixel file sources (browser multipart uploads)
 // ---------------------------------------------------------------------------
 
 /**

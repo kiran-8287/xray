@@ -175,10 +175,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 export default function LoadPage() {
   /* ---- Input mode & file selection ---- */
-  const [mode, setMode] = useState<"upload" | "server-path">("upload");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [serverPixelDataPath, setServerPixelDataPath] = useState("");
-  const [serverJsonPath, setServerJsonPath] = useState("");
 
   /* ---- Analysis & gating ---- */
   const [analyzing, setAnalyzing] = useState(false);
@@ -244,12 +241,8 @@ export default function LoadPage() {
     setSummary(null);
     setRunError(null);
 
-    if (mode === "upload" && selectedFiles.length === 0) {
+    if (selectedFiles.length === 0) {
       setAnalyzeError("Please select a folder containing .npz pixel data and .json annotation files.");
-      return;
-    }
-    if (mode === "server-path" && !serverPixelDataPath.trim()) {
-      setAnalyzeError("A pixel-data path is required for server-path mode.");
       return;
     }
 
@@ -260,17 +253,10 @@ export default function LoadPage() {
     try {
       const body = new FormData();
       body.append("runId", newRunId);
-
-      if (mode === "server-path") {
-        body.append("source", "server-path");
-        body.append("pixelDataPath", serverPixelDataPath.trim());
-        if (serverJsonPath.trim()) body.append("jsonPath", serverJsonPath.trim());
-      } else {
-        const b = bucketFiles(selectedFiles);
-        for (const f of b.high) body.append("pixelFiles", f, f.name);
-        for (const f of b.low) body.append("pixelFilesLow", f, f.name);
-        for (const f of b.json) body.append("jsonFiles", f, f.name);
-      }
+      const b = bucketFiles(selectedFiles);
+      for (const f of b.high) body.append("pixelFiles", f, f.name);
+      for (const f of b.low) body.append("pixelFilesLow", f, f.name);
+      for (const f of b.json) body.append("jsonFiles", f, f.name);
 
       setProgress({ stage: "analyze", message: "Uploading & analyzing inputs…", done: 0, total: 1 });
 
@@ -362,11 +348,6 @@ export default function LoadPage() {
           categoryOverrides: overrides,
         },
       };
-      if (mode === "server-path") {
-        payload.source = "server-path";
-        payload.pixelDataPath = serverPixelDataPath.trim();
-        if (serverJsonPath.trim()) payload.jsonPath = serverJsonPath.trim();
-      }
 
       const res = await fetchWithTimeout(`${API_BASE}/api/import/run`, {
         method: "POST",
@@ -539,127 +520,74 @@ export default function LoadPage() {
         </button>
       </div>
 
-      {/* Step 1 — choose input mode */}
-      <div className="mb-4 inline-flex rounded-xl border border-border bg-panel p-1 gap-1">
-        {([["upload", "Upload", Upload], ["server-path", "Server Path", FolderOpen]] as const).map(([val, label, Icon]) => (
-          <button
-            key={val}
-            onClick={() => { setMode(val); setReport(null); setAnalyzeError(null); }}
-            disabled={analyzing || running}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${
-              mode === val ? "bg-accent text-white shadow-sm" : "text-muted hover:text-ink hover:bg-surface"
-            }`}
-          >
-            <Icon size={15} />
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Step 2 — inputs */}
+      {/* Step 1 — inputs */}
       <div className="rounded-2xl border border-border bg-panel p-5 shadow-sm mb-6">
-        {mode === "upload" ? (
-          <>
-            <label
-              className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-border bg-surface p-10 text-center cursor-pointer hover:border-accent transition-colors"
-            >
-              <FolderOpen size={36} className="text-muted" />
-              <span className="text-lg font-semibold text-ink">Select folder</span>
-              <span className="text-sm text-muted max-w-md">
-                                Pick the folder with <strong>pixel-data</strong>, <strong>catalog</strong> and <strong>annotations</strong> inside.
-              </span>
-              <input
-                type="file"
-                multiple
-                {...({ webkitdirectory: "", directory: "" } as any)}
-                className="hidden"
-                onChange={(e) => { setSelectedFiles(Array.from(e.target.files || [])); invalidateAnalysis(); }}
-              />
-              <span className="mt-1 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-accent text-white text-sm font-semibold">
-                <Upload size={15} /> Select
-              </span>
-            </label>
+        <label
+          className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-border bg-surface p-10 text-center cursor-pointer hover:border-accent transition-colors"
+        >
+          <FolderOpen size={36} className="text-muted" />
+          <span className="text-lg font-semibold text-ink">Select folder</span>
+          <span className="text-sm text-muted max-w-md">
+                            Pick the folder with <strong>pixel-data</strong>, <strong>catalog</strong> and <strong>annotations</strong> inside.
+          </span>
+          <input
+            type="file"
+            multiple
+            {...({ webkitdirectory: "", directory: "" } as any)}
+            className="hidden"
+            onChange={(e) => { setSelectedFiles(Array.from(e.target.files || [])); invalidateAnalysis(); }}
+          />
+          <span className="mt-1 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-accent text-white text-sm font-semibold">
+            <Upload size={15} /> Select
+          </span>
+        </label>
 
-            <div className="mt-4 rounded-xl border border-border bg-white p-4">
-              <p className="text-[10px] uppercase tracking-wider text-muted mb-2">Expected structure:</p>
-              <pre className="text-[11px] text-muted font-mono leading-relaxed whitespace-pre">{`{pixel-data}/highenergy/*.npz
+        <div className="mt-4 rounded-xl border border-border bg-white p-4">
+          <p className="text-[10px] uppercase tracking-wider text-muted mb-2">Expected structure:</p>
+          <pre className="text-[11px] text-muted font-mono leading-relaxed whitespace-pre">{`{pixel-data}/highenergy/*.npz
 {pixel-data}/lowenergy/*.npz
 {catalog}/bags_1.json, threats_1.json, non_threats_1.json
 {annotations}/*.json`}</pre>
-              <p className="text-[11px] text-muted mt-2">
-                .npz, catalog .json, annotation .json and layout .json files are split automatically. Just pick the top folder.
-              </p>
-            </div>
+          <p className="text-[11px] text-muted mt-2">
+            .npz, catalog .json, annotation .json and layout .json files are split automatically. Just pick the top folder.
+          </p>
+        </div>
 
-            {wheel.r > 0 || wheel.l > 0 || wheel.c > 0 || wheel.a > 0 || wheel.o > 0 ? (
-              <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-                <div className="rounded-xl border border-border bg-white p-3 text-sm">
-                  <span className="font-semibold text-ink">{wheel.r}</span>
-                  <span className="text-muted ml-1">high-energy .npz</span>
-                </div>
-                <div className="rounded-xl border border-border bg-white p-3 text-sm">
-                  <span className="font-semibold text-ink">{wheel.l}</span>
-                  <span className="text-muted ml-1">low-energy .npz</span>
-                </div>
-                <div className="rounded-xl border border-border bg-white p-3 text-sm">
-                  <span className="font-semibold text-ink">{wheel.c}</span>
-                  <span className="text-muted ml-1">catalog .json</span>
-                </div>
-                <div className="rounded-xl border border-border bg-white p-3 text-sm">
-                  <span className="font-semibold text-ink">{wheel.a}</span>
-                  <span className="text-muted ml-1">annotation .json</span>
-                </div>
-                <div className="rounded-xl border border-border bg-white p-3 text-sm">
-                  <span className="font-semibold text-ink">{wheel.o}</span>
-                  <span className="text-muted ml-1">layout/other .json</span>
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs text-muted mt-3">
-                If your browser doesn't support folder selection, select the files individually — the page separates
-                <span className="font-mono"> lowenergy/</span> .npz, other .npz, catalog .json, annotation .json,
-                and layout .json automatically.
-              </p>
-            )}
-          </>
-        ) : (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-[10px] font-semibold text-muted uppercase tracking-wider mb-1.5">
-                Pixel data path
-              </label>
-              <input
-                type="text"
-                value={serverPixelDataPath}
-                onChange={(e) => { setServerPixelDataPath(e.target.value); invalidateAnalysis(); }}
-                disabled={analyzing || running}
-                placeholder="e.g. C:\xray_portable\pixel_data"
-                className="w-full px-4 py-2.5 rounded-lg border border-border bg-white text-sm text-ink font-mono focus:outline-none focus:border-accent"
-              />
+        {wheel.r > 0 || wheel.l > 0 || wheel.c > 0 || wheel.a > 0 || wheel.o > 0 ? (
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+            <div className="rounded-xl border border-border bg-white p-3 text-sm">
+              <span className="font-semibold text-ink">{wheel.r}</span>
+              <span className="text-muted ml-1">high-energy .npz</span>
             </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-muted uppercase tracking-wider mb-1.5">
-                JSON path (optional)
-              </label>
-              <input
-                type="text"
-                value={serverJsonPath}
-                onChange={(e) => { setServerJsonPath(e.target.value); invalidateAnalysis(); }}
-                disabled={analyzing || running}
-                placeholder="e.g. C:\xray_portable\annotations"
-                className="w-full px-4 py-2.5 rounded-lg border border-border bg-white text-sm text-ink font-mono focus:outline-none focus:border-accent"
-              />
+            <div className="rounded-xl border border-border bg-white p-3 text-sm">
+              <span className="font-semibold text-ink">{wheel.l}</span>
+              <span className="text-muted ml-1">low-energy .npz</span>
             </div>
-            <p className="text-xs text-muted">
-              Use this when data is already on the server. It scans for .npz and .json files.
-            </p>
+            <div className="rounded-xl border border-border bg-white p-3 text-sm">
+              <span className="font-semibold text-ink">{wheel.c}</span>
+              <span className="text-muted ml-1">catalog .json</span>
+            </div>
+            <div className="rounded-xl border border-border bg-white p-3 text-sm">
+              <span className="font-semibold text-ink">{wheel.a}</span>
+              <span className="text-muted ml-1">annotation .json</span>
+            </div>
+            <div className="rounded-xl border border-border bg-white p-3 text-sm">
+              <span className="font-semibold text-ink">{wheel.o}</span>
+              <span className="text-muted ml-1">layout/other .json</span>
+            </div>
           </div>
+        ) : (
+          <p className="text-xs text-muted mt-3">
+            If your browser doesn't support folder selection, select the files individually — the page separates
+            <span className="font-mono"> lowenergy/</span> .npz, other .npz, catalog .json, annotation .json,
+            and layout .json automatically.
+          </p>
         )}
 
         <div className="mt-5 flex items-center gap-3">
           <button
             onClick={handleAnalyze}
-            disabled={analyzing || running || (mode === "upload" && selectedFiles.length === 0)}
+            disabled={analyzing || running || selectedFiles.length === 0}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:bg-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {analyzing ? <Loader2 size={16} className="animate-spin" /> : <Play size={15} />}

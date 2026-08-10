@@ -974,44 +974,29 @@ app.get('/api/user-config/has-exports-path', async (_req, res) => {
 // Import / "Save Historic Data" endpoints
 // ============================================================================
 
-// Analyze uploaded (or server-path) pixel data + annotation/catalog folder and
+// Analyze uploaded pixel data + annotation/catalog folder and
 // return a pre-flight report: duplicates, missing objects, unclassified files.
 app.post('/api/import/analyze', requireAuth, uploadImport.any(), async (req, res) => {
   try {
-    let pixelFiles = [];
-    let jsonFiles = [];
+    const files = Array.isArray(req.files) ? req.files : [];
+    const high = files.filter((f) => f.fieldname === 'pixelFiles');
+    const low = files.filter((f) => f.fieldname === 'pixelFilesLow');
+    const json = files.filter((f) => f.fieldname === 'jsonFiles');
+    const pixelFiles = [
+      ...high.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'highenergy', absPath: f.path, originalName: f.originalname })),
+      ...low.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'lowenergy', absPath: f.path, originalName: f.originalname })),
+    ];
+    const jsonFiles = json.map((f) => ({ filename: f.originalname, absPath: f.path }));
 
-    const body = req.body || {};
-    if (body.source === 'server-path') {
-      if (!body.pixelDataPath || typeof body.pixelDataPath !== 'string') {
-        return res.status(400).json({ ok: false, error: 'pixelDataPath is required for server-path mode' });
-      }
-      pixelFiles = await scanPixelDir(body.pixelDataPath);
-      jsonFiles = await scanJsonDir(body.jsonPath || body.pixelDataPath);
-      if (pixelFiles.length === 0 && jsonFiles.length === 0) {
-        return res.status(400).json({ ok: false, error: `No .npz / .json files found under ${body.pixelDataPath}` });
-      }
-    } else {
-      const files = Array.isArray(req.files) ? req.files : [];
-      const high = files.filter((f) => f.fieldname === 'pixelFiles');
-      const low = files.filter((f) => f.fieldname === 'pixelFilesLow');
-      const json = files.filter((f) => f.fieldname === 'jsonFiles');
-      pixelFiles = [
-        ...high.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'highenergy', absPath: f.path, originalName: f.originalname })),
-        ...low.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'lowenergy', absPath: f.path, originalName: f.originalname })),
-      ];
-      jsonFiles = json.map((f) => ({ filename: f.originalname, absPath: f.path }));
-
-      if (pixelFiles.length === 0 && jsonFiles.length === 0) {
-        return res.status(400).json({ ok: false, error: 'No pixel data or JSON files provided' });
-      }
+    if (pixelFiles.length === 0 && jsonFiles.length === 0) {
+      return res.status(400).json({ ok: false, error: 'No pixel data or JSON files provided' });
     }
 
     const report = await analyzeImport({ pixelFiles, jsonFiles });
+    const body = req.body || {};
     res.json({
       ok: report.ok,
       runId: body.runId || null,
-      mode: body.source === 'server-path' ? 'server-path' : 'upload',
       ...report,
     });
   } catch (err) {
@@ -1033,22 +1018,10 @@ app.post('/api/import/run', requireAuth, async (req, res) => {
     const cancelState = { cancelled: false };
     importCancellations.set(runId, cancelState);
 
-    let pixelFiles = [];
-    let jsonFiles = [];
-
-    if (body.source === 'server-path') {
-      if (!body.pixelDataPath || typeof body.pixelDataPath !== 'string') {
-        throw new Error('pixelDataPath is required for server-path mode');
-      }
-      res.write(JSON.stringify({ stage: 'start', message: 'Scanning server folders…' }) + '\n');
-      pixelFiles = await scanPixelDir(body.pixelDataPath);
-      jsonFiles = await scanJsonDir(body.jsonPath || body.pixelDataPath);
-    } else {
-      stagedDir = path.join(tempDir, 'import', String(body.stagedId || runId));
-      res.write(JSON.stringify({ stage: 'start', message: 'Reading staged upload…' }) + '\n');
-      pixelFiles = await scanPixelDir(stagedDir);
-      jsonFiles = await scanJsonDir(path.join(stagedDir, 'json'));
-    }
+    stagedDir = path.join(tempDir, 'import', String(body.stagedId || runId));
+    res.write(JSON.stringify({ stage: 'start', message: 'Reading staged upload…' }) + '\n');
+    const pixelFiles = await scanPixelDir(stagedDir);
+    const jsonFiles = await scanJsonDir(path.join(stagedDir, 'json'));
 
     const options = (body.options && typeof body.options === 'object') ? body.options : {};
     await runImport({
