@@ -281,6 +281,7 @@ export default function LoadPage() {
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       let finalReport: AnalyzeReport | null = null;
+      let buffer = ''; // Buffer for incomplete lines across chunks
 
       if (!reader) {
         throw new Error("No response stream available");
@@ -290,10 +291,22 @@ export default function LoadPage() {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n').filter(Boolean);
+        // Add chunk to buffer (handles incomplete lines split across chunks)
+        buffer += decoder.decode(value, { stream: true });
+        
+        // Split by newlines
+        const lines = buffer.split('\n');
+        
+        // Keep last element if buffer doesn't end with newline (incomplete line)
+        if (!buffer.endsWith('\n')) {
+          buffer = lines.pop() || '';
+        } else {
+          buffer = '';
+        }
 
         for (const line of lines) {
+          if (!line.trim()) continue; // Skip empty lines
+          
           try {
             const data = JSON.parse(line);
             if (data.stage === 'start') {
@@ -308,6 +321,18 @@ export default function LoadPage() {
           } catch (e) {
             // Ignore parse errors for partial chunks
           }
+        }
+      }
+      
+      // Try to parse any remaining data in buffer
+      if (buffer.trim()) {
+        try {
+          const data = JSON.parse(buffer);
+          if (data.stage === 'done' && data.report) {
+            finalReport = data.report;
+          }
+        } catch (e) {
+          // Ignore
         }
       }
 
@@ -354,7 +379,15 @@ export default function LoadPage() {
       } else if (r.items.toAdd.length === 0 && r.layouts.toAdd.length === 0) {
         showToast("info", "Everything in the upload already exists — nothing new to import.");
       } else {
-        showToast("success", "Analysis complete — no blocking issues.");
+        // Show warning for very large imports
+        const totalNew = r.items.toAdd.length + r.layouts.toAdd.length;
+        if (totalNew > 50000) {
+          showToast("warning", 
+            `Large import: ${totalNew.toLocaleString()} new items/layouts. This may take 30+ minutes. ` +
+            `Please keep this page open and don't navigate away. Consider importing in smaller batches if you experience issues.`);
+        } else {
+          showToast("success", "Analysis complete — no blocking issues.");
+        }
       }
     } catch (err) {
       const m = err instanceof Error ? err.message : "Unknown error";
@@ -390,12 +423,20 @@ export default function LoadPage() {
         },
       };
 
+      // Calculate timeout based on import size (very large imports need more time)
+      const totalToAdd = (report.layouts.toAdd?.length || 0) + (report.items.toAdd?.length || 0);
+      const importTimeoutMs = totalToAdd > 50000 ? 60 * 60 * 1000 : // 60 min for 50k+ items
+                              totalToAdd > 10000 ? 30 * 60 * 1000 : // 30 min for 10k+ items
+                              LONG_REQUEST_TIMEOUT_MS; // 30 min default
+      
+      console.log(`[Import] Starting import of ${totalToAdd.toLocaleString()} items with ${importTimeoutMs / 1000 / 60}-minute timeout`);
+      
       const res = await fetchWithTimeout(`${API_BASE}/api/import/run`, {
         method: "POST",
         headers: apiHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
         signal: controller.signal,
-      }, LONG_REQUEST_TIMEOUT_MS, 0);
+      }, importTimeoutMs, 0);
 
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => null);
