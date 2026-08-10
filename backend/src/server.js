@@ -976,7 +976,11 @@ app.get('/api/user-config/has-exports-path', async (_req, res) => {
 
 // Analyze uploaded pixel data + annotation/catalog folder and
 // return a pre-flight report: duplicates, missing objects, unclassified files.
+// Streams NDJSON progress lines for real-time UI feedback.
 app.post('/api/import/analyze', requireAuth, uploadImport.any(), async (req, res) => {
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Transfer-Encoding', 'chunked');
+
   try {
     const files = Array.isArray(req.files) ? req.files : [];
     const high = files.filter((f) => f.fieldname === 'pixelFiles');
@@ -989,19 +993,30 @@ app.post('/api/import/analyze', requireAuth, uploadImport.any(), async (req, res
     const jsonFiles = json.map((f) => ({ filename: f.originalname, absPath: f.path }));
 
     if (pixelFiles.length === 0 && jsonFiles.length === 0) {
-      return res.status(400).json({ ok: false, error: 'No pixel data or JSON files provided' });
+      res.write(JSON.stringify({ stage: 'error', message: 'No pixel data or JSON files provided' }) + '\n');
+      res.end();
+      return;
     }
 
-    const report = await analyzeImport({ pixelFiles, jsonFiles });
     const body = req.body || {};
-    res.json({
-      ok: report.ok,
-      runId: body.runId || null,
-      ...report,
+    res.write(JSON.stringify({ stage: 'start', message: 'Starting analysis…', runId: body.runId || null }) + '\n');
+
+    const report = await analyzeImport({
+      pixelFiles,
+      jsonFiles,
+      progress: (o) => {
+        try { res.write(JSON.stringify(o) + '\n'); } catch { /* client gone */ }
+      },
     });
+
+    res.write(JSON.stringify({ stage: 'done', message: 'Analysis complete', report }) + '\n');
+    res.end();
   } catch (err) {
     console.error('[import/analyze] Error:', err);
-    res.status(500).json({ ok: false, error: String(err) });
+    try {
+      res.write(JSON.stringify({ stage: 'error', message: String(err) }) + '\n');
+      res.end();
+    } catch { /* response already ended */ }
   }
 });
 

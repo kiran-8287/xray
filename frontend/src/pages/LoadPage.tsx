@@ -98,6 +98,10 @@ const CATEGORY_OPTIONS = [
   { value: "non-threats", label: "Non-threats" },
 ];
 
+/** Warn when selected files exceed this count to prevent browser/memory issues */
+const LARGE_IMPORT_WARNING_THRESHOLD = 10_000;
+const LARGE_IMPORT_ERROR_THRESHOLD = 100_000;
+
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
@@ -185,6 +189,7 @@ export default function LoadPage() {
   const [skipMissing, setSkipMissing] = useState(false);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [massCategory, setMassCategory] = useState("");
+  const [importWarning, setImportWarning] = useState<string | null>(null);
 
   /* Apply the chosen mass-assign category to every unclassified pixel file. */
   const applyMassCategory = () => {
@@ -271,16 +276,52 @@ export default function LoadPage() {
         if (res.status === 401) throw new Error("Authentication required. Configure your API key first.");
         throw new Error(data?.error || `Analysis failed (HTTP ${res.status})`);
       }
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "Analysis failed");
+
+      // Read NDJSON stream for progress updates
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let finalReport: AnalyzeReport | null = null;
+
+      if (!reader) {
+        throw new Error("No response stream available");
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(Boolean);
+
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line);
+            if (data.stage === 'start') {
+              setProgress({ stage: 'analyze', message: data.message || 'Starting analysis…', done: 0, total: 1 });
+            } else if (data.stage === 'analyze') {
+              setProgress({ stage: 'analyze', message: data.message || 'Analyzing…', done: data.done || 0, total: 1 });
+            } else if (data.stage === 'done' && data.report) {
+              finalReport = data.report;
+            } else if (data.stage === 'error') {
+              throw new Error(data.message || 'Analysis failed');
+            }
+          } catch (e) {
+            // Ignore parse errors for partial chunks
+          }
+        }
+      }
+
+      if (!finalReport) {
+        throw new Error("No analysis report received");
+      }
 
       const r: AnalyzeReport = {
-        pixel: { total: 0, newFiles: [], duplicateFiles: [], noLowEnergy: [], highCount: 0, ...data.pixel },
-        json: data.json || { annotationsFiles: 0, savedLayoutsFiles: 0, catalogFiles: 0, unknownFiles: 0, errors: [] },
-        items: { toAdd: [], duplicates: [], unclassified: [], ...data.items },
-        layouts: { total: 0, toAdd: [], duplicates: 0, collisionRenames: 0, missingObjects: [], ...data.layouts },
-        itemDerivation: data.itemDerivation || { conflicts: 0, reconciled: [] },
-        stats: { subcategoryConflicts: 0, ...data.stats },
+        pixel: { total: 0, newFiles: [], duplicateFiles: [], noLowEnergy: [], highCount: 0, ...finalReport.pixel },
+        json: finalReport.json || { annotationsFiles: 0, savedLayoutsFiles: 0, catalogFiles: 0, unknownFiles: 0, errors: [] },
+        items: { toAdd: [], duplicates: [], unclassified: [], ...finalReport.items },
+        layouts: { total: 0, toAdd: [], duplicates: 0, collisionRenames: 0, missingObjects: [], ...finalReport.layouts },
+        itemDerivation: finalReport.itemDerivation || { conflicts: 0, reconciled: [] },
+        stats: { subcategoryConflicts: 0, ...finalReport.stats },
       };
       r.items.unclassified = (r.items.unclassified || []).map((u: any) => ({
         id: typeof u === "string" ? u : (u && u.id) || u,
@@ -458,6 +499,7 @@ export default function LoadPage() {
     setOverrides({});
     setMassCategory("");
     setSkipMissing(false);
+    setImportWarning(null);
     abortRef.current?.abort();
   };
 
@@ -535,7 +577,18 @@ export default function LoadPage() {
             multiple
             {...({ webkitdirectory: "", directory: "" } as any)}
             className="hidden"
-            onChange={(e) => { setSelectedFiles(Array.from(e.target.files || [])); invalidateAnalysis(); }}
+            onChange={(e) => {
+              const files = Array.from(e.target.files || []);
+              setSelectedFiles(files);
+              if (files.length >= LARGE_IMPORT_ERROR_THRESHOLD) {
+                setImportWarning(`⚠️ ${files.length.toLocaleString()} files selected exceeds safe limit (${LARGE_IMPORT_ERROR_THRESHOLD.toLocaleString()}). Please split into smaller batches.`);
+              } else if (files.length >= LARGE_IMPORT_WARNING_THRESHOLD) {
+                setImportWarning(`⚠️ ${files.length.toLocaleString()} files selected. Large imports may take longer and consume significant memory.`);
+              } else {
+                setImportWarning(null);
+              }
+              invalidateAnalysis();
+            }}
           />
           <span className="mt-1 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-accent text-white text-sm font-semibold">
             <Upload size={15} /> Select
@@ -584,10 +637,26 @@ export default function LoadPage() {
           </p>
         )}
 
+        {importWarning && (
+          <div className={`mt-4 rounded-xl border p-4 flex items-start gap-2 ${
+            selectedFiles.length >= LARGE_IMPORT_ERROR_THRESHOLD
+              ? "border-red-300 bg-red-50 text-red-800"
+              : "border-amber-300 bg-amber-50 text-amber-800"
+          }`}>
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium">{importWarning}</p>
+              {selectedFiles.length >= LARGE_IMPORT_ERROR_THRESHOLD && (
+                <p className="text-xs mt-1">The Analyze button is disabled. Please select fewer files or split your import into multiple batches.</p>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="mt-5 flex items-center gap-3">
           <button
             onClick={handleAnalyze}
-            disabled={analyzing || running || selectedFiles.length === 0}
+            disabled={analyzing || running || selectedFiles.length === 0 || selectedFiles.length >= LARGE_IMPORT_ERROR_THRESHOLD}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:bg-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {analyzing ? <Loader2 size={16} className="animate-spin" /> : <Play size={15} />}
