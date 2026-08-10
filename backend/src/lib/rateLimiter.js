@@ -8,7 +8,7 @@ class RateLimiter {
     this.windowMs = options.windowMs || 1000; // 1 second window
     this.maxRequests = options.maxRequests || 20; // Max 20 requests per window
     this.maxConcurrent = options.maxConcurrent || 10; // Max 10 concurrent requests
-    this.cleanupInterval = options.cleanupInterval || 60000; // Cleanup every 60 seconds
+    this.cleanupInterval = options.cleanupInterval || 300000; // Cleanup every 5 minutes
     
     // Store request timestamps per IP: { ip: [timestamp1, timestamp2, ...] }
     this.requests = new Map();
@@ -99,7 +99,11 @@ class RateLimiter {
         }
       }
       
-      console.log(`[RateLimiter] Cleanup: ${this.requests.size} IPs tracked`);
+      // Only log if there are active connections (reduce noise)
+      const totalConnections = Array.from(this.concurrent.values()).reduce((a, b) => a + b, 0);
+      if (this.requests.size > 0 || totalConnections > 0) {
+        console.log(`[RateLimiter] Status: ${this.requests.size} IPs tracked, ${totalConnections} active connections`);
+      }
     }, this.cleanupInterval);
   }
 

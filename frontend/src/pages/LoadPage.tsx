@@ -110,13 +110,37 @@ function apiHeaders(extra: Record<string, string> = {}): Record<string, string> 
 }
 
 /** Split the files selected from a folder/file picker into energy + json buckets. */
-function bucketFiles(files: File[]): {
+type FileBuckets = {
   high: File[];
   low: File[];
+  catalog: File[];
+  annotation: File[];
+  layout: File[];
+  other: File[];
   json: File[];
-} {
+};
+
+/** Match the backend detectJsonType() filename heuristics so the UI classifies
+ *  the catalog (bags/threats/non-threats) separately from annotations and
+ *  saved-layouts partitions. */
+function classifyJsonFileName(relPath: string): "catalog" | "annotation" | "savedLayouts" | "unknown" {
+  const n = String(relPath).toLowerCase();
+  const base = (n.split("/").pop() || "").split("\\").pop() || n;
+  if (/^(bags?)[_-]?\d*\.json$/.test(base)) return "catalog";
+  if (/^(threats?)[_-]?\d*\.json$/.test(base)) return "catalog";
+  if (/^non[_-]?threats?[_-]?\d*\.json$/.test(base)) return "catalog";
+  if (/^savedlayouts?[_-]?\d*\.json$/.test(base)) return "savedLayouts";
+  if (/^annotations?[_-]?\d*\.json$/.test(base)) return "annotation";
+  return "unknown";
+}
+
+function bucketFiles(files: File[]): FileBuckets {
   const high: File[] = [];
   const low: File[] = [];
+  const catalog: File[] = [];
+  const annotation: File[] = [];
+  const layout: File[] = [];
+  const other: File[] = [];
   const json: File[] = [];
   for (const f of files) {
     const rel = (f as any).webkitRelativePath || f.name;
@@ -126,9 +150,14 @@ function bucketFiles(files: File[]): {
       else high.push(f);
     } else if (lower.endsWith(".json")) {
       json.push(f);
+      const kind = classifyJsonFileName(rel);
+      if (kind === "catalog") catalog.push(f);
+      else if (kind === "annotation") annotation.push(f);
+      else if (kind === "savedLayouts") layout.push(f);
+      else other.push(f);
     }
   }
-  return { high, low, json };
+  return { high, low, catalog, annotation, layout, other, json };
 }
 
 /* ------------------------------------------------------------------ */
@@ -194,10 +223,16 @@ export default function LoadPage() {
     return () => { abortRef.current?.abort(); };
   }, []);
 
-  const wheel = useMemo(() => {
-    if (!selectedFiles.length) return { r: 0, l: 0, j: 0 };
+    const wheel = useMemo(() => {
+    if (!selectedFiles.length) return { r: 0, l: 0, c: 0, a: 0, o: 0 };
     const b = bucketFiles(selectedFiles);
-    return { r: b.high.length, l: b.low.length, j: b.json.length };
+    return {
+      r: b.high.length,
+      l: b.low.length,
+      c: b.catalog.length,
+      a: b.annotation.length,
+      o: b.layout.length + b.other.length,
+    };
   }, [selectedFiles]);
 
   /* ------------------------------------------------------------------ */
@@ -531,7 +566,7 @@ export default function LoadPage() {
               <FolderOpen size={36} className="text-muted" />
               <span className="text-lg font-semibold text-ink">Select folder</span>
               <span className="text-sm text-muted max-w-md">
-                Pick the folder with <strong>pixel-data</strong> and <strong>annotations</strong> inside.
+                                Pick the folder with <strong>pixel-data</strong>, <strong>catalog</strong> and <strong>annotations</strong> inside.
               </span>
               <input
                 type="file"
@@ -549,14 +584,15 @@ export default function LoadPage() {
               <p className="text-[10px] uppercase tracking-wider text-muted mb-2">Expected structure:</p>
               <pre className="text-[11px] text-muted font-mono leading-relaxed whitespace-pre">{`{pixel-data}/highenergy/*.npz
 {pixel-data}/lowenergy/*.npz
+{catalog}/bags_1.json, threats_1.json, non_threats_1.json
 {annotations}/*.json`}</pre>
               <p className="text-[11px] text-muted mt-2">
-                .npz and .json files are split automatically. Just pick the top folder.
+                .npz, catalog .json, annotation .json and layout .json files are split automatically. Just pick the top folder.
               </p>
             </div>
 
-            {wheel.r > 0 || wheel.l > 0 || wheel.j > 0 ? (
-              <div className="mt-3 grid grid-cols-3 gap-3">
+            {wheel.r > 0 || wheel.l > 0 || wheel.c > 0 || wheel.a > 0 || wheel.o > 0 ? (
+              <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
                 <div className="rounded-xl border border-border bg-white p-3 text-sm">
                   <span className="font-semibold text-ink">{wheel.r}</span>
                   <span className="text-muted ml-1">high-energy .npz</span>
@@ -566,14 +602,23 @@ export default function LoadPage() {
                   <span className="text-muted ml-1">low-energy .npz</span>
                 </div>
                 <div className="rounded-xl border border-border bg-white p-3 text-sm">
-                  <span className="font-semibold text-ink">{wheel.j}</span>
-                  <span className="text-muted ml-1">.json files</span>
+                  <span className="font-semibold text-ink">{wheel.c}</span>
+                  <span className="text-muted ml-1">catalog .json</span>
+                </div>
+                <div className="rounded-xl border border-border bg-white p-3 text-sm">
+                  <span className="font-semibold text-ink">{wheel.a}</span>
+                  <span className="text-muted ml-1">annotation .json</span>
+                </div>
+                <div className="rounded-xl border border-border bg-white p-3 text-sm">
+                  <span className="font-semibold text-ink">{wheel.o}</span>
+                  <span className="text-muted ml-1">layout/other .json</span>
                 </div>
               </div>
             ) : (
               <p className="text-xs text-muted mt-3">
                 If your browser doesn't support folder selection, select the files individually — the page separates
-                <span className="font-mono"> lowenergy/</span> .npz, other .npz, and .json automatically.
+                <span className="font-mono"> lowenergy/</span> .npz, other .npz, catalog .json, annotation .json,
+                and layout .json automatically.
               </p>
             )}
           </>
