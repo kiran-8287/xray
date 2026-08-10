@@ -6,37 +6,21 @@ Full-stack app for generating and reviewing synthetic X-ray bag scan data.
 - **Backend** — Express + file processing pipelines → http://localhost:8080
 - **Python scripts** — NumPy / SciPy / OpenCV / Pillow spawned by the backend for raw pixel processing
 
-## Prerequisites
+## Installation
 
-| Tool | Version | Notes |
-|------|---------|-------|
-| Git | any recent | clone the repo |
-| Docker Desktop | latest stable | primary way to run |
-| Python | 3.8+ | required by backend scripts |
-| pip | bundled | `pip install -r backend/requirements.txt` |
-| Node.js | 20+ | optional, local dev without Docker |
-| npm | bundled with Node 20+ | optional |
-
-## Quick start
+The fastest way to run the application is with Docker Compose.
 
 ```bash
 # 1. Clone and enter the repo
 git clone <your-repository-url>
 cd xray
 
-# 2. Configure environment (defaults are safe to keep)
-cp .env.example .env
-
-# 3. Run (recommended: Docker Compose)
+# 2. Start the application
 docker compose up --build
 # Stop with:  docker compose down
 ```
 
-Then open **http://localhost:5174**. Backend health check:
-
-```bash
-curl http://localhost:8080/api/items/categorized
-```
+Then open **http://localhost:5174**.
 
 ### Windows fallback
 
@@ -46,17 +30,64 @@ If `docker compose up --build` fails (known BuildKit bug on Windows), run:
 bootstrap.bat
 ```
 
-## Run without Docker (Node.js)
+## Versions used
+
+These are the versions currently used in this project. You do not need to install them manually when using Docker.
+
+| Component | Version |
+|-----------|---------|
+| Docker image base | `node:20-alpine` |
+| Node.js | 20 |
+| React | ^18.3.1 |
+| TypeScript | ^5.9.3 |
+| Vite | ^5.4.20 |
+| Tailwind CSS | ^3.4.17 |
+| Express | ^4.22.2 |
+| Python | 3.11 (container) |
+| numpy | >= 1.24 |
+| scipy | >= 1.10 |
+| opencv-python | >= 4.8 |
+| Pillow | >= 10.0 |
+
+## Run without Docker (optional)
+
+If Docker is not available, you can run the services directly.
 
 ```bash
+# Install JavaScript dependencies
 npm install --no-audit --no-fund
 npm install --prefix backend --no-audit --no-fund
 npm install --prefix frontend --no-audit --no-fund
-pip install -r backend/requirements.txt   # Python deps
-npm run dev                               # starts frontend + backend
+
+# Install Python dependencies
+pip install -r backend/requirements.txt
+
+# Start both services
+npm run dev
 ```
 
 Or run each separately: `cd backend && npm run dev` and `cd frontend && npm run dev`.
+
+## Environment configuration (optional)
+
+The application works out of the box with built-in defaults. If you want to customize paths or limits, copy the example environment file:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` in the project root. Common settings:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PORT` | `8080` | Backend port |
+| `API_KEY` | *(empty)* | Enable write-endpoint auth |
+| `LIBRARY_IMAGES_PATH` | `backend/data/library_images` | Image storage path |
+| `MAX_FILE_SIZE` | `104857600` (100 MB) | Upload limit |
+| `MAX_FILES_PER_UPLOAD` | `5000` | Files per request |
+| `UPLOAD_TIMEOUT_MS` | `1800000` (30 min) | Upload timeout |
+
+> **Note:** When running with Docker, you typically do not need to create `.env` unless you want to override defaults.
 
 ## Useful scripts
 
@@ -72,4 +103,4 @@ Or run each separately: `cd backend && npm run dev` and `cd frontend && npm run 
 - **Docker fails on Windows:** use `bootstrap.bat` or the Node.js option.
 - **Backend won't start:** check that port 8080 is free and `.env` exists in the root and `backend/`.
 
-See **[setup.md](setup.md)** for the full setup guide, environment variables, and upload limits.
+See **[SETUP.md](SETUP.md)** for the full setup guide, environment variables, and upload limits.
