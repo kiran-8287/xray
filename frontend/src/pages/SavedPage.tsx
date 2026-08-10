@@ -797,7 +797,7 @@ export default function SavedPage() {
       if (apiKey) headers['X-API-Key'] = apiKey;
 
       const res = await fetchWithTimeout(
-        `${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(layoutId)}&saveMode=individual&includeImages=${includeImages}`,
+        `${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(layoutId)}&saveMode=individual&includeImages=${includeImages}&scope=saved`,
         { headers }
       );
 
@@ -883,7 +883,7 @@ export default function SavedPage() {
         headers['X-API-Key'] = apiKey;
       }
 
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}&saveMode=selected&includeImages=${includeImages}`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}&saveMode=selected&includeImages=${includeImages}&scope=saved`, {
         headers,
         signal: controller.signal,
       }, 300000);
@@ -998,7 +998,7 @@ export default function SavedPage() {
         headers['X-API-Key'] = apiKey;
       }
       
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}&saveMode=all&includeImages=${includeImages}`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}&saveMode=all&includeImages=${includeImages}&scope=saved`, {
         headers,
         signal: controller.signal,
       }, 300000); // 5 minute timeout
@@ -1205,6 +1205,7 @@ export default function SavedPage() {
         </div>
         <div className="flex items-center gap-3">
           <ExportLocationSelector
+            scope="saved"
             autoOpen
             onPathSaved={(p, configured) => {
               showToast(

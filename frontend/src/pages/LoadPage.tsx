@@ -224,7 +224,7 @@ export default function LoadPage() {
       const apiKey = localStorage.getItem("apiKey");
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (apiKey) headers["X-API-Key"] = apiKey;
-      const res = await fetchWithTimeout(`${API_BASE}/api/load/export-combinations?jobId=${encodeURIComponent(jobId)}`, { method: "POST", headers, body: JSON.stringify({ combinations: combos }), signal: controller.signal }, LONG_REQUEST_TIMEOUT_MS);
+      const res = await fetchWithTimeout(`${API_BASE}/api/load/export-combinations?jobId=${encodeURIComponent(jobId)}`, { method: "POST", headers, body: JSON.stringify({ combinations: combos, scope: 'load' }), signal: controller.signal }, LONG_REQUEST_TIMEOUT_MS);
       const data = await res.json();
       if (data.ok) {
         const fileCountMsg = data.summary?.fileCount ? ` (${data.summary.fileCount.high} high, ${data.summary.fileCount.low} low)` : "";
@@ -292,6 +292,7 @@ return (
           <div className="flex items-center gap-2">
             <ExportLocationSelector
               ref={exportLocationRef}
+              scope="load"
               autoOpen
               onConfigLoaded={(p, configured) => { setExportsPath(p ?? ""); setExportsPathConfigured(configured); }}
               onPathSaved={(p, configured) => {

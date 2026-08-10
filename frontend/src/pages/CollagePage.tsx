@@ -898,7 +898,7 @@ export default function CollagePage() {
           <h2 className="text-3xl font-bold text-ink tracking-tight font-heading">Collage Images</h2>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <ExportLocationSelector />
+          <ExportLocationSelector scope="collage" />
           {(totalPending > 0 || isGenerating) && (
           <div className="flex items-center gap-3 flex-wrap">
             {/* Save this page button */}

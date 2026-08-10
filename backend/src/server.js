@@ -937,14 +937,21 @@ app.get('/api/storage/catalog', async (_req, res) => {
   }
 });
 
-// User configuration endpoints for export path settings
+// User configuration endpoints for export path settings.
+// Each page/destination has its OWN independent folder ("scope"): load, saved,
+// collage. Changing one never changes the others.
 app.get('/api/user-config/exports-path', async (_req, res) => {
   try {
-    const exportsPath = await getExportsPath();
-    const configured = await hasConfiguredExportsPath();
+    const scopes = ['load', 'saved', 'collage'];
+    const paths = {};
+    const configured = {};
+    for (const scope of scopes) {
+      paths[scope] = await getExportsPath(scope);
+      configured[scope] = await hasConfiguredExportsPath(scope);
+    }
     // `platform` tells the UI which path convention (Windows drive vs POSIX /) to
     // expect, so the client can show the right format instructions.
-    res.json({ ok: true, exportsPath, configured, platform: process.platform });
+    res.json({ ok: true, paths, configured, platform: process.platform });
   } catch (err) {
     console.error('[user-config/exports-path] Error:', err);
     res.status(500).json({ ok: false, error: String(err) });
@@ -953,16 +960,20 @@ app.get('/api/user-config/exports-path', async (_req, res) => {
 
 app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
   try {
-    const { exportsPath } = req.body || {};
+    const { scope, exportsPath } = req.body || {};
+    const requestedScope = typeof scope === 'string' && ['load', 'saved', 'collage'].includes(scope.trim().toLowerCase())
+      ? scope.trim().toLowerCase()
+      : 'saved';
 
     if (typeof exportsPath !== 'string') {
       return res.status(400).json({ ok: false, error: 'exportsPath is required and must be a string' });
     }
 
-    // Empty string (or whitespace-only) resets to the default exports folder.
+    // Empty string (or whitespace-only) resets that scope to its default folder.
     if (exportsPath.trim() === '') {
-      const userConfig = await setExportsPath(null);
-      return res.json({ ok: true, exportsPath: userConfig.exportsPath });
+      const userConfig = await setExportsPath(requestedScope, null);
+      const key = requestedScope === 'load' ? 'loadExportsPath' : requestedScope === 'collage' ? 'collageExportsPath' : 'savedExportsPath';
+      return res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key] });
     }
 
     const trimmed = exportsPath.trim().replace(/[\\/]+$/, '');
@@ -982,12 +993,17 @@ app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
 
     const resolvedPath = path.resolve(trimmed);
 
-    // Create the folder and standard subfolders up front so mistakes surface now.
+    // Create the expected subfolders up front so mistakes surface now.
     try {
-      await fs.mkdir(path.join(resolvedPath, 'high'), { recursive: true });
-      await fs.mkdir(path.join(resolvedPath, 'low'), { recursive: true });
-      await fs.mkdir(path.join(resolvedPath, 'annotations'), { recursive: true });
-      await fs.mkdir(path.join(resolvedPath, 'catalog'), { recursive: true });
+      if (requestedScope === 'collage') {
+        await fs.mkdir(path.join(resolvedPath, 'collage_images', 'high'), { recursive: true });
+        await fs.mkdir(path.join(resolvedPath, 'collage_images', 'low'), { recursive: true });
+      } else {
+        await fs.mkdir(path.join(resolvedPath, 'high'), { recursive: true });
+        await fs.mkdir(path.join(resolvedPath, 'low'), { recursive: true });
+        await fs.mkdir(path.join(resolvedPath, 'annotations'), { recursive: true });
+        await fs.mkdir(path.join(resolvedPath, 'catalog'), { recursive: true });
+      }
     } catch (err) {
       console.error('[user-config/exports-path] Failed to create folder:', err);
       return res.status(400).json({
@@ -996,18 +1012,22 @@ app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
       });
     }
 
-    const userConfig = await setExportsPath(resolvedPath);
-    res.json({ ok: true, exportsPath: userConfig.exportsPath });
+    const userConfig = await setExportsPath(requestedScope, resolvedPath);
+    const key = requestedScope === 'load' ? 'loadExportsPath' : requestedScope === 'collage' ? 'collageExportsPath' : 'savedExportsPath';
+    res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key] });
   } catch (err) {
     console.error('[user-config/exports-path] Error:', err);
     res.status(500).json({ ok: false, error: String(err) });
   }
 });
 
-app.get('/api/user-config/has-exports-path', async (_req, res) => {
+app.get('/api/user-config/has-exports-path', async (req, res) => {
   try {
-    const configured = await hasConfiguredExportsPath();
-    res.json({ ok: true, configured });
+    const scope = typeof req.query.scope === 'string' && ['load', 'saved', 'collage'].includes(req.query.scope.trim().toLowerCase())
+      ? req.query.scope.trim().toLowerCase()
+      : 'saved';
+    const configured = await hasConfiguredExportsPath(scope);
+    res.json({ ok: true, scope, configured });
   } catch (err) {
     console.error('[user-config/has-exports-path] Error:', err);
     res.status(500).json({ ok: false, error: String(err) });
@@ -1558,6 +1578,9 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
     const includeImages = typeof req.query.includeImages === 'string'
         ? req.query.includeImages.trim().toLowerCase() !== 'false'
         : true;
+    const scope = typeof req.query.scope === 'string' && ['load', 'saved', 'collage'].includes(req.query.scope.trim().toLowerCase())
+        ? req.query.scope.trim().toLowerCase()
+        : 'saved';
     const BATCH_THRESHOLD = 50; // Save Selected uses batch strategy when count exceeds this
     const useBatchAnnotations = saveMode === 'all';
     let cancelled = false;
@@ -1578,8 +1601,8 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             cancelled = exportCancellations.has(jobId);
         }
 
-        // Get user-configured exports path (or fall back to default)
-        const userExportsRoot = await getExportsPath();
+        // Get user-configured exports path for this scope (or fall back to default)
+        const userExportsRoot = await getExportsPath(scope);
         const exportsRoot = path.resolve(userExportsRoot);
         const exportsHighRoot = path.join(exportsRoot, 'high');
         const exportsLowRoot = path.join(exportsRoot, 'low');
@@ -1886,7 +1909,7 @@ app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
             return res.status(400).json({ ok: false, error: 'No combinations provided' });
         }
 
-        const userExportsRoot = await getExportsPath();
+        const userExportsRoot = await getExportsPath('load');
         const exportsRoot = path.resolve(userExportsRoot);
         const exportsHighRoot = path.join(exportsRoot, 'high');
         const exportsLowRoot = path.join(exportsRoot, 'low');
@@ -2960,6 +2983,14 @@ app.post("/api/render-and-save-collage", requireAuth, async (req, res) => {
             return res.status(400).json({ ok: false, error: "Missing name" });
         }
 
+        // Use the user-configured collage exports path (or fall back to default)
+        const collageRoot = await getExportsPath('collage');
+        const collageHighRoot = path.join(collageRoot, 'high');
+        const collageLowRoot = path.join(collageRoot, 'low');
+        
+        await fs.mkdir(collageHighRoot, { recursive: true });
+        await fs.mkdir(collageLowRoot, { recursive: true });
+
         const energyDir = energyType === "lowenergy" ? collageLowRoot : collageHighRoot;
 
         const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
@@ -3023,8 +3054,13 @@ app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
             await fs.mkdir(highEnergyDir, { recursive: true });
             await fs.mkdir(lowEnergyDir, { recursive: true });
         } else {
-            highEnergyDir = collageHighRoot;
-            lowEnergyDir = collageLowRoot;
+            // Use the user-configured collage exports path (or fall back to default)
+            const collageRoot = await getExportsPath('collage');
+            highEnergyDir = path.join(collageRoot, 'high');
+            lowEnergyDir = path.join(collageRoot, 'low');
+            
+            await fs.mkdir(highEnergyDir, { recursive: true });
+            await fs.mkdir(lowEnergyDir, { recursive: true });
         }
 
         // Enrich objects separately for each energy type to ensure correct pixel data paths

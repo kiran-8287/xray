@@ -6,11 +6,10 @@ import app from '../src/server.js';
 import config from '../src/lib/config.js';
 
 // Exports-path configuration endpoints:
-//   GET /api/user-config/exports-path  (ok:true, exportsPath, configured, platform)
-//   POST /api/user-config/exports-path (absolute path only; "" resets to default)
+//   GET /api/user-config/exports-path  (ok:true, paths, configured, platform)
+//   POST /api/user-config/exports-path (scope + absolute path; "" resets to default)
 //
-// The tests below back up and restore the real backend/data/storage/user_config.json
-// so running the suite never clobbers a developer's configured export folder.
+// Each page (load, saved, collage) has its own independent export path ("scope").
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const userConfigFile = path.join(config.dataDir, 'user_config.json');
@@ -42,20 +41,25 @@ describe('Exports path configuration', () => {
     }
   });
 
-  it('GET returns ok, platform, and an absolute default path', async () => {
+  it('GET returns ok, platform, and absolute default paths for each scope', async () => {
     const res = await request(app).get('/api/user-config/exports-path');
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(typeof res.body.platform).toBe('string');
     expect(res.body.platform.length).toBeGreaterThan(0);
-    expect(typeof res.body.exportsPath).toBe('string');
-    expect(path.isAbsolute(res.body.exportsPath)).toBe(true);
+    
+    // Each scope should have a path
+    for (const scope of ['load', 'saved', 'collage']) {
+      expect(typeof res.body.paths[scope]).toBe('string');
+      expect(path.isAbsolute(res.body.paths[scope])).toBe(true);
+      expect(typeof res.body.configured[scope]).toBe('boolean');
+    }
   });
 
   it('POST rejects relative paths with a helpful message', async () => {
     const res = await request(app)
       .post('/api/user-config/exports-path')
-      .send({ exportsPath: 'my_exports' });
+      .send({ scope: 'saved', exportsPath: 'my_exports' });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/absolute/i);
   });

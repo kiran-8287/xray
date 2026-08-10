@@ -25,6 +25,8 @@ interface ExportLocationSelectorProps {
   className?: string;
   /** Automatically open the dialog on mount when no path has been configured yet. */
   autoOpen?: boolean;
+  /** Which scope to manage: load, saved, or collage. Defaults to 'saved'. */
+  scope?: 'load' | 'saved' | 'collage';
   /** Called once after the current config is fetched from the backend. */
   onConfigLoaded?: (exportsPath: string | null, configured: boolean, platform: ServerPlatform | "") => void;
   /** Called after a path is saved (custom or default). */
@@ -32,7 +34,7 @@ interface ExportLocationSelectorProps {
 }
 
 const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLocationSelectorProps>(
-  function ExportLocationSelector({ className = "", autoOpen = false, onConfigLoaded, onPathSaved }, ref) {
+  function ExportLocationSelector({ className = "", autoOpen = false, scope = "saved", onConfigLoaded, onPathSaved }, ref) {
     const [loading, setLoading] = useState(true);
     const [exportsPath, setExportsPath] = useState<string | null>(null);
     const [configured, setConfigured] = useState(false);
@@ -51,8 +53,14 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
           const res = await fetchWithTimeout(`${API_BASE_URL}/api/user-config/exports-path`);
           const data = await res.json();
           if (cancelled || !data?.ok) return;
-          const p = typeof data.exportsPath === "string" && data.exportsPath.length > 0 ? data.exportsPath : null;
-          const isConfigured = data.configured === true && p !== null;
+          
+          // Extract the path for this specific scope
+          const paths = data.paths || {};
+          const scopedPath = paths[scope] || data.exportsPath || null;
+          const scopedConfigured = data.configured?.[scope] || data.configured || false;
+          const p = typeof scopedPath === "string" && scopedPath.length > 0 ? scopedPath : null;
+          const isConfigured = scopedConfigured === true && p !== null;
+          
           setExportsPath(p);
           setConfigured(isConfigured);
           setPlatform(data.platform || "");
@@ -71,7 +79,7 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
       return () => {
         cancelled = true;
       };
-    }, []);
+    }, [scope, autoOpen, onConfigLoaded]);
 
     const openModal = () => {
       setInput(exportsPath ?? "");
@@ -98,7 +106,7 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
         const bodyValue = useDefault ? "" : validation.normalized ?? "";
         const res = await fetchWithTimeout(
           `${API_BASE_URL}/api/user-config/exports-path`,
-          { method: "POST", headers, body: JSON.stringify({ exportsPath: bodyValue }) },
+          { method: "POST", headers, body: JSON.stringify({ scope, exportsPath: bodyValue }) },
           30000
         );
         if (!res.ok) {
@@ -221,21 +229,34 @@ return (
                   How to type the path ({platformDisplayName(platform)} server)
                 </p>
                 <ul className="space-y-1 text-xs text-amber-800 list-disc ml-4">
-                  {isWin ? (
+                  {!isWin ? (
+                    <>
+                      <li>
+                        Linux system: must start with a forward slash — e.g.{" "}
+                        <span className="font-mono">/home/you/XrayExports</span>
+                      </li>
+                      <li>
+                        Linux system: give the full absolute path from the root directory (no ~, no shortcuts, no quotes).
+                      </li>
+                    </>
+                  ) : (
+                    <>
+                      <li>
+                        Linux system: must start with a forward slash — e.g.{" "}
+                        <span className="font-mono">/home/you/XrayExports</span>
+                      </li>
+                      <li>
+                        Linux system: give the full absolute path from the root directory (no ~, no shortcuts, no quotes).
+                      </li>
+                    </>
+                  )}
+                  {isWin && (
                     <>
                       <li>
                         Windows: drive letter + backslash or forward slash — e.g.{" "}
                         <span className="font-mono">C:\XrayExports</span> or <span className="font-mono">C:/XrayExports</span>
                       </li>
-                      <li>Give the full absolute path from the drive root (no shortcuts, no quotes).</li>
-                    </>
-                  ) : (
-                    <>
-                      <li>
-                        Linux/macOS: must start with a forward slash — e.g.{" "}
-                        <span className="font-mono">/home/you/XrayExports</span>
-                      </li>
-                      <li>Give the full absolute path from the root (no ~, no quotes).</li>
+                      <li>Windows: give the full absolute path from the drive root (no shortcuts, no quotes).</li>
                     </>
                   )}
                   <li>A trailing slash or backslash is removed automatically.</li>
