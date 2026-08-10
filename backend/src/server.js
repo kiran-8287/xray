@@ -894,6 +894,18 @@ app.get("/api/items/categorized", publicApiRateLimiter.middleware(), async (req,
   }
 });
 
+// Get all item IDs for fast existence checking
+app.get('/api/items/ids', publicApiRateLimiter.middleware(), async (req, res) => {
+  try {
+    const items = await getItems();
+    const ids = items.map(i => i.id);
+    res.json({ ok: true, ids });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 // Batch item persistence endpoint for 50-item page saves into category partitions
 app.post('/api/items/batch-save', requireAuth, async (req, res) => {
   try {
@@ -1837,6 +1849,120 @@ app.post('/api/saved-layouts/export/cancel', requireAuth, async (req, res) => {
         res.json({ ok: true, cancelled: true });
     } catch (err) {
         console.error('[export/cancel] Error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Export annotation combinations as high+low resolution images
+app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
+    const jobId = `load_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    let cancelled = false;
+
+    try {
+        const { combinations, outputPath, includeImages = true } = req.body || {};
+        
+        if (!Array.isArray(combinations) || combinations.length === 0) {
+            return res.status(400).json({ ok: false, error: 'No combinations provided' });
+        }
+
+        const userExportsRoot = await getExportsPath();
+        const exportsRoot = path.resolve(userExportsRoot);
+        const exportsHighRoot = path.join(exportsRoot, 'high');
+        const exportsLowRoot = path.join(exportsRoot, 'low');
+        
+        await fs.mkdir(exportsHighRoot, { recursive: true });
+        await fs.mkdir(exportsLowRoot, { recursive: true });
+
+        const exported = [];
+        const savedPaths = { high: [], low: [] };
+
+        for (let i = 0; i < combinations.length; i++) {
+            if (exportCancellations.has(jobId)) { cancelled = true; break; }
+
+            const combo = combinations[i];
+            const objects = combo.objects || {};
+            const flatObjects = [];
+            
+            if (objects.bag) {
+                flatObjects.push({ ...objects.bag, transform: { x: objects.bag.center?.x || 0, y: objects.bag.center?.y || 0, width: objects.bag.size?.width || 800, height: objects.bag.size?.height || 600, rotation: 0 }, layer: objects.bag.layer || 0 });
+            }
+            if (Array.isArray(objects.threats)) {
+                for (const t of objects.threats) {
+                    flatObjects.push({ ...t, transform: { x: t.center?.x || 0, y: t.center?.y || 0, width: t.size?.width || 120, height: t.size?.height || 60, rotation: t.rotation || 0 }, layer: t.layer || 1 });
+                }
+            }
+            if (Array.isArray(objects['non-threats'])) {
+                for (const nt of objects['non-threats']) {
+                    flatObjects.push({ ...nt, transform: { x: nt.center?.x || 0, y: nt.center?.y || 0, width: nt.size?.width || 80, height: nt.size?.height || 80, rotation: nt.rotation || 0 }, layer: nt.layer || 1 });
+                }
+            }
+
+            if (flatObjects.length === 0) {
+                exported.push({ layoutId: combo.layoutId, layoutName: combo.layoutName, error: 'No valid objects' });
+                continue;
+            }
+
+            try {
+                const enrichedObjects = await enrichObjectsWithPixelData(flatObjects);
+                const highEnergyObjects = enrichedObjects;
+                const lowEnergyObjects = enrichedObjects.map(obj => {
+                    if (obj.pixel_data_path) {
+                        return { ...obj, pixel_data_path: obj.pixel_data_path.replace(/^highenergy[\\/]/, "lowenergy/") };
+                    }
+                    return obj;
+                });
+
+                const [highPngBuffer, lowPngBuffer] = await Promise.all([
+                    renderSceneAsync(highEnergyObjects, 800, 600, "highenergy"),
+                    renderSceneAsync(lowEnergyObjects, 800, 600, "lowenergy")
+                ]);
+
+                const safeName = (combo.layoutName || combo.layoutId || `combo_${i}`).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+                const filename = `${safeName}.png`;
+
+                const highEnergyPath = path.join(exportsHighRoot, filename);
+                const lowEnergyPath = path.join(exportsLowRoot, filename);
+
+                await fs.writeFile(highEnergyPath, highPngBuffer);
+                await fs.writeFile(lowEnergyPath, lowPngBuffer);
+
+                savedPaths.high.push(highEnergyPath);
+                savedPaths.low.push(lowEnergyPath);
+
+                exported.push({
+                    layoutId: combo.layoutId, layoutName: combo.layoutName,
+                    highEnergyPath, lowEnergyPath, highEnergyFilename: filename, lowEnergyFilename: filename,
+                });
+            } catch (err) {
+                console.error(`[export] Failed: ${combo.layoutId}:`, err);
+                exported.push({ layoutId: combo.layoutId, layoutName: combo.layoutName, error: err.message });
+            }
+        }
+
+        res.json({
+            ok: true, message: `Exported ${exported.length} combination(s)`,
+            exported, savedPaths, cancelled,
+            summary: { total: combinations.length, success: exported.filter(e => !e.error).length, failed: exported.filter(e => e.error).length, fileCount: { high: savedPaths.high.length, low: savedPaths.low.length } }
+        });
+    } catch (err) {
+        console.error('[export-combinations] Error:', err);
+        if (!res.headersSent) { res.status(500).json({ ok: false, error: String(err) }); }
+        else { try { res.end(); } catch (_) {} }
+    } finally {
+        if (jobId) { exportCancellations.delete(jobId); }
+    }
+});
+
+app.post('/api/load/export-combinations/cancel', requireAuth, async (req, res) => {
+    try {
+        const { jobId } = req.body || {};
+        if (!jobId || typeof jobId !== 'string' || !jobId.trim()) {
+            return res.status(400).json({ ok: false, error: 'Missing jobId' });
+        }
+        exportCancellations.set(jobId.trim(), true);
+        res.json({ ok: true, cancelled: true });
+    } catch (err) {
+        console.error('[export-combinations/cancel] Error:', err);
         res.status(500).json({ ok: false, error: String(err) });
     }
 });

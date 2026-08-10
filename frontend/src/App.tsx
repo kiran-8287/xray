@@ -41,9 +41,10 @@ function NavigationGuard() {
 
   const blocker = useBlocker(({ nextLocation }) => {
     const hasResults = GenerationService.hasGeneratedResults();
+    const isGenerating = GenerationService.isGenerating();
     const isOnCollagePage = location.pathname.startsWith("/collage");
     const isNavigatingToCustomize = nextLocation.pathname.startsWith("/customize");
-    const collageBlocked = isOnCollagePage && hasResults && !isNavigatingToCustomize;
+    const collageBlocked = isOnCollagePage && (isGenerating || hasResults) && !isNavigatingToCustomize;
 
     const isOnUploadPage = location.pathname === "/" || location.pathname === "/library";
     const uploadBlocked = isOnUploadPage && isUploadUnsaved();
@@ -52,7 +53,7 @@ function NavigationGuard() {
 
     if (blocked && !showDialog) {
       setMessage(collageBlocked
-        ? "You have generated combinations that haven't been saved. If you leave this page, they will be discarded."
+        ? "Combination generation is in progress. If you leave this page, progress will be discarded."
         : "You have staged files that haven't been saved. Leaving will discard unsaved items in this batch."
       );
     }
@@ -68,7 +69,7 @@ function NavigationGuard() {
   }, [blocker.state, blocker.location]);
 
   const handleDiscard = () => {
-    if (location.pathname.startsWith("/collage")) {
+    if (GenerationService.isGenerating() || GenerationService.hasGeneratedResults()) {
       GenerationService.clear();
     }
     setShowDialog(false);
