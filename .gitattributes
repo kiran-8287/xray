@@ -1,1 +1,2 @@
 bootstrap.sh text eol=lf
+backend/entrypoint.sh text eol=lf
