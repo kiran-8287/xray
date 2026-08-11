@@ -21,6 +21,7 @@ type PaginationInfo = { page: number; limit: number; total: number; totalPages: 
 export default function LoadPage() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const exportAbortRef = useRef<AbortController | null>(null);
   const exportJobIdRef = useRef<string | null>(null);
   const exportLocationRef = useRef<ExportLocationSelectorHandle>(null);
@@ -98,7 +99,75 @@ export default function LoadPage() {
     if (arr.length === 0) { showToast("error", "Please select JSON annotation files."); return; }
     setUploadedFiles(arr);
   };
-  const handleDrop = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); handleFilesSelected(e.dataTransfer.files); };
+
+  const readEntries = (reader: any): Promise<any[]> =>
+    new Promise((resolve, reject) => {
+      const entries: any[] = [];
+      const readBatch = () => {
+        reader.readEntries(
+          (results: any[]) => {
+            if (!results.length) {
+              resolve(entries);
+            } else {
+              entries.push(...results);
+              readBatch();
+            }
+          },
+          reject
+        );
+      };
+      readBatch();
+    });
+
+  const traverseEntry = async (entry: any): Promise<File[]> => {
+    if (!entry) return [];
+    if (entry.isFile) {
+      return new Promise((resolve, reject) => {
+        entry.file((file: File) => {
+          resolve(file.name.toLowerCase().endsWith(".json") ? [file] : []);
+        }, reject);
+      });
+    }
+    if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const nestedEntries = await readEntries(reader);
+      const nestedFiles = await Promise.all(nestedEntries.map(traverseEntry));
+      return nestedFiles.flat();
+    }
+    return [];
+  };
+
+  const handleFolderSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const items = e.target.files;
+    if (!items || items.length === 0) return;
+
+    // Try folder traversal via webkitGetAsEntry for nested folder support
+    const dataTransfer = new DataTransfer();
+    Array.from(items).forEach((f) => dataTransfer.items.add(f));
+    const entries = Array.from(dataTransfer.items)
+      .map((item) => (item as any).webkitGetAsEntry?.())
+      .filter(Boolean);
+
+    let files: File[] = [];
+    if (entries.length > 0) {
+      const nested = await Promise.all(entries.map(traverseEntry));
+      files = nested.flat();
+    } else {
+      files = Array.from(items).filter((f) => f.name.toLowerCase().endsWith(".json"));
+    }
+
+    if (files.length === 0) {
+      showToast("error", "No JSON annotation files found in the selected folder.");
+      return;
+    }
+    setUploadedFiles(files);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handleFilesSelected(e.dataTransfer.files);
+  };
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); };
 
   /** Parse annotation files, check every object against the library, build analysis report. */
@@ -327,12 +396,17 @@ return (
         {/* Phase: Upload */}
         {phase === "upload" && (
           <div className="max-w-2xl mx-auto">
-            <div onDrop={handleDrop} onDragOver={handleDragOver} onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-border rounded-2xl p-12 text-center cursor-pointer hover:border-accent hover:bg-white transition-all">
+            <div onDrop={handleDrop} onDragOver={handleDragOver} className="border-2 border-dashed border-border rounded-2xl p-12 text-center hover:border-accent hover:bg-white transition-all">
               <Upload size={48} className="mx-auto text-muted mb-4" />
               <h3 className="text-lg font-semibold text-ink mb-2">Upload Annotation Files</h3>
-              <p className="text-sm text-muted mb-4">Drop JSON annotation files here, or click to browse.<br />Each file should contain combinations with objects.</p>
+              <p className="text-sm text-muted mb-6">Upload individual JSON annotation files, or upload an entire folder containing annotations.</p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+                <button onClick={() => fileInputRef.current?.click()} className="px-6 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:bg-accent/90 transition-colors">Choose Files</button>
+                <button onClick={() => folderInputRef.current?.click()} className="px-6 py-2.5 rounded-xl border border-border bg-white text-ink text-sm font-semibold hover:bg-surface transition-colors">Choose Folder</button>
+              </div>
               <input ref={fileInputRef} type="file" accept=".json" multiple onChange={(e) => handleFilesSelected(e.target.files)} className="hidden" />
-              <button className="px-6 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:bg-accent/90 transition-colors">Choose Files</button>
+              <input ref={folderInputRef} type="file" multiple // @ts-ignore webkitdirectory
+                webkitdirectory="true" onChange={handleFolderSelected} className="hidden" />
             </div>
             {uploadedFiles.length > 0 && (
               <div className="mt-6 bg-white rounded-xl border border-border p-4">
