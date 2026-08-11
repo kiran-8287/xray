@@ -9,6 +9,7 @@ import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
 import ConfirmModal from "../components/common/ConfirmModal";
 import ExportLocationSelector, { ExportLocationSelectorHandle } from "../components/common/ExportLocationSelector";
+import { setLoadUnsaved } from "../lib/navigationGuard";
 
 const API_BASE = API_BASE_URL;
 const PAGE_SIZE = 100;
@@ -44,6 +45,15 @@ export default function LoadPage() {
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [renderingPreviews, setRenderingPreviews] = useState<Set<string>>(new Set());
   const [showHighRes, setShowHighRes] = useState<{ combo: Combination; url: string } | null>(null);
+
+  // Refs to avoid stale closures in async preview generation
+  const previewUrlsRef = useRef<Record<string, string>>({});
+  const renderingPreviewsRef = useRef<Set<string>>(new Set());
+  const generateAbortRef = useRef<AbortController | null>(null);
+
+  // Keep refs in sync with state
+  useEffect(() => { previewUrlsRef.current = previewUrls; }, [previewUrls]);
+  useEffect(() => { renderingPreviewsRef.current = renderingPreviews; }, [renderingPreviews]);
   const [showSaveOptions, setShowSaveOptions] = useState(false);
   const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "all" | "selected" | "individual"; combo?: Combination } | null>(null);
   const [exportsPathConfigured, setExportsPathConfigured] = useState(false);
@@ -92,6 +102,33 @@ export default function LoadPage() {
     };
     loadLibraryIds();
   }, []);
+
+  // Warn user and prevent navigation/refresh when annotations are loaded or analysis is in progress
+  useEffect(() => {
+    const hasUnsavedProgress = uploadedFiles.length > 0 || phase !== "upload";
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (hasUnsavedProgress) {
+        event.preventDefault();
+        event.returnValue = "You have uploaded annotations that haven't been saved. If you leave this page, your progress will be lost.";
+        return event.returnValue;
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [uploadedFiles.length, phase]);
+
+  // Register unsaved state with global navigation guard
+  useEffect(() => {
+    const hasUnsavedProgress = uploadedFiles.length > 0 || phase !== "upload";
+    setLoadUnsaved(hasUnsavedProgress);
+    return () => {
+      setLoadUnsaved(false);
+    };
+  }, [uploadedFiles.length, phase]);
 
   const handleFilesSelected = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -192,7 +229,9 @@ export default function LoadPage() {
             if (Array.isArray(objects["non-threats"])) { for (const nt of objects["non-threats"]) { if (nt.id) objectIds.push(nt.id); } }
             const combo: Combination = {
               layoutId: item.layoutId || `${file.name}_${allCombinations.length}`,
-              layoutName: item.layoutName || item.layoutId || file.name,
+              // Prefer layoutId (SB-format combination ID) over layoutName to avoid
+              // showing generic descriptive strings like "bag containing , , , "
+              layoutName: item.layoutId || item.layoutName || file.name,
               objects, missingObjectIds: [], allPresent: true,
             };
             for (const oid of objectIds) {
@@ -225,32 +264,83 @@ export default function LoadPage() {
       generatePreviews(validCombos.slice(0, PAGE_SIZE));
     }
   };
-/** Generate preview thumbnail for a set of combinations via /api/render-preview */
+/** Generate preview thumbnail for a set of combinations via /api/render-preview
+ *  Uses concurrency limiting (MAX_CONCURRENT_RENDERS = 3) to prevent backend overload,
+ *  matching the pattern used in CollagePage. */
+  const MAX_CONCURRENT_RENDERS = 3;
+
   const generatePreviews = async (combos: Combination[]) => {
-    const newRendering = new Set(renderingPreviews);
-    const newUrls: Record<string, string> = { ...previewUrls };
+    // Abort any in-flight generation for a previous page
+    if (generateAbortRef.current) {
+      generateAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    generateAbortRef.current = controller;
+
+    const semaphore = { current: 0, queue: [] as (() => void)[] };
+    const acquire = () => new Promise<void>((resolve) => {
+      if (semaphore.current < MAX_CONCURRENT_RENDERS) {
+        semaphore.current++;
+        resolve();
+      } else {
+        semaphore.queue.push(resolve);
+      }
+    });
+    const release = () => {
+      semaphore.current--;
+      if (semaphore.queue.length > 0 && semaphore.current < MAX_CONCURRENT_RENDERS) {
+        const next = semaphore.queue.shift()!;
+        semaphore.current++;
+        next();
+      }
+    };
+
+    // Mark combos that need rendering (using refs to avoid stale closures)
+    const newRendering = new Set(renderingPreviewsRef.current);
     for (const combo of combos) {
-      if (newRendering.has(combo.layoutId) || newUrls[combo.layoutId]) continue;
-      newRendering.add(combo.layoutId);
+      if (!previewUrlsRef.current[combo.layoutId]) {
+        newRendering.add(combo.layoutId);
+      }
     }
     setRenderingPreviews(newRendering);
-    for (const combo of combos) {
-      if (newUrls[combo.layoutId]) continue;
+
+    // Process combos with concurrency limit
+    const pending = combos.map((combo) => (async () => {
+      if (controller.signal.aborted) return;
+      // Skip if already rendered (check ref for latest value)
+      if (previewUrlsRef.current[combo.layoutId]) return;
+      await acquire();
       try {
         // /api/render-preview expects the nested { bag, threats, non-threats } format
         const objects = combo.objects || {};
-        if (!objects.bag && !Array.isArray(objects.threats) && !Array.isArray(objects["non-threats"])) continue;
+        if (!objects.bag && !Array.isArray(objects.threats) && !Array.isArray(objects["non-threats"])) return;
+        if (controller.signal.aborted) return;
         const res = await fetchWithTimeout(
           `${API_BASE}/api/render-preview`,
-          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objects }) },
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objects }), signal: controller.signal },
           LONG_REQUEST_TIMEOUT_MS
         );
+        if (!res.ok) return;
         const data = await res.json();
-        if (data.image) { newUrls[combo.layoutId] = `data:image/png;base64,${data.image}`; }
-      } catch (err) { console.error(`Failed to render preview for ${combo.layoutId}:`, err); }
+        if (data.image) {
+          setPreviewUrls((prev) => {
+            if (prev[combo.layoutId]) return prev; // already set by concurrent call
+            return { ...prev, [combo.layoutId]: `data:image/png;base64,${data.image}` };
+          });
+        }
+      } catch (err) {
+        if ((err as any)?.name !== "AbortError") {
+          console.error(`Failed to render preview for ${combo.layoutId}:`, err);
+        }
+      } finally {
+        release();
+      }
+    })());
+
+    await Promise.all(pending);
+    if (!controller.signal.aborted) {
+      setRenderingPreviews(new Set());
     }
-    setPreviewUrls(newUrls);
-    setRenderingPreviews(new Set());
   };
 
   /** Pagination */
