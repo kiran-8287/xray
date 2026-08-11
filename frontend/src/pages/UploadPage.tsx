@@ -30,6 +30,8 @@ export default function UploadPage() {
   const processingTotalRef = useRef(0);
   const processingCompletedRef = useRef(0);
   const lookAheadRunningRef = useRef(false);
+  const batchRetryCountRef = useRef<Map<number, number>>(new Map());
+  const MAX_BATCH_RETRIES = 2;
 
   const [savingPage, setSavingPage] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "success" | "error">("idle");
@@ -185,7 +187,16 @@ export default function UploadPage() {
         }, LONG_REQUEST_TIMEOUT_MS, 1);
 
         if (!response.ok) {
-          throw new Error(`Server responded with ${response.status}`);
+          let errorDetail = `Server responded with ${response.status}`;
+          try {
+            const errorData = await response.json();
+            if (errorData?.error) {
+              errorDetail = errorData.error;
+            }
+          } catch {
+            // If response body is already consumed or not JSON, use default message
+          }
+          throw new Error(errorDetail);
         }
 
         const reader = response.body!.getReader();
@@ -206,6 +217,16 @@ export default function UploadPage() {
                 msg = JSON.parse(line);
               } catch {
                 continue;
+              }
+
+              if (msg.status === "error" && msg.isFatal) {
+                const fatalError = msg.reason || "Unknown pipeline error";
+                console.error(`[Batch ${batchNumber}] Fatal pipeline error:`, msg);
+                setStreamErrors((prev) => [...prev, { 
+                  id: `batch-${batchNumber}`, 
+                  reason: `Batch failed: ${fatalError}` 
+                }]);
+                throw new Error(fatalError);
               }
 
               if (msg.status === "done") {
@@ -281,7 +302,7 @@ export default function UploadPage() {
                   const origIdx = slot.originalIndex;
                   if (!processedOriginalIndicesRef.current.has(origIdx)) {
                     processedOriginalIndicesRef.current.add(origIdx);
-                    processingCompletedRef.current++;
+                    // Don't increment completion counter for errors - only count successes
                     setProcessingProgress({
                       n: processingCompletedRef.current,
                       total: processingTotalRef.current,
@@ -332,6 +353,46 @@ export default function UploadPage() {
         }
       } catch (err) {
         console.error(`[Batch ${batchNumber}] Batch processing error:`, err);
+        
+        // Retry logic for transient failures
+        const currentRetries = batchRetryCountRef.current.get(batchNumber) || 0;
+        if (currentRetries < MAX_BATCH_RETRIES) {
+          batchRetryCountRef.current.set(batchNumber, currentRetries + 1);
+          const retryDelay = Math.min(1000 * Math.pow(2, currentRetries), 10000); // Exponential backoff, max 10s
+          console.warn(`[Batch ${batchNumber}] Retrying in ${retryDelay}ms (attempt ${currentRetries + 1}/${MAX_BATCH_RETRIES})`);
+          
+          setTimeout(() => {
+            const retrySlots: FileSlot[] = [];
+            const startIdx = batchNumber * PAGE_SIZE;
+            const endIdx = Math.min(startIdx + PAGE_SIZE, fileSlotsRef.current.length);
+            for (let i = startIdx; i < endIdx; i++) {
+              const slot = fileSlotsRef.current[i];
+              if (slot && !processedOriginalIndicesRef.current.has(slot.originalIndex)) {
+                retrySlots.push(slot);
+              }
+            }
+            if (retrySlots.length > 0) {
+              enqueueRawFilesBatch(retrySlots, batchNumber);
+              startQueueWorker();
+            }
+          }, retryDelay);
+        } else {
+          console.error(`[Batch ${batchNumber}] Max retries (${MAX_BATCH_RETRIES}) exceeded, abandoning batch`);
+          batchRetryCountRef.current.delete(batchNumber);
+          
+          // Mark remaining files in this batch as failed
+          const startIdx = batchNumber * PAGE_SIZE;
+          const endIdx = Math.min(startIdx + PAGE_SIZE, fileSlotsRef.current.length);
+          for (let i = startIdx; i < endIdx; i++) {
+            const slot = fileSlotsRef.current[i];
+            if (slot && !processedOriginalIndicesRef.current.has(slot.originalIndex)) {
+              setStreamErrors((prev) => [...prev, {
+                id: slot.file.name,
+                reason: `Failed after ${MAX_BATCH_RETRIES + 1} attempts`
+              }]);
+            }
+          }
+        }
       }
     });
   }
