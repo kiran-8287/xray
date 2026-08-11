@@ -25,5 +25,5 @@ EXPOSE 8080
 
 # Start as root so the entrypoint can chown bind-mounted /app/data,
 # then drop to the non-root `node` user before exec'ing the app.
-ENTRYPOINT ["entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["npm", "run", "start"]
