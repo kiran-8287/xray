@@ -26,6 +26,9 @@ export default function LoadPage() {
   const exportAbortRef = useRef<AbortController | null>(null);
   const exportJobIdRef = useRef<string | null>(null);
   const exportLocationRef = useRef<ExportLocationSelectorHandle>(null);
+  // Progress-bar polling: interval + cumulative base across export chunks
+  const exportProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const exportProgressBaseRef = useRef(0);
 
   const [phase, setPhase] = useState<"upload" | "analyzing" | "report" | "generating" | "results">("upload");
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -58,6 +61,13 @@ export default function LoadPage() {
   // Keep refs in sync with state
   useEffect(() => { previewUrlsRef.current = previewUrls; }, [previewUrls]);
   useEffect(() => { renderingPreviewsRef.current = renderingPreviews; }, [renderingPreviews]);
+
+  // Clear the progress-polling interval if the user leaves the page mid-export.
+  useEffect(() => {
+    return () => {
+      if (exportProgressTimerRef.current) { clearInterval(exportProgressTimerRef.current); exportProgressTimerRef.current = null; }
+    };
+  }, []);
   const [showSaveOptions, setShowSaveOptions] = useState(false);
   const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "all" | "selected" | "individual" | "page"; combo?: Combination } | null>(null);
   const [exportsPathConfigured, setExportsPathConfigured] = useState(false);
@@ -410,11 +420,36 @@ export default function LoadPage() {
     setExporting(true);
     setExportMode(mode);
     setExportProgress({ done: 0, total: combos.length });
+    exportProgressBaseRef.current = 0;
     const controller = new AbortController();
     exportAbortRef.current = controller;
     const apiKey = localStorage.getItem("apiKey");
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (apiKey) headers["X-API-Key"] = apiKey;
+
+    // Live progress polling: the backend updates a per-job counter as it renders
+    // each combination, so the progress bar advances during the run instead of
+    // sitting at 0 and jumping away when the job completes.
+    const stopProgressPolling = () => {
+      if (exportProgressTimerRef.current) { clearInterval(exportProgressTimerRef.current); exportProgressTimerRef.current = null; }
+    };
+    const startProgressPolling = () => {
+      stopProgressPolling();
+      exportProgressTimerRef.current = setInterval(() => {
+        const jobId = exportJobIdRef.current;
+        if (!jobId || controller.signal.aborted) return;
+        fetch(`${API_BASE}/api/load/export-combinations/progress?jobId=${encodeURIComponent(jobId)}`)
+          .then((r) => r.json())
+          .then((d) => {
+            if (d && d.ok && d.found && typeof d.done === "number" && typeof d.total === "number") {
+              const base = exportProgressBaseRef.current || 0;
+              setExportProgress({ done: Math.min(base + d.done, combos.length), total: combos.length });
+            }
+          })
+          .catch(() => { /* polling is best-effort; ignore */ });
+      }, 800);
+    };
+    startProgressPolling();
 
     // Mass volumes are exported in page-sized batches so the backend never has to
     // render the whole set in a single pass. Each batch writes its high+low PNGs.
@@ -429,6 +464,7 @@ export default function LoadPage() {
         const batch = combos.slice(start, start + EXPORT_BATCH_SIZE);
         const jobId = `load_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
         exportJobIdRef.current = jobId;
+        exportProgressBaseRef.current = start;
         const res = await fetchWithTimeout(`${API_BASE}/api/load/export-combinations?jobId=${encodeURIComponent(jobId)}`,
           { method: "POST", headers, body: JSON.stringify({ combinations: batch, scope: 'load' }), signal: controller.signal },
           LONG_REQUEST_TIMEOUT_MS);
@@ -454,8 +490,10 @@ export default function LoadPage() {
       if (err instanceof DOMException && err.name === "AbortError") { showToast("info", "Export stopped."); }
       else { showToast("error", `Export failed: ${err instanceof Error ? err.message : String(err)}`); }
     } finally {
+      stopProgressPolling();
       exportAbortRef.current = null;
       exportJobIdRef.current = null;
+      exportProgressBaseRef.current = 0;
       setExporting(false);
       setExportMode(null);
       setExportProgress(null);

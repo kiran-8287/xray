@@ -69,6 +69,11 @@ const logger = pino({
 // at the next layout boundary.
 const exportCancellations = new Map();
 
+// In-memory progress store for load-page export jobs (keyed by the client jobId).
+// Updated per combination so the frontend can render a live progress bar while the
+// backend renders/writes the high+low PNGs.
+const exportProgressStore = new Map();
+
 // In-memory cancellation flags for long-running import (Save Historic Data) jobs.
 const importCancellations = new Map();
 
@@ -1887,7 +1892,10 @@ app.post('/api/saved-layouts/export/cancel', requireAuth, async (req, res) => {
 
 // Export annotation combinations as high+low resolution images
 app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
-    const jobId = `load_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    // Use the client-provided jobId so the frontend can poll progress and cancel.
+    const jobId = typeof req.query.jobId === 'string' && req.query.jobId.trim()
+        ? req.query.jobId.trim()
+        : `load_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     let cancelled = false;
 
     try {
@@ -1896,6 +1904,8 @@ app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
         if (!Array.isArray(combinations) || combinations.length === 0) {
             return res.status(400).json({ ok: false, error: 'No combinations provided' });
         }
+
+        exportProgressStore.set(jobId, { done: 0, total: combinations.length });
 
         // Load-page images are saved together in ONE folder (no high/ low/ subfolders).
         const userExportsRoot = await getExportsPath('load');
@@ -1908,6 +1918,9 @@ app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
 
         for (let i = 0; i < combinations.length; i++) {
             if (exportCancellations.has(jobId)) { cancelled = true; break; }
+
+            // Publish per-combination progress so the frontend progress bar advances live.
+            exportProgressStore.set(jobId, { done: i, total: combinations.length });
 
             const combo = combinations[i];
             const objects = combo.objects || {};
@@ -1971,6 +1984,8 @@ app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
                 console.error(`[export] Failed: ${combo.layoutId}:`, err);
                 exported.push({ layoutId: combo.layoutId, layoutName: combo.layoutName, error: err.message });
             }
+
+            exportProgressStore.set(jobId, { done: i + 1, total: combinations.length });
         }
 
         res.json({
@@ -1984,6 +1999,7 @@ app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
         else { try { res.end(); } catch (_) {} }
     } finally {
         if (jobId) { exportCancellations.delete(jobId); }
+        if (jobId) { exportProgressStore.delete(jobId); }
     }
 });
 
@@ -1999,6 +2015,17 @@ app.post('/api/load/export-combinations/cancel', requireAuth, async (req, res) =
         console.error('[export-combinations/cancel] Error:', err);
         res.status(500).json({ ok: false, error: String(err) });
     }
+});
+
+// Live progress for a running load-page export job (polled by the frontend so the
+// progress bar advances while images are being rendered/written).
+app.get('/api/load/export-combinations/progress', async (req, res) => {
+    const jobId = typeof req.query.jobId === 'string' ? req.query.jobId.trim() : '';
+    const progress = jobId ? exportProgressStore.get(jobId) : null;
+    if (!progress) {
+        return res.json({ ok: true, found: false, done: null, total: null });
+    }
+    res.json({ ok: true, found: true, done: progress.done, total: progress.total });
 });
 
 app.get('/api/saved-layouts/:id', async (req, res) => {
