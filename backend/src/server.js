@@ -1006,10 +1006,12 @@ app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
       }
     } catch (err) {
       console.error('[user-config/exports-path] Failed to create folder:', err);
-      return res.status(400).json({
-        ok: false,
-        error: `Could not create the export folder. Check that the drive exists and is writable. (${err && err.code ? err.code : String(err)})`,
-      });
+      const code = err && err.code ? err.code : String(err);
+      let message = `Could not create the export folder. Check that the drive exists and is writable. (${code})`;
+      if (code === 'EACCES' || code === 'EPERM') {
+        message += ' The container runs as a non-root user (UID 1000). If this is a bind-mounted host folder, make sure the host directory is writable by UID 1000, or choose a path under /app/data (which is automatically fixed on startup).';
+      }
+      return res.status(400).json({ ok: false, error: message });
     }
 
     const userConfig = await setExportsPath(requestedScope, resolvedPath);
