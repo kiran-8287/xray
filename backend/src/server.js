@@ -816,10 +816,27 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
 
     } catch (err) {
         timer.logError('pipeline_error', err);
+        const errorMessage = err?.message || String(err);
+        const errorStack = err?.stack || '';
+        
+        // Always log the full error for debugging
+        logger.error({ operationId, error: errorMessage, stack: errorStack }, 'process_raw_files_pipeline_error');
+        console.error(`[process-raw-files] operationId=${operationId} error=${errorMessage}`);
+        if (errorStack) {
+            console.error(`[process-raw-files] stack=${errorStack.split('\n').slice(0, 5).join('\n')}`);
+        }
+        
         if (!res.headersSent) {
-            res.status(500).json({ ok: false, error: err.message });
+            res.status(500).json({ ok: false, error: errorMessage });
         } else {
+            // Headers already sent as 200, but we can still send error details in the stream
             try {
+                res.write(JSON.stringify({
+                    status: "error",
+                    reason: `Pipeline error: ${errorMessage}`,
+                    operationId,
+                    isFatal: true,
+                }) + "\n");
                 res.end();
             } catch (_) {}
         }
