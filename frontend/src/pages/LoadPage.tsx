@@ -293,7 +293,6 @@ return (
             <ExportLocationSelector
               ref={exportLocationRef}
               scope="load"
-              autoOpen
               onConfigLoaded={(p, configured) => { setExportsPath(p ?? ""); setExportsPathConfigured(configured); }}
               onPathSaved={(p, configured) => {
                 setExportsPath(p ?? "");

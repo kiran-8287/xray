@@ -102,5 +102,35 @@ Then edit `.env` in the project root. Common settings:
 - **`No module named 'scipy'`:** the Python packages aren't installed — run `pip install -r backend/requirements.txt`.
 - **Docker fails on Windows:** use `bootstrap.bat` or the Node.js option.
 - **Backend won't start:** check that port 8080 is free and `.env` exists in the root and `backend/`.
+- **Backend crashes with `EACCES: permission denied, mkdir '/app/data/storage'`:** see **[Known Issues](#known-issues)** below.
+
+### Known Issues
+
+#### Backend fails to start: bind-mounted data directory ownership mismatch
+
+**Symptoms:** backend exits immediately with `EACCES: permission denied, mkdir '/app/data/storage'`.
+
+**Cause:** `docker-compose.yml` bind-mounts `./backend/data` to `/app/data`. If that host folder was created/owned by a different UID/GID than the container runtime user, the non-root container process cannot create subdirectories inside it.
+
+**Permanent fix included in this repo:** the backend now uses an entrypoint script that self-heals `/app/data` ownership on every container start, so no host-side `sudo`/`chown` is required.
+
+**One-time workaround commands (if needed):**
+
+```bash
+# Option 1: fix ownership from inside a throwaway root container
+docker compose run --rm --user root backend chown -R 1000:1000 /app/data
+
+# Option 2: if Option 1 is blocked by host security policies, run the backend
+# container as the host folder's owner instead of the default node UID.
+# Replace 2263 and 1001 with the UID/GID shown by:
+#   docker compose run --rm --user root backend sh -c "ls -ld /app/data"
+docker compose run --rm --user root backend sh -c "id -u node; ls -ld /app/data"
+```
+
+After applying either option, restart normally:
+
+```bash
+docker compose up --build
+```
 
 See **[SETUP.md](SETUP.md)** for the full setup guide, environment variables, and upload limits.
