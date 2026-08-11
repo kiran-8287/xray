@@ -5,6 +5,7 @@ set -e
 # This allows the container to start as non-root without requiring
 # sudo/chown on the host.
 mkdir -p /app/data/storage
+mkdir -p /app/data/load_layouts
 chown -R node:node /app/data
 
 # Also ensure /home is writable by the node user so custom export paths

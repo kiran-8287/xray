@@ -47,6 +47,9 @@ const config = {
   dataDir: process.env.DATA_DIR || path.resolve(PROJECT_ROOT, 'data', 'storage'),
   savedLayoutsDir: process.env.SAVED_LAYOUTS_PATH || path.resolve(PROJECT_ROOT, 'data', 'storage'),
   exportsRoot: process.env.EXPORTS_PATH || path.resolve(PROJECT_ROOT, 'data', 'exports'),
+  // Default destination for Load-page saves. High- and low-resolution images are
+  // written side-by-side into this single folder (no high/ low/ subfolders).
+  loadLayoutsDir: process.env.LOAD_LAYOUTS_PATH || path.resolve(PROJECT_ROOT, 'data', 'load_layouts'),
   tempDir: process.env.TEMP_PATH || path.resolve(PROJECT_ROOT, 'data', 'temp'),
 
   // Server

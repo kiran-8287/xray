@@ -131,6 +131,13 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
     };
 
     const isWin = platform === "win32";
+    const isLoadScope = scope === "load";
+    const isCollageScope = scope === "collage";
+    const defaultFolderLabel = isLoadScope
+      ? "backend/data/load_layouts"
+      : isCollageScope
+        ? "backend/data/collage_images"
+        : "backend/data/exports";
     const sep = isWin ? "\\" : "/";
     const buttonLabel = loading
       ? "Export location…"
@@ -170,7 +177,7 @@ return (
                 <p className="text-xs text-muted">
                   Current location:{" "}
                   <span className="font-mono text-ink break-all">
-                    {configured && exportsPath ? exportsPath : "Default (backend/data/exports)"}
+                    {configured && exportsPath ? exportsPath : `Default (${defaultFolderLabel})`}
                   </span>
                 </p>
               </div>
@@ -205,18 +212,21 @@ return (
                 ) : (
                   <p className="mt-1.5 text-xs text-muted">
                     Empty + "Use Default" keeps the built-in{" "}
-                    <span className="font-mono">backend/data/exports</span> folder.
+                    <span className="font-mono">{defaultFolderLabel}</span> folder.
                   </p>
                 )}
 
                 {validation.ok && validation.normalized && (
                   <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
-                    ✅ Files will be saved to:{" "}
+                    {isLoadScope
+                      ? "✅ High- and low-resolution images will be saved in one folder:"
+                      : "✅ Files will be saved to:"}{" "}
                     <span className="font-mono break-all">
-                      {validation.normalized}
-                      {sep}high / {validation.normalized}
-                      {sep}low
-                      {isWin ? " / …\\annotations" : " / …/annotations"}
+                      {isLoadScope
+                        ? `${validation.normalized} (as "<id> high.png" / "<id> low.png")`
+                        : isCollageScope
+                          ? `${validation.normalized}${sep}collage_images${sep}high / ${validation.normalized}${sep}collage_images${sep}low`
+                          : `${validation.normalized}${sep}high / ${validation.normalized}${sep}low / ${validation.normalized}${sep}annotations`}
                     </span>
                   </div>
                 )}
@@ -257,7 +267,13 @@ return (
                     </>
                   )}
                   <li>A trailing slash or backslash is removed automatically.</li>
-                  <li>Subfolders (high, low, annotations, catalog) are created automatically.</li>
+                  {isLoadScope ? (
+                    <li>No subfolders — high- and low-resolution images are saved together in this folder.</li>
+                  ) : isCollageScope ? (
+                    <li>The subfolders collage_images/high and collage_images/low are created automatically.</li>
+                  ) : (
+                    <li>Subfolders (high, low, annotations) are created automatically.</li>
+                  )}
                 </ul>
               </div>
 

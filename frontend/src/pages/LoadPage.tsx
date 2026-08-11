@@ -16,7 +16,7 @@ const PAGE_SIZE = 100;
 
 type Toast = { id: string; type: "success" | "error" | "info"; message: string };
 type Combination = { layoutId: string; layoutName: string; objects: Record<string, any>; missingObjectIds: string[]; allPresent: boolean };
-type AnalysisResult = { totalCombinations: number; validCombinations: number; invalidCombinations: number; totalUniqueObjects: number; presentObjects: number; missingObjects: number; missingObjectIds: string[]; combinations: Combination[] };
+type AnalysisResult = { totalCombinations: number; validCombinations: number; invalidCombinations: number; totalObjectReferences: number; totalUniqueObjects: number; presentObjects: number; missingObjects: number; missingObjectIds: string[]; combinations: Combination[] };
 type PaginationInfo = { page: number; limit: number; total: number; totalPages: number };
 
 export default function LoadPage() {
@@ -57,6 +57,11 @@ export default function LoadPage() {
   const [showSaveOptions, setShowSaveOptions] = useState(false);
   const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "all" | "selected" | "individual"; combo?: Combination } | null>(null);
   const [exportsPathConfigured, setExportsPathConfigured] = useState(false);
+  // True once the export-location config has been fetched from the backend.
+  // Saving must work with the DEFAULT (load layouts) folder even when the user
+  // hasn't configured a custom path, so we only open the location dialog while
+  // this is still loading.
+  const [exportsPathLoaded, setExportsPathLoaded] = useState(false);
   const [exportsPath, setExportsPath] = useState("");
 
   const showToast = (type: Toast["type"], message: string) => {
@@ -97,8 +102,11 @@ export default function LoadPage() {
       }
 
       setLibraryItemIds(ids);
-      if (ids.size === 0) { showToast("error", "Failed to load library items. Please refresh."); }
-      else { console.log(`Loaded ${ids.size} library item IDs`); }
+      if (ids.size === 0) {
+        // silently ignore empty library
+      } else {
+        console.log(`Loaded ${ids.size} library item IDs`);
+      }
     };
     loadLibraryIds();
   }, []);
@@ -215,6 +223,7 @@ export default function LoadPage() {
       const allCombinations: Combination[] = [];
       const allObjectIds = new Set<string>();
       const missingObjectIds = new Set<string>();
+      let totalObjectReferences = 0;
       let validCount = 0, invalidCount = 0;
       for (const file of uploadedFiles) {
         const text = await file.text();
@@ -235,6 +244,7 @@ export default function LoadPage() {
               objects, missingObjectIds: [], allPresent: true,
             };
             for (const oid of objectIds) {
+              totalObjectReferences++;
               allObjectIds.add(oid);
               if (!libraryItemIds.has(oid)) { combo.missingObjectIds.push(oid); missingObjectIds.add(oid); }
             }
@@ -245,6 +255,7 @@ export default function LoadPage() {
       }
       const result: AnalysisResult = {
         totalCombinations: allCombinations.length, validCombinations: validCount, invalidCombinations: invalidCount,
+        totalObjectReferences,
         totalUniqueObjects: allObjectIds.size, presentObjects: allObjectIds.size - missingObjectIds.size,
         missingObjects: missingObjectIds.size, missingObjectIds: Array.from(missingObjectIds), combinations: allCombinations,
       };
@@ -257,7 +268,7 @@ export default function LoadPage() {
 
   const handleReportAction = (action: "upload-missing" | "continue") => {
     setReportAction(action);
-    if (action === "upload-missing") { navigate("/upload"); } else {
+    if (action === "upload-missing") { navigate("/"); } else {
       const validCombos = analysis?.combinations.filter((c) => c.allPresent) || [];
       setValidCombinations(validCombos); setPage(1); setSelectedForExport(new Set()); setPhase("generating");
       showToast("info", `Generating images for ${validCombos.length} valid combinations...`);
@@ -370,7 +381,7 @@ export default function LoadPage() {
 
 /** Export combinations to exports folder (high + low resolution images) */
   const exportCombinations = async (combos: Combination[], mode: "all" | "selected" | "individual") => {
-    if (!exportsPathConfigured) { setShowSaveOptions(false); exportLocationRef.current?.open(); return; }
+    if (!exportsPathLoaded) { setShowSaveOptions(false); exportLocationRef.current?.open(); return; }
     if (exporting || combos.length === 0) return;
     setExporting(true);
     setExportMode(mode);
@@ -452,11 +463,11 @@ return (
             <ExportLocationSelector
               ref={exportLocationRef}
               scope="load"
-              onConfigLoaded={(p, configured) => { setExportsPath(p ?? ""); setExportsPathConfigured(configured); }}
+              onConfigLoaded={(p, configured) => { setExportsPath(p ?? ""); setExportsPathConfigured(configured); setExportsPathLoaded(true); }}
               onPathSaved={(p, configured) => {
                 setExportsPath(p ?? "");
                 setExportsPathConfigured(configured);
-                showToast(configured && p ? "success" : "info", configured && p ? `Export location saved: ${p}` : "Using the default export folder.");
+                showToast(configured && p ? "success" : "info", configured && p ? `Export location saved: ${p}` : "Using the default load layouts folder.");
               }}
             />
             {phase !== "upload" && (
@@ -525,23 +536,43 @@ return (
           <div className="max-w-4xl mx-auto">
             <div className="bg-white rounded-2xl border border-border p-6 shadow-sm">
               <h2 className="text-xl font-bold text-ink mb-4">Analysis Report</h2>
+
+              {/* Summary stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
                 <div className="rounded-xl border border-border bg-surface p-3">
                   <p className="text-[10px] text-muted uppercase tracking-wider">Total Combinations</p>
-                  <p className="text-2xl font-bold text-ink">{analysis.totalCombinations}</p>
-                </div>
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                  <p className="text-[10px] text-emerald-600 uppercase tracking-wider">Valid</p>
-                  <p className="text-2xl font-bold text-emerald-700">{analysis.validCombinations}</p>
-                </div>
-                <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
-                  <p className="text-[10px] text-rose-600 uppercase tracking-wider">Missing Objects</p>
-                  <p className="text-2xl font-bold text-rose-700">{analysis.invalidCombinations}</p>
+                  <p className="text-2xl font-bold text-ink">{analysis.totalCombinations.toLocaleString()}</p>
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-3">
-                  <p className="text-[10px] text-muted uppercase tracking-wider">Missing Files</p>
-                  <p className="text-2xl font-bold text-ink">{analysis.missingObjects}</p>
+                  <p className="text-[10px] text-muted uppercase tracking-wider">Total Objects Used</p>
+                  <p className="text-2xl font-bold text-ink">{analysis.totalObjectReferences.toLocaleString()}</p>
                 </div>
+                <div className="rounded-xl border border-border bg-surface p-3">
+                  <p className="text-[10px] text-muted uppercase tracking-wider">Unique Objects</p>
+                  <p className="text-2xl font-bold text-ink">{analysis.totalUniqueObjects.toLocaleString()}</p>
+                </div>
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+                  <p className="text-[10px] text-rose-600 uppercase tracking-wider">Missing from System</p>
+                  <p className="text-2xl font-bold text-rose-700">{analysis.missingObjects.toLocaleString()}</p>
+                </div>
+              </div>
+
+              {/* Object availability breakdown */}
+              <div className="mb-6 rounded-xl border border-border bg-surface p-4">
+                <h3 className="text-sm font-semibold text-ink mb-3">Object Availability</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                    <p className="text-[10px] text-emerald-600 uppercase tracking-wider">Present in Library</p>
+                    <p className="text-2xl font-bold text-emerald-700">{analysis.presentObjects.toLocaleString()}</p>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-[10px] text-amber-700 uppercase tracking-wider">Not in Library</p>
+                    <p className="text-2xl font-bold text-amber-800">{analysis.missingObjects.toLocaleString()}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted mt-3">
+                  {analysis.presentObjects.toLocaleString()} of {analysis.totalUniqueObjects.toLocaleString()} unique objects exist in your library. {analysis.validCombinations.toLocaleString()} valid combinations, {analysis.invalidCombinations.toLocaleString()} with missing objects.
+                </p>
               </div>
 
               {analysis.missingObjectIds.length > 0 && (
@@ -561,13 +592,6 @@ return (
                   )}
                 </div>
               )}
-
-              <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                <h3 className="text-sm font-semibold text-emerald-800 flex items-center gap-2 mb-1">
-                  <CheckCircle2 size={16} /> Present in Library
-                </h3>
-                <p className="text-xs text-emerald-700">{analysis.presentObjects} unique objects found in library out of {analysis.totalUniqueObjects} total unique objects.</p>
-              </div>
 
               <div className="flex flex-wrap gap-3">
                 {analysis.invalidCombinations > 0 && (
@@ -624,21 +648,39 @@ return (
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {currentPageCombos.map((combo) => (
-                <div key={combo.layoutId} className={`bg-white rounded-xl border-2 shadow-sm overflow-hidden transition-all ${selectedForExport.has(combo.layoutId) ? "border-accent ring-2 ring-accent/20" : "border-border hover:border-accent/50"}`}>
-                  <div className="relative aspect-[4/3] bg-surface cursor-pointer" onClick={() => { if (previewUrls[combo.layoutId]) { setShowHighRes({ combo, url: previewUrls[combo.layoutId] }); } }}>
+                <div key={combo.layoutId} className={`bg-panel rounded-2xl border border-border shadow-card overflow-hidden transition-all cursor-pointer group text-left w-full ${selectedForExport.has(combo.layoutId) ? "ring-2 ring-accent/20 border-accent" : "hover:border-accent/50"}`}>
+                  <div className="relative aspect-[4/3] bg-surface" onClick={() => { if (previewUrls[combo.layoutId]) { setShowHighRes({ combo, url: previewUrls[combo.layoutId] }); } }}>
                     {previewUrls[combo.layoutId] ? (<img src={previewUrls[combo.layoutId]} alt={combo.layoutName} className="w-full h-full object-contain" />)
                       : renderingPreviews.has(combo.layoutId) ? (<div className="flex items-center justify-center h-full"><Loader2 size={24} className="animate-spin text-muted" /></div>)
                       : (<div className="flex items-center justify-center h-full"><ImageIcon size={32} className="text-muted/40" /></div>)}
                     {selectedForExport.has(combo.layoutId) && (<div className="absolute top-2 left-2 w-6 h-6 rounded-full bg-accent flex items-center justify-center"><Check size={14} className="text-white" /></div>)}
                   </div>
-                  <div className="p-3">
-                    <h4 className="text-sm font-semibold text-ink truncate mb-1" title={combo.layoutName}>{combo.layoutName}</h4>
-                    <p className="text-[10px] text-muted font-mono mb-2">{combo.layoutId}</p>
-                    <div className="flex items-center gap-1.5">
-                      <button onClick={() => toggleSelect(combo.layoutId)} className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${selectedForExport.has(combo.layoutId) ? "bg-accent text-white" : "bg-surface border border-border text-ink hover:bg-gray-100"}`}>
+                  <div className="p-4">
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-accent-sky font-mono truncate" title={combo.layoutId}>{combo.layoutId}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      {(() => {
+                        const objs = combo.objects || {};
+                        const bagId = objs.bag?.id || objs.bag?.name;
+                        const threatIds = (Array.isArray(objs.threats) ? objs.threats : []).map((t: any) => t.id || t.name).filter(Boolean);
+                        const otherIds = (Array.isArray(objs["non-threats"]) ? objs["non-threats"] : []).map((o: any) => o.id || o.name).filter(Boolean);
+                        return (
+                          <>
+                            {bagId && <p className="text-[10px] font-mono text-muted truncate" title={String(bagId)}>Bag: {String(bagId)}</p>}
+                            {threatIds.length > 0 && <p className="text-[10px] font-mono text-rose-600 truncate" title={threatIds.join(", ")}>Threat: {threatIds.join(", ")}</p>}
+                            {otherIds.length > 0 && <p className="text-[10px] font-mono text-muted truncate" title={otherIds.join(", ")}>Others: {otherIds.join(", ")}</p>}
+                          </>
+                        );
+                      })()}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-3">
+                      <button onClick={(e) => { e.stopPropagation(); toggleSelect(combo.layoutId); }} className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${selectedForExport.has(combo.layoutId) ? "bg-accent text-white" : "bg-surface border border-border text-ink hover:bg-gray-100"}`}>
                         {selectedForExport.has(combo.layoutId) ? "Selected" : "Select"}
                       </button>
-                      <button onClick={() => handleSaveIndividual(combo)} disabled={exporting} className="px-2 py-1.5 rounded-lg border border-border bg-white text-xs font-medium text-ink hover:bg-surface transition-colors disabled:opacity-50" title="Save this combination">
+                      <button onClick={(e) => { e.stopPropagation(); handleSaveIndividual(combo); }} disabled={exporting} className="px-2 py-1.5 rounded-lg border border-border bg-white text-xs font-medium text-ink hover:bg-surface transition-colors disabled:opacity-50" title="Save this combination">
                         <Download size={14} />
                       </button>
                     </div>
@@ -667,12 +709,114 @@ return (
 {/* High-res preview modal */}
       {showHighRes && (
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm" onClick={() => setShowHighRes(null)}>
-          <div className="relative max-w-5xl max-h-[90vh] bg-white rounded-2xl shadow-2xl overflow-hidden">
-            <button onClick={() => setShowHighRes(null)} className="absolute top-4 right-4 z-10 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"><X size={20} /></button>
-            <img src={showHighRes.url} alt={showHighRes.combo.layoutName} className="max-w-full max-h-[85vh] object-contain" />
-            <div className="p-4 border-t border-border">
-              <h3 className="text-sm font-semibold text-ink">{showHighRes.combo.layoutName}</h3>
-              <p className="text-xs text-muted font-mono">{showHighRes.combo.layoutId}</p>
+          <div className="relative w-full max-w-5xl max-h-[90vh] bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-panel">
+              <h3 className="text-base font-semibold text-accent-sky font-mono truncate pr-4">{showHighRes.combo.layoutName}</h3>
+              <button onClick={() => setShowHighRes(null)} className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-ink transition-colors cursor-pointer">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex flex-col md:flex-row flex-1 min-h-0">
+              <div className="flex-1 p-6 flex items-center justify-center bg-surface min-h-0">
+                <img src={showHighRes.url} alt={showHighRes.combo.layoutName} className="max-w-full max-h-full object-contain" />
+              </div>
+              <div className="w-full md:w-80 p-6 border-t md:border-t-0 md:border-l border-border flex flex-col gap-4 overflow-y-auto">
+                <div>
+                  <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Layout Info</h4>
+                  <div className="space-y-2">
+                    <div className="rounded-xl border border-border bg-white p-2.5">
+                      <p className="text-[10px] text-muted mb-0.5">Name</p>
+                      <p className="text-xs font-medium text-ink truncate" title={showHighRes.combo.layoutName}>{showHighRes.combo.layoutName}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-white p-2.5">
+                      <p className="text-[10px] text-muted mb-0.5">ID</p>
+                      <p className="text-xs font-mono text-ink truncate">{showHighRes.combo.layoutId}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-white p-2.5">
+                      <p className="text-[10px] text-muted mb-0.5">Status</p>
+                      <p className={`text-xs font-medium ${showHighRes.combo.allPresent ? "text-emerald-600" : "text-rose-600"}`}>
+                        {showHighRes.combo.allPresent ? "All objects present" : "Missing objects"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {showHighRes.combo.missingObjectIds.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Missing Objects</h4>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                      <div className="space-y-1">
+                        {showHighRes.combo.missingObjectIds.map((id, i) => (
+                          <p key={i} className="text-xs font-mono text-amber-900 truncate" title={id}>{id}</p>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Objects in Layout</h4>
+                  <div className="space-y-2">
+                    {(() => {
+                      const objs = showHighRes.combo.objects || {};
+                      const bag = objs.bag;
+                      const threats = Array.isArray(objs.threats) ? objs.threats : [];
+                      const others = Array.isArray(objs["non-threats"]) ? objs["non-threats"] : [];
+
+                      if (!bag && threats.length === 0 && others.length === 0) {
+                        return <p className="text-xs text-muted">No object data available.</p>;
+                      }
+
+                      return (
+                        <>
+                          {bag && (
+                            <div className="rounded-xl border border-border bg-white p-2.5">
+                              <p className="text-[10px] text-muted mb-1">Bag</p>
+                              <p className="text-xs font-medium text-ink truncate" title={bag.id || bag.name}>{bag.id || bag.name}</p>
+                            </div>
+                          )}
+                          {threats.map((t: any, idx: number) => (
+                            <div key={idx} className="rounded-xl border border-rose-200 bg-rose-50 p-2.5">
+                              <p className="text-[10px] text-rose-600 mb-1">Threat</p>
+                              <p className="text-xs font-medium text-ink truncate" title={t.id || t.name}>{t.id || t.name}</p>
+                            </div>
+                          ))}
+                          {others.map((o: any, idx: number) => (
+                            <div key={idx} className="rounded-xl border border-border bg-white p-2.5">
+                              <p className="text-[10px] text-muted mb-1">Other</p>
+                              <p className="text-xs font-medium text-ink truncate" title={o.id || o.name}>{o.id || o.name}</p>
+                            </div>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                <div className="mt-auto pt-4">
+                  <button
+                    onClick={() => handleSaveIndividual(showHighRes.combo)}
+                    disabled={exporting}
+                    className={`w-full px-5 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm transition-all cursor-pointer ${
+                      exporting
+                        ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                        : "bg-blue-600 text-white shadow-btn hover:shadow-btn-hover"
+                    }`}
+                  >
+                    {exporting ? (
+                      <>
+                        <Loader2 className="animate-spin" size={16} />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Download size={16} />
+                        Save Image
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
