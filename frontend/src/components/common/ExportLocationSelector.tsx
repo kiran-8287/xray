@@ -41,7 +41,6 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
     const [input, setInput] = useState("");
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
-    const autoOpenedRef = useRef(false);
 
     // Load current configuration once.
     useEffect(() => {
@@ -64,23 +63,10 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
           setPlatform(data.platform || "");
           onConfigLoaded?.(p, isConfigured, data.platform || "");
           
-          // Auto-open dialog ONLY ONCE EVER on first visit when no path is configured.
-          // Uses localStorage to ensure it never shows again after the first time.
-          if (!isConfigured && !autoOpenedRef.current) {
-            const everShown = typeof window !== 'undefined' ? window.localStorage.getItem('exportLocationDialogShown') : null;
-            if (!everShown) {
-              autoOpenedRef.current = true;
-              setSaveError(null);
-              setShowModal(true);
-              try {
-                if (typeof window !== 'undefined') {
-                  window.localStorage.setItem('exportLocationDialogShown', 'true');
-                }
-              } catch {
-                /* ignore storage errors */
-              }
-            }
-          }
+          // NOTE: Auto-open on first visit was removed because it caused repeated
+          // 400 POSTs to /api/user-config/exports-path on every page load when
+          // no path was configured. Users can manually open the dialog via the
+          // "Export location" button when they actually want to set a path.
         } catch (err) {
           console.warn("[ExportLocationSelector] Failed to load export path config:", err);
         } finally {

@@ -107,9 +107,11 @@ function layoutFromAnnotation(a) {
   const nonThreats = Array.isArray(objects['non-threats']) ? objects['non-threats'] : [];
 
   const name =
-    (a.layoutName && String(a.layoutName).trim().length > 0)
-      ? a.layoutName
-      : (a.layoutId || a.id);
+    (a.layoutId && String(a.layoutId).trim().length > 0)
+      ? a.layoutId
+      : (a.layoutName && String(a.layoutName).trim().length > 0)
+        ? a.layoutName
+        : (a.id);
 
   return {
     id: a.layoutId || a.id,
