@@ -1206,7 +1206,6 @@ export default function SavedPage() {
         <div className="flex items-center gap-3">
           <ExportLocationSelector
             scope="saved"
-            autoOpen
             onPathSaved={(p, configured) => {
               showToast(
                 'success',

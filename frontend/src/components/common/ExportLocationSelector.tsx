@@ -23,8 +23,6 @@ export interface ExportLocationSelectorHandle {
 
 interface ExportLocationSelectorProps {
   className?: string;
-  /** Automatically open the dialog on mount when no path has been configured yet. */
-  autoOpen?: boolean;
   /** Which scope to manage: load, saved, or collage. Defaults to 'saved'. */
   scope?: 'load' | 'saved' | 'collage';
   /** Called once after the current config is fetched from the backend. */
@@ -34,7 +32,7 @@ interface ExportLocationSelectorProps {
 }
 
 const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLocationSelectorProps>(
-  function ExportLocationSelector({ className = "", autoOpen = false, scope = "saved", onConfigLoaded, onPathSaved }, ref) {
+  function ExportLocationSelector({ className = "", scope = "saved", onConfigLoaded, onPathSaved }, ref) {
     const [loading, setLoading] = useState(true);
     const [exportsPath, setExportsPath] = useState<string | null>(null);
     const [configured, setConfigured] = useState(false);
@@ -65,10 +63,23 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
           setConfigured(isConfigured);
           setPlatform(data.platform || "");
           onConfigLoaded?.(p, isConfigured, data.platform || "");
-          if (autoOpen && !isConfigured && !autoOpenedRef.current) {
-            autoOpenedRef.current = true;
-            setSaveError(null);
-            setShowModal(true);
+          
+          // Auto-open dialog ONLY ONCE EVER on first visit when no path is configured.
+          // Uses localStorage to ensure it never shows again after the first time.
+          if (!isConfigured && !autoOpenedRef.current) {
+            const everShown = typeof window !== 'undefined' ? window.localStorage.getItem('exportLocationDialogShown') : null;
+            if (!everShown) {
+              autoOpenedRef.current = true;
+              setSaveError(null);
+              setShowModal(true);
+              try {
+                if (typeof window !== 'undefined') {
+                  window.localStorage.setItem('exportLocationDialogShown', 'true');
+                }
+              } catch {
+                /* ignore storage errors */
+              }
+            }
           }
         } catch (err) {
           console.warn("[ExportLocationSelector] Failed to load export path config:", err);
@@ -79,7 +90,7 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
       return () => {
         cancelled = true;
       };
-    }, [scope, autoOpen, onConfigLoaded]);
+    }, [scope, onConfigLoaded]);
 
     const openModal = () => {
       setInput(exportsPath ?? "");
