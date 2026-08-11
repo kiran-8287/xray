@@ -81,7 +81,7 @@ describe('Exports path configuration', () => {
     expect(typeof res.body.exportsPath).toBe('string');
     const savedPath = res.body.exportsPath;
     expect(path.isAbsolute(savedPath)).toBe(true);
-    for (const sub of ['high', 'low', 'annotations', 'catalog']) {
+    for (const sub of ['high', 'low', 'annotations']) {
       await expect(fsPromises.access(path.join(savedPath, sub))).resolves.toBeUndefined();
     }
 

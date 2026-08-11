@@ -282,6 +282,7 @@ const {
     collageLowRoot,
     pixelDataRoot,
     exportsRoot,
+    loadLayoutsDir,
     tempDir,
 } = config;
 
@@ -294,6 +295,7 @@ await fs.mkdir(collageImagesRoot, { recursive: true });
 await fs.mkdir(collageHighRoot, { recursive: true });
 await fs.mkdir(collageLowRoot, { recursive: true });
 await fs.mkdir(pixelDataRoot, { recursive: true });
+await fs.mkdir(loadLayoutsDir, { recursive: true });
 await fs.mkdir(tempDir, { recursive: true });
 await fs.mkdir(path.join(tempDir, 'raw-uploads'), { recursive: true });
 
@@ -1015,11 +1017,14 @@ app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
       if (requestedScope === 'collage') {
         await fs.mkdir(path.join(resolvedPath, 'collage_images', 'high'), { recursive: true });
         await fs.mkdir(path.join(resolvedPath, 'collage_images', 'low'), { recursive: true });
+      } else if (requestedScope === 'load') {
+        // Load-page saves keep high- and low-resolution images together in the
+        // same folder (named "<id> high.png" / "<id> low.png"), so no subfolders.
+        await fs.mkdir(resolvedPath, { recursive: true });
       } else {
         await fs.mkdir(path.join(resolvedPath, 'high'), { recursive: true });
         await fs.mkdir(path.join(resolvedPath, 'low'), { recursive: true });
         await fs.mkdir(path.join(resolvedPath, 'annotations'), { recursive: true });
-        await fs.mkdir(path.join(resolvedPath, 'catalog'), { recursive: true });
       }
     } catch (err) {
       console.error('[user-config/exports-path] Failed to create folder:', err);
@@ -1568,17 +1573,6 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
   }
 });
 
-// Local category-key helper (matches storage.normalizeCategoryKey) so the export
-// can group items into catalog partitions the import service will re-detect.
-function normalizeCategoryKeyLocal(cat) {
-  if (!cat) return 'non_threats';
-  const c = String(cat).toLowerCase().trim();
-  if (/^non[- ]?threat/.test(c)) return 'non_threats';
-  if (c.includes('bag')) return 'bags';
-  if (c.includes('threat') || c.includes('electronic')) return 'threats';
-  return 'non_threats';
-}
-
 // Export saved layout images as a JSON summary and write PNG files to exports folder.
 // This route must be registered before /api/saved-layouts/:id so /export is not swallowed.
 // Supports optional ?jobId= query param so the client can cancel a running bulk
@@ -1626,40 +1620,15 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
         const exportsHighRoot = path.join(exportsRoot, 'high');
         const exportsLowRoot = path.join(exportsRoot, 'low');
         const exportsAnnotationsRoot = path.join(exportsRoot, 'annotations');
-        const exportsCatalogRoot = path.join(exportsRoot, 'catalog');
-        
+
         await fs.mkdir(exportsHighRoot, { recursive: true });
         await fs.mkdir(exportsLowRoot, { recursive: true });
         await fs.mkdir(exportsAnnotationsRoot, { recursive: true });
-        await fs.mkdir(exportsCatalogRoot, { recursive: true });
 
         const exported = [];
-        const savedPaths = { high: [], low: [], annotations: [], catalogs: [] };
+        const savedPaths = { high: [], low: [], annotations: [] };
         const annotationRecords = [];
         const ANNOTATION_PARTITION_CAP = 5000;
-
-        // ---- ALWAYS export the current library catalog first so a re-import on a
-        // fresh machine reproduces the exact items (category + subcategory + pixels +
-        // valid regions) instead of deriving them from annotation copies.
-        // This runs even when there are no layouts to export.
-        try {
-            const allItems = await getItems();
-            const catBins = { bags: [], threats: [], non_threats: [] };
-            for (const it of allItems) {
-                const key = normalizeCategoryKeyLocal(it.category);
-                if (catBins[key]) catBins[key].push(it);
-            }
-            const catFileNames = { bags: 'bags_1.json', threats: 'threats_1.json', non_threats: 'non_threats_1.json' };
-            for (const [key, items] of Object.entries(catBins)) {
-                if (items.length === 0) continue;
-                const catName = catFileNames[key];
-                const catPath = path.join(exportsCatalogRoot, catName);
-                await fs.writeFile(catPath, JSON.stringify(items, null, 2));
-                savedPaths.catalogs.push(catPath);
-            }
-        } catch (err) {
-            console.warn('[export] Failed to write catalog files:', err);
-        }
 
         if (targetLayouts.length === 0) {
             return res.json({
@@ -1876,7 +1845,6 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     high: savedPaths.high.length,
                     low: savedPaths.low.length,
                     annotations: savedPaths.annotations.length,
-                    catalogs: savedPaths.catalogs.length,
                     annotationPartitions: annotationPartitions.length
                 }
             }
@@ -1928,13 +1896,11 @@ app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
             return res.status(400).json({ ok: false, error: 'No combinations provided' });
         }
 
+        // Load-page images are saved together in ONE folder (no high/ low/ subfolders).
         const userExportsRoot = await getExportsPath('load');
         const exportsRoot = path.resolve(userExportsRoot);
-        const exportsHighRoot = path.join(exportsRoot, 'high');
-        const exportsLowRoot = path.join(exportsRoot, 'low');
-        
-        await fs.mkdir(exportsHighRoot, { recursive: true });
-        await fs.mkdir(exportsLowRoot, { recursive: true });
+
+        await fs.mkdir(exportsRoot, { recursive: true });
 
         const exported = [];
         const savedPaths = { high: [], low: [] };
@@ -1980,11 +1946,15 @@ app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
                     renderSceneAsync(lowEnergyObjects, 800, 600, "lowenergy")
                 ]);
 
-                const safeName = (combo.layoutName || combo.layoutId || `combo_${i}`).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
-                const filename = `${safeName}.png`;
+                // Name files from the layout ID with a resolution suffix (e.g.
+                // "abc high.png" / "abc low.png"). Both copies live side-by-side
+                // in the same load-layouts folder.
+                const baseName = (combo.layoutId || combo.layoutName || `combo_${i}`).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
+                const highFilename = `${baseName} high.png`;
+                const lowFilename = `${baseName} low.png`;
 
-                const highEnergyPath = path.join(exportsHighRoot, filename);
-                const lowEnergyPath = path.join(exportsLowRoot, filename);
+                const highEnergyPath = path.join(exportsRoot, highFilename);
+                const lowEnergyPath = path.join(exportsRoot, lowFilename);
 
                 await fs.writeFile(highEnergyPath, highPngBuffer);
                 await fs.writeFile(lowEnergyPath, lowPngBuffer);
@@ -1994,7 +1964,7 @@ app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
 
                 exported.push({
                     layoutId: combo.layoutId, layoutName: combo.layoutName,
-                    highEnergyPath, lowEnergyPath, highEnergyFilename: filename, lowEnergyFilename: filename,
+                    highEnergyPath, lowEnergyPath, highEnergyFilename: highFilename, lowEnergyFilename: lowFilename,
                 });
             } catch (err) {
                 console.error(`[export] Failed: ${combo.layoutId}:`, err);

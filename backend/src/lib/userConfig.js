@@ -6,7 +6,8 @@
  *
  * Each destination is INDEPENDENT so the user can pick a different folder for
  * each page without affecting the others:
- *   - load   → where Load-page exports (Save All / Save Selected / individual)
+ *   - load   → where Load-page exports (Save All / Save Selected / individual).
+ *              Defaults to backend/data/load_layouts (high+low PNGs in one folder).
  *   - saved  → where Saved-page exports (Save All / Save Selected / individual)
  *   - collage→ where Collage-page images are rendered and saved
  */
@@ -27,7 +28,7 @@ const SCOPE_KEYS = {
 
 // Default user config. null means "use the built-in default for that scope".
 const DEFAULT_USER_CONFIG = {
-  loadExportsPath: null,     // default: config.exportsRoot  (backend/data/exports)
+  loadExportsPath: null,     // default: config.loadLayoutsDir (backend/data/load_layouts)
   savedExportsPath: null,    // default: config.exportsRoot  (backend/data/exports)
   collageExportsPath: null,  // default: config.collageImagesRoot (backend/data/collage_images)
 };
@@ -40,6 +41,7 @@ function scopeKey(scope) {
 
 /** Built-in default folder for a scope (used when the user hasn't set one). */
 function defaultPathForScope(scope) {
+  if (scope === 'load') return config.loadLayoutsDir;
   if (scope === 'collage') return config.collageImagesRoot;
   return config.exportsRoot;
 }
