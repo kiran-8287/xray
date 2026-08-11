@@ -40,7 +40,7 @@ export default function LoadPage() {
   const [pagination, setPagination] = useState<PaginationInfo | null>(null);
   const [selectedForExport, setSelectedForExport] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
-  const [exportMode, setExportMode] = useState<"all" | "selected" | "individual" | null>(null);
+  const [exportMode, setExportMode] = useState<"all" | "selected" | "individual" | "page" | null>(null);
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [renderingPreviews, setRenderingPreviews] = useState<Set<string>>(new Set());
@@ -51,11 +51,15 @@ export default function LoadPage() {
   const renderingPreviewsRef = useRef<Set<string>>(new Set());
   const generateAbortRef = useRef<AbortController | null>(null);
 
+  // Refs to support buffering the next page (page-by-page workflow)
+  const lastGeneratedPageRef = useRef<number | null>(null);
+  const prefetchNextPageRef = useRef<string>("");
+
   // Keep refs in sync with state
   useEffect(() => { previewUrlsRef.current = previewUrls; }, [previewUrls]);
   useEffect(() => { renderingPreviewsRef.current = renderingPreviews; }, [renderingPreviews]);
   const [showSaveOptions, setShowSaveOptions] = useState(false);
-  const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "all" | "selected" | "individual"; combo?: Combination } | null>(null);
+  const [pendingSaveAction, setPendingSaveAction] = useState<{ type: "all" | "selected" | "individual" | "page"; combo?: Combination } | null>(null);
   const [exportsPathConfigured, setExportsPathConfigured] = useState(false);
   // True once the export-location config has been fetched from the backend.
   // Saving must work with the DEFAULT (load layouts) folder even when the user
@@ -272,7 +276,7 @@ export default function LoadPage() {
       const validCombos = analysis?.combinations.filter((c) => c.allPresent) || [];
       setValidCombinations(validCombos); setPage(1); setSelectedForExport(new Set()); setPhase("generating");
       showToast("info", `Generating images for ${validCombos.length} valid combinations...`);
-      generatePreviews(validCombos.slice(0, PAGE_SIZE));
+      generatePreviews(validCombos.slice(0, PAGE_SIZE), 1);
     }
   };
 /** Generate preview thumbnail for a set of combinations via /api/render-preview
@@ -280,13 +284,14 @@ export default function LoadPage() {
  *  matching the pattern used in CollagePage. */
   const MAX_CONCURRENT_RENDERS = 3;
 
-  const generatePreviews = async (combos: Combination[]) => {
+  const generatePreviews = async (combos: Combination[], pageNum: number | null = null) => {
     // Abort any in-flight generation for a previous page
     if (generateAbortRef.current) {
       generateAbortRef.current.abort();
     }
     const controller = new AbortController();
     generateAbortRef.current = controller;
+    if (pageNum != null) lastGeneratedPageRef.current = pageNum;
 
     const semaphore = { current: 0, queue: [] as (() => void)[] };
     const acquire = () => new Promise<void>((resolve) => {
@@ -368,7 +373,7 @@ export default function LoadPage() {
   }, [validCombinations, page, pagination]);
 
   /** Generate previews for new page when it changes */
-  useEffect(() => { if ((phase === "results" || phase === "generating") && currentPageCombos.length > 0) { generatePreviews(currentPageCombos); } }, [phase, page, validCombinations.length]);
+  useEffect(() => { if ((phase === "results" || phase === "generating") && currentPageCombos.length > 0) { generatePreviews(currentPageCombos, page); } }, [phase, page, currentPageCombos]);
 
   /** Move from "generating" to "results" once first batch of previews are requested */
   useEffect(() => {
@@ -377,30 +382,74 @@ export default function LoadPage() {
       return () => clearTimeout(t);
     }
   }, [phase, validCombinations.length]);
+
+  /** Buffer the next page's previews once the current page has finished rendering.
+   *  Page-by-page workflow (like the Collage/upload flows): only ever render one
+   *  page at a time and pre-render at most the NEXT page, so mass loads never
+   *  trigger a one-shot render of everything at once. */
+  useEffect(() => {
+    if (phase !== "results" || !pagination) return;
+    const nextStart = page * PAGE_SIZE;
+    const nextCombos = validCombinations.slice(nextStart, nextStart + PAGE_SIZE);
+    if (nextCombos.length === 0) { prefetchNextPageRef.current = ""; return; }
+    // The current page's preview batch must have started AND finished first.
+    if (lastGeneratedPageRef.current !== page) return;
+    const stillBusy = currentPageCombos.some((c) => renderingPreviews.has(c.layoutId));
+    if (stillBusy || exporting) return;
+    const key = `${page + 1}`;
+    if (prefetchNextPageRef.current === key) return;
+    prefetchNextPageRef.current = key;
+    generatePreviews(nextCombos, page + 1);
+  }, [phase, page, pagination, validCombinations, currentPageCombos, renderingPreviews, exporting]);
  
 
-/** Export combinations to exports folder (high + low resolution images) */
-  const exportCombinations = async (combos: Combination[], mode: "all" | "selected" | "individual") => {
+/** Export combinations to exports folder (high + low resolution images). */
+  const exportCombinations = async (combos: Combination[], mode: "all" | "selected" | "individual" | "page") => {
     if (!exportsPathLoaded) { setShowSaveOptions(false); exportLocationRef.current?.open(); return; }
     if (exporting || combos.length === 0) return;
     setExporting(true);
     setExportMode(mode);
     setExportProgress({ done: 0, total: combos.length });
-    const jobId = `load_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    exportJobIdRef.current = jobId;
     const controller = new AbortController();
     exportAbortRef.current = controller;
+    const apiKey = localStorage.getItem("apiKey");
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers["X-API-Key"] = apiKey;
+
+    // Mass volumes are exported in page-sized batches so the backend never has to
+    // render the whole set in a single pass. Each batch writes its high+low PNGs.
+    const EXPORT_BATCH_SIZE = PAGE_SIZE;
     try {
-      const apiKey = localStorage.getItem("apiKey");
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (apiKey) headers["X-API-Key"] = apiKey;
-      const res = await fetchWithTimeout(`${API_BASE}/api/load/export-combinations?jobId=${encodeURIComponent(jobId)}`, { method: "POST", headers, body: JSON.stringify({ combinations: combos, scope: 'load' }), signal: controller.signal }, LONG_REQUEST_TIMEOUT_MS);
-      const data = await res.json();
-      if (data.ok) {
-        const fileCountMsg = data.summary?.fileCount ? ` (${data.summary.fileCount.high} high, ${data.summary.fileCount.low} low)` : "";
-        showToast("success", `Exported ${data.summary?.success || combos.length} combination(s)${fileCountMsg}`);
-        showToast("info", `Saved to: ${exportsPath || "default exports folder"}`);
-      } else { throw new Error(data.error || "Export failed"); }
+      let exportedCount = 0;
+      let highFiles = 0;
+      let lowFiles = 0;
+
+      for (let start = 0; start < combos.length; start += EXPORT_BATCH_SIZE) {
+        if (controller.signal.aborted) { showToast("info", "Export stopped."); break; }
+        const batch = combos.slice(start, start + EXPORT_BATCH_SIZE);
+        const jobId = `load_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        exportJobIdRef.current = jobId;
+        const res = await fetchWithTimeout(`${API_BASE}/api/load/export-combinations?jobId=${encodeURIComponent(jobId)}`,
+          { method: "POST", headers, body: JSON.stringify({ combinations: batch, scope: 'load' }), signal: controller.signal },
+          LONG_REQUEST_TIMEOUT_MS);
+        const data = await res.json();
+        if (!data.ok) { throw new Error(data.error || "Export failed"); }
+        exportedCount += data.summary?.success || batch.length;
+        highFiles += data.summary?.fileCount?.high || 0;
+        lowFiles += data.summary?.fileCount?.low || 0;
+        setExportProgress({ done: Math.min(start + EXPORT_BATCH_SIZE, combos.length), total: combos.length });
+      }
+
+      if (!controller.signal.aborted) {
+        showToast("success", `Exported ${exportedCount} combination(s) (${highFiles} high, ${lowFiles} low)`);
+        showToast("info", `Saved to: ${exportsPath || "load layouts folder (default)"}`);
+
+        // Save-This-Page workflow: once a page is saved, move on to the buffered
+        // next page so the user can keep going page by page.
+        if (mode === "page" && pagination && pagination.page < pagination.totalPages) {
+          goToPage(page + 1);
+        }
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") { showToast("info", "Export stopped."); }
       else { showToast("error", `Export failed: ${err instanceof Error ? err.message : String(err)}`); }
@@ -420,6 +469,7 @@ export default function LoadPage() {
 
   const handleSaveAll = () => { if (validCombinations.length === 0) return; setPendingSaveAction({ type: "all" }); setShowSaveOptions(true); };
   const handleSaveSelected = () => { if (selectedForExport.size === 0) { showToast("error", "No combinations selected"); return; } setPendingSaveAction({ type: "selected" }); setShowSaveOptions(true); };
+  const handleSaveThisPage = () => { if (currentPageCombos.length === 0) return; setPendingSaveAction({ type: "page" }); setShowSaveOptions(true); };
   const handleSaveIndividual = (combo: Combination) => { setPendingSaveAction({ type: "individual", combo }); setShowSaveOptions(true); };
 
   const confirmSave = () => {
@@ -428,6 +478,7 @@ export default function LoadPage() {
     let combosToExport: Combination[] = [];
     if (pendingSaveAction.type === "all") { combosToExport = validCombinations; }
     else if (pendingSaveAction.type === "selected") { combosToExport = validCombinations.filter((c) => selectedForExport.has(c.layoutId)); }
+    else if (pendingSaveAction.type === "page") { combosToExport = currentPageCombos; }
     else if (pendingSaveAction.type === "individual" && pendingSaveAction.combo) { combosToExport = [pendingSaveAction.combo]; }
     const type = pendingSaveAction.type;
     setPendingSaveAction(null);
@@ -449,6 +500,8 @@ export default function LoadPage() {
   const handleReset = () => {
     setPhase("upload"); setAnalysis(null); setValidCombinations([]); setPage(1);
     setSelectedForExport(new Set()); setPreviewUrls({}); setShowHighRes(null); setPagination(null);
+    prefetchNextPageRef.current = "";
+    lastGeneratedPageRef.current = null;
   };
 return (
     <div className="min-h-screen bg-surface">
@@ -618,11 +671,15 @@ return (
                 {selectedForExport.size > 0 && (<span className="text-xs text-muted">({selectedForExport.size} selected)</span>)}
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <button onClick={handleSaveThisPage} disabled={exporting || currentPageCombos.length === 0} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title="Save only the 100 combinations shown on this page, then move to the next">
+                  {exporting && exportMode === "page" ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                  Save This Page ({currentPageCombos.length})
+                </button>
                 <button onClick={handleSaveSelected} disabled={exporting || selectedForExport.size === 0} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-white text-sm font-semibold text-ink hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                   {exporting && exportMode === "selected" ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                   Save Selected ({selectedForExport.size})
                 </button>
-                <button onClick={handleSaveAll} disabled={exporting || validCombinations.length === 0} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                <button onClick={handleSaveAll} disabled={exporting || validCombinations.length === 0} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-white text-sm font-semibold text-ink hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                   {exporting && exportMode === "all" ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                   Save All
                 </button>
@@ -823,7 +880,7 @@ return (
       )}
 
       {/* Save confirmation modal */}
-      <ConfirmModal isOpen={showSaveOptions} title="Confirm Export" message={pendingSaveAction?.type === "all" ? `Save all ${validCombinations.length} combinations as high + low resolution images?` : pendingSaveAction?.type === "selected" ? `Save ${selectedForExport.size} selected combinations as high + low resolution images?` : `Save this combination as high + low resolution images?`} confirmLabel="Save" cancelLabel="Cancel" confirmVariant="primary" onConfirm={confirmSave} onCancel={cancelSave} />
+      <ConfirmModal isOpen={showSaveOptions} title="Confirm Export" message={pendingSaveAction?.type === "all" ? `Save all ${validCombinations.length} combinations as high + low resolution images?` : pendingSaveAction?.type === "selected" ? `Save ${selectedForExport.size} selected combinations as high + low resolution images?` : pendingSaveAction?.type === "page" ? `Save this page (${currentPageCombos.length} combinations on page ${page}) as high + low resolution images, then continue to the next page?` : `Save this combination as high + low resolution images?`} confirmLabel="Save" cancelLabel="Cancel" confirmVariant="primary" onConfirm={confirmSave} onCancel={cancelSave} />
     </div>
   );
 }

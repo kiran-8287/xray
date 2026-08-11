@@ -129,6 +129,7 @@ function classifyPageHint(req) {
         if (p.startsWith('/upload')) return 'upload';
         if (p.startsWith('/library')) return 'library';
         if (p.startsWith('/collage') || p.startsWith('/generate')) return 'collage';
+        if (p.startsWith('/load')) return 'load';
         if (p.startsWith('/benchmark') || p.startsWith('/bench')) return 'benchmark';
         if (p.startsWith('/settings')) return 'settings';
         if (p.startsWith('/analysis')) return 'analysis';
