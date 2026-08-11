@@ -11,6 +11,7 @@ import { isUploadUnsaved } from "./lib/navigationGuard";
 import { loadCustomSubcategories } from "./config/categories";
 import { GenerationService } from "./lib/generationService";
 import { initializeCacheManager } from "./lib/cacheManager";
+import { isLoadUnsaved, setLoadUnsaved } from "./lib/navigationGuard";
 import { useEffect, useRef, useState } from "react";
 
 // Register Service Worker for offline support and image caching
@@ -46,16 +47,22 @@ function NavigationGuard() {
     const isNavigatingToCustomize = nextLocation.pathname.startsWith("/customize");
     const collageBlocked = isOnCollagePage && (isGenerating || hasResults) && !isNavigatingToCustomize;
 
-    const isOnUploadPage = location.pathname === "/" || location.pathname === "/library";
+    const isOnUploadPage = location.pathname === "/";
     const uploadBlocked = isOnUploadPage && isUploadUnsaved();
 
-    const blocked = collageBlocked || uploadBlocked;
+    const isOnLoadPage = location.pathname === "/load";
+    const loadBlocked = isOnLoadPage && isLoadUnsaved();
+
+    const blocked = collageBlocked || uploadBlocked || loadBlocked;
 
     if (blocked && !showDialog) {
-      setMessage(collageBlocked
-        ? "Combination generation is in progress. If you leave this page, progress will be discarded."
-        : "You have staged files that haven't been saved. Leaving will discard unsaved items in this batch."
-      );
+      if (collageBlocked) {
+        setMessage("Combination generation is in progress or has results. If you leave this page, progress will be discarded.");
+      } else if (uploadBlocked) {
+        setMessage("You have staged files that haven't been saved. Leaving will discard unsaved items in this batch.");
+      } else if (loadBlocked) {
+        setMessage("You have uploaded annotations that haven't been saved. If you leave this page, your progress will be lost.");
+      }
     }
 
     return blocked;
@@ -71,6 +78,9 @@ function NavigationGuard() {
   const handleDiscard = () => {
     if (GenerationService.isGenerating() || GenerationService.hasGeneratedResults()) {
       GenerationService.clear();
+    }
+    if (isLoadUnsaved()) {
+      setLoadUnsaved(false);
     }
     setShowDialog(false);
     if (pendingLocation) {

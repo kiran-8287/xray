@@ -9,6 +9,7 @@ import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
 import ConfirmModal from "../components/common/ConfirmModal";
 import ExportLocationSelector, { ExportLocationSelectorHandle } from "../components/common/ExportLocationSelector";
+import { setLoadUnsaved } from "../lib/navigationGuard";
 
 const API_BASE = API_BASE_URL;
 const PAGE_SIZE = 100;
@@ -101,6 +102,33 @@ export default function LoadPage() {
     };
     loadLibraryIds();
   }, []);
+
+  // Warn user and prevent navigation/refresh when annotations are loaded or analysis is in progress
+  useEffect(() => {
+    const hasUnsavedProgress = uploadedFiles.length > 0 || phase !== "upload";
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (hasUnsavedProgress) {
+        event.preventDefault();
+        event.returnValue = "You have uploaded annotations that haven't been saved. If you leave this page, your progress will be lost.";
+        return event.returnValue;
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [uploadedFiles.length, phase]);
+
+  // Register unsaved state with global navigation guard
+  useEffect(() => {
+    const hasUnsavedProgress = uploadedFiles.length > 0 || phase !== "upload";
+    setLoadUnsaved(hasUnsavedProgress);
+    return () => {
+      setLoadUnsaved(false);
+    };
+  }, [uploadedFiles.length, phase]);
 
   const handleFilesSelected = (files: FileList | null) => {
     if (!files || files.length === 0) return;

@@ -328,16 +328,21 @@ export default function CollagePage() {
     }
   }, [failures]);
 
-  // Warn user and clean up if they reload during generation
+  // Warn user and clean up if they reload during generation or if results exist
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      // Only warn if generation is in progress
       if (GenerationService.isGenerating()) {
         // Clean up the generation process
         GenerationService.abort();
 
         // Show browser's native confirmation dialog
         const message = "Combination generation is in progress. If you reload, all progress will be lost. Are you sure you want to continue?";
+        event.returnValue = message;
+        return message;
+      }
+
+      if (GenerationService.hasGeneratedResults()) {
+        const message = "You have generated combinations that haven't been fully saved. If you reload, progress will be lost. Are you sure you want to continue?";
         event.returnValue = message;
         return message;
       }

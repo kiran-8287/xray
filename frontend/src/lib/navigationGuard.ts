@@ -1,6 +1,7 @@
 import { useRef, useCallback } from "react";
 
 const uploadUnsavedRef = { current: false };
+const loadUnsavedRef = { current: false };
 
 export function setUploadUnsaved(unsaved: boolean) {
   uploadUnsavedRef.current = unsaved;
@@ -21,4 +22,12 @@ export function useUploadNavigationGuard() {
 
 export function isUploadUnsaved() {
   return uploadUnsavedRef.current;
+}
+
+export function setLoadUnsaved(unsaved: boolean) {
+  loadUnsavedRef.current = unsaved;
+}
+
+export function isLoadUnsaved() {
+  return loadUnsavedRef.current;
 }
