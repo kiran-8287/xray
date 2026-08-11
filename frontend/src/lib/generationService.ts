@@ -77,6 +77,10 @@ let pendingNotify = false;
 let autoSaveStartTime = 0;
 let lastAutoSaveTime = 0; // Track when last auto-save completed
 
+// Abort flag for split generation - prevents the sequential batch loop from
+// continuing after clear()/abort() is called during navigation away.
+let generationAborted = false;
+
 // Backpressure hook for split generation: when the in-memory buffer fills up,
 // a sub-batch pauses and stores a resume callback here. It is invoked from
 // saveCurrentPage() / processNextAutoSavePage() via checkAndRefillBuffer() once
@@ -754,6 +758,9 @@ export const GenerationService = {
   async startGeneration(params: GenerationParams) {
     const splitParams = params as SplitGenerationParams;
     
+    // Reset abort flag at the start of any new generation
+    generationAborted = false;
+    
     // Check if we should use split generation for large k values
     if (shouldUseSplitGeneration(params.kValue, splitParams)) {
       console.log(`[GenerationService] Using split generation for k=${params.kValue.toLocaleString()}`);
@@ -978,6 +985,9 @@ export const GenerationService = {
   async startSplitGeneration(params: SplitGenerationParams) {
     const { splitBatchSize = 25_000 } = params;
     
+    // Reset abort flag for this generation run
+    generationAborted = false;
+    
     const quotas = calculateDistributionQuotas(
       params.kValue,
       params.threatDistribution,
@@ -1027,6 +1037,12 @@ export const GenerationService = {
     let accumulatedIds: string[] = [];
 
     for (let i = 0; i < quotas.batches.length; i++) {
+      // Check if generation was aborted (e.g., user navigated away)
+      if (generationAborted) {
+        console.log(`[SplitGeneration] Aborted before batch ${i + 1}/${quotas.numBatches}`);
+        break;
+      }
+      
       const batch = quotas.batches[i];
       
       state.progress = { generated: totalGeneratedCount, total: params.kValue };
@@ -1039,6 +1055,9 @@ export const GenerationService = {
         // New items are streamed into generatedBuffer so the first 100
         // appear on page 1 right away, and the next 200 fill pages 2-3.
         const onProgress = (newItems: CombinatorialResult[], newFailures: FailureLog[]) => {
+          // Don't process results if generation was aborted
+          if (generationAborted) return;
+          
           if (newItems.length > 0) {
             generatedBuffer.push(...newItems);
             totalGeneratedCount += newItems.length;
@@ -1157,6 +1176,9 @@ export const GenerationService = {
   },
 
   abort() {
+    // Set abort flag to stop split generation loop from continuing
+    generationAborted = true;
+    
     if (worker) {
       worker.terminate();
       worker = null;
@@ -1310,6 +1332,9 @@ export const GenerationService = {
   },
 
   clear() {
+    // Set abort flag to stop split generation loop from continuing
+    generationAborted = true;
+    
     if (worker) {
       worker.terminate();
       worker = null;
