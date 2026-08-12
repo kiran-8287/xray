@@ -298,7 +298,6 @@ export default function CustomizationPage() {
         subcategory: bagItem.subcategory,
         originalPixelValue: bagItem.pixel_value,
         currentPixelValue: bagItem.pixel_value,
-        oldPixelValue: null,
         stencilId: "bag",
         filepath: bagItem.filepath,
         polygonOutline: bagOutline,
@@ -330,7 +329,6 @@ export default function CustomizationPage() {
         subcategory: item.subcategory,
         originalPixelValue: item.pixel_value,
         currentPixelValue: item.pixel_value,
-        oldPixelValue: null,
         stencilId: "item",
         filepath: item.filepath,
         polygonOutline: itemOutline,
@@ -360,7 +358,6 @@ export default function CustomizationPage() {
         subcategory: threatItem.subcategory,
         originalPixelValue: threatItem.pixel_value,
         currentPixelValue: threatItem.pixel_value,
-        oldPixelValue: null,
         stencilId: "threat",
         filepath: threatItem.filepath,
         polygonOutline: threatOutline,
@@ -414,13 +411,13 @@ export default function CustomizationPage() {
 
     const newObject: SceneObject = {
       id: `custom-object-${Date.now()}`,
+      sourceItemId: item.id,
       name: item.name || item.id,
       library: getStencilKind(item.category),
       subcategory: item.subcategory,
       originalPixelValue: item.pixel_value,
-      currentPixelValue: item.pixel_value,
-      oldPixelValue: null,
-      stencilId: "item",
+        currentPixelValue: item.pixel_value,
+        stencilId: "item",
       filepath: item.filepath,
       polygonOutline: itemOutline,
       transform: { x: pos.x, y: pos.y, width, height, rotation: pos.rotation ?? Math.random() * 360 },
@@ -569,7 +566,6 @@ export default function CustomizationPage() {
         size: { width: bagObject.transform.width, height: bagObject.transform.height },
         originalPixelValue: bagObject.originalPixelValue,
         currentPixelValue: bagObject.currentPixelValue,
-        oldPixelValue: bagObject.oldPixelValue,
         polygonOutline: bagObject.polygonOutline,
         validRegionPolygon,
         layer: bagObject.layer,
@@ -585,7 +581,6 @@ export default function CustomizationPage() {
         rotation: obj.transform.rotation,
         originalPixelValue: obj.originalPixelValue,
         currentPixelValue: obj.currentPixelValue,
-        oldPixelValue: obj.oldPixelValue,
         layer: obj.layer,
       }));
 
@@ -598,7 +593,6 @@ export default function CustomizationPage() {
         rotation: obj.transform.rotation,
         originalPixelValue: obj.originalPixelValue,
         currentPixelValue: obj.currentPixelValue,
-        oldPixelValue: obj.oldPixelValue,
         layer: obj.layer,
       }));
 

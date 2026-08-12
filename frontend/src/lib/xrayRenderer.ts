@@ -74,16 +74,23 @@ export async function drawXRayComposite(
 
   const sorted = [...objects].sort((a, b) => a.layer - b.layer);
 
+  // Resolve the backend item id to fetch 16-bit .npz data for. Objects added on
+  // the Customize page keep a throwaway `custom-object-*` key in `id` for React
+  // identity, while the real library item lives in `sourceItemId`. Without this,
+  // /api/items/:id/pixel-data would 404 for every such object.
+  const getPixelDataId = (obj: SceneObject): string | null => obj.sourceItemId || obj.id || null;
+
   // Try to load 16-bit pixel data for all objects first
   const pixelDataPromises = sorted.map(async (obj) => {
-    if (!obj.id) return null;
-    return await fetchPixelData(obj.id);
+    const pid = getPixelDataId(obj);
+    if (!pid) return null;
+    return await fetchPixelData(pid);
   });
   const pixelDataResults = await Promise.all(pixelDataPromises);
 
   // Check if all objects have pixel data available
   const allHavePixelData = sorted.every((obj, i) => {
-    if (!obj.id) return true; // Skip objects without IDs
+    if (!getPixelDataId(obj)) return true; // Skip objects without a source id
     return pixelDataResults[i] !== null;
   });
 
