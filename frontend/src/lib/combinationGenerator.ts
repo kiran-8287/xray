@@ -51,7 +51,7 @@ function createBagSceneObject(bag: Item): SceneObject {
   const bagHeight = bag.height || bag.width || Math.min(CANVAS_W, CANVAS_H);
   return {
     id: bag.id, name: bag.name, library: "bag", subcategory: bag.subcategory,
-    originalPixelValue: bag.pixel_value, currentPixelValue: bag.pixel_value, oldPixelValue: null,
+    originalPixelValue: bag.pixel_value, currentPixelValue: bag.pixel_value,
     stencilId: "bag", filepath: bag.filepath, polygonOutline: outline,
     transform: { x: bagWidth / 2, y: bagHeight / 2, width: bagWidth, height: bagHeight, rotation: 0 },
     initialWidth: bagWidth, initialHeight: bagHeight, layer: 0, tags: bag.tags || [],
@@ -64,7 +64,7 @@ function createThreatSceneObject(threat: Item, x: number, y: number, rotation: n
   const h = threat.height ? Math.round(threat.height) : 60;
   return {
     id: threat.id, name: threat.name, library: "threat", subcategory: threat.subcategory,
-    originalPixelValue: threat.pixel_value, currentPixelValue: threat.pixel_value, oldPixelValue: null,
+    originalPixelValue: threat.pixel_value, currentPixelValue: threat.pixel_value,
     stencilId: "threat", filepath: threat.filepath, polygonOutline: outline,
     transform: { x, y, width: w, height: h, rotation }, initialWidth: w, initialHeight: h, layer,
   };
@@ -76,7 +76,7 @@ function createNonThreatSceneObject(item: Item, x: number, y: number, rotation: 
   const h = item.height ? Math.round(item.height) : 80;
   return {
     id: item.id, name: item.name, library: "non-threat", subcategory: item.subcategory,
-    originalPixelValue: item.pixel_value, currentPixelValue: item.pixel_value, oldPixelValue: null,
+    originalPixelValue: item.pixel_value, currentPixelValue: item.pixel_value,
     stencilId: "item", filepath: item.filepath, polygonOutline: outline,
     transform: { x, y, width: w, height: h, rotation }, initialWidth: w, initialHeight: h, layer,
   };
@@ -158,7 +158,7 @@ function tryPlaceNonThreats(items: Item[], bagObj: SceneObject, threatObjs: Scen
       if (!pos) continue;
       const testObj: SceneObject = {
         id: "temp", name: item.name, library: "non-threat",
-        originalPixelValue: item.pixel_value, currentPixelValue: item.pixel_value, oldPixelValue: null,
+        originalPixelValue: item.pixel_value, currentPixelValue: item.pixel_value,
         stencilId: "item", filepath: item.filepath, polygonOutline: outline,
         transform: { x: pos.x, y: pos.y, width: w, height: h, rotation: pos.rotation ?? 0 }, layer: 0,
       };

@@ -1385,6 +1385,11 @@ app.post('/api/saved-layouts', requireAuth, async (req, res) => {
     }
     
     try {
+        // Attach segmentation masks (outer boundary polygon points) to each threat
+        // so they are persisted with the saved annotation. Skip silently if a
+        // threat has no resolvable pixel data.
+        await attachThreatSegmentationMasks([layout_json.objects]);
+
         const layout = await createSavedLayout({ id, name, filepath, layout_json });
         res.json({ ok: true, layout });
     } catch (err) {
@@ -1437,6 +1442,11 @@ app.post('/api/saved-layouts/batch', requireAuth, async (req, res) => {
         });
     }
     try {
+        // Attach segmentation masks (outer boundary polygon points) to every
+        // threat across the whole batch in ONE batched pixel-generation call,
+        // then persist. Masks are saved with the annotations only (no UI change).
+        await attachThreatSegmentationMasks(normalized.map((n) => n.layout_json.objects));
+
         const saved = await createSavedLayoutsBatch(normalized);
         res.json({ ok: true, saved: saved.length, savedLayouts: saved });
     } catch (err) {
@@ -1646,6 +1656,12 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             });
         }
 
+        // Publish live progress for Save All / Save Selected so the frontend can
+        // render a progress bar while layouts are being rendered/written.
+        if (jobId) {
+            exportProgressStore.set(jobId, { done: 0, total: targetLayouts.length });
+        }
+
         // Determine the starting partition number by scanning existing annotation files.
         // This prevents overwriting previous exports (e.g., annotations_1.json, annotations_2.json).
         let annotationPartitionNum = 1;
@@ -1666,14 +1682,28 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             console.warn('[export] Failed to scan existing annotation partitions:', err);
         }
 
+        // Generate segmentation masks for ALL threats across the whole export set in
+        // ONE batched, deduped call BEFORE the loop (instead of once per layout), so
+        // a large Save All does not spawn a python child for every single layout.
+        try {
+            await attachThreatSegmentationMasks(targetLayouts.map((l) => l.layout_json?.objects).filter(Boolean));
+        } catch (err) {
+            console.warn('[export] Segmentation mask batch failed:', err.message || err);
+        }
+
         let currentAnnotationPartition = [];
         const annotationPartitions = [];
 
-        for (const layout of targetLayouts) {
+        for (let idx = 0; idx < targetLayouts.length; idx++) {
+            const layout = targetLayouts[idx];
             // Stop at the next layout boundary if the client requested cancellation.
             if (jobId && exportCancellations.has(jobId)) {
                 cancelled = true;
                 break;
+            }
+            // Publish per-layout progress so the frontend progress bar advances live.
+            if (jobId) {
+                exportProgressStore.set(jobId, { done: idx, total: targetLayouts.length });
             }
             try {
                 const objects = layout.layout_json?.objects || {};
@@ -1823,6 +1853,10 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     error: err.message
                 });
             }
+            // Mark this layout as completed so the progress bar reflects what is done.
+            if (jobId) {
+                exportProgressStore.set(jobId, { done: idx + 1, total: targetLayouts.length });
+            }
         }
 
         // Flush remaining annotations in the partition buffer
@@ -1867,8 +1901,21 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
         // with the same jobId (or any future job) is not accidentally short-circuited.
         if (jobId) {
             exportCancellations.delete(jobId);
+            exportProgressStore.delete(jobId);
         }
     }
+});
+
+// Live progress for a running saved-layouts export job (Save All / Save Selected),
+// polled by the frontend so the progress bar advances while images are rendered/written.
+// Registered before /api/saved-layouts/:id so it is not swallowed by the param route.
+app.get('/api/saved-layouts/export/progress', async (req, res) => {
+    const jobId = typeof req.query.jobId === 'string' ? req.query.jobId.trim() : '';
+    const progress = jobId ? exportProgressStore.get(jobId) : null;
+    if (!progress) {
+        return res.json({ ok: true, found: false, done: null, total: null });
+    }
+    res.json({ ok: true, found: true, done: progress.done, total: progress.total });
 });
 
 // Cancel a running bulk export (Save All / Save Selected) job.
@@ -2972,6 +3019,94 @@ app.get("/api/items/:id", async (req, res) => {
   }
 });
 
+// Helper: generate segmentation masks (outermost boundary polygon of non-white
+// pixels, i.e. pixel value < 65535) for the THREAT objects across one or more
+// layout objects, reusing the exact same valid-region mask generation pipeline
+// that auto-assigns bag masks. The resulting polygon points are normalized to
+// [0,1] and attached in place as `segmentationMask` on each threat.
+//
+// All threats across the provided layouts are batched into a SINGLE
+// generateValidRegionBatch call (and identical item ids are generated once), so
+// collage "Save Annotations" pages of ~100 combos stay efficient. No new
+// dependencies and nothing is shown in the UI — masks are saved only.
+async function attachThreatSegmentationMasks(layoutObjectsList) {
+    const layoutObjects = Array.isArray(layoutObjectsList) ? layoutObjectsList : [];
+    const allItems = await getItems();
+    const itemMap = new Map(allItems.map((i) => [i.id, i]));
+
+    // Collect every threat reference, deduping mask work by item id.
+    const byId = new Map(); // itemId -> { itemId, npzPath } | null (unresolvable)
+    const refs = []; // { itemId, threat }
+    for (const objects of layoutObjects) {
+        const threats = Array.isArray(objects?.threats) ? objects.threats : [];
+        for (const t of threats) {
+            if (!t || t.id == null) continue;
+            // Reuse an existing mask so already-annotated threats are never recomputed.
+            if (Array.isArray(t.segmentationMask) && t.segmentationMask.length >= 3) {
+                continue;
+            }
+            if (!byId.has(t.id)) {
+                const item = itemMap.get(t.id);
+                const relPath = await resolvePixelDataPath(t.id, item?.pixel_data_path || item?.pixelDataFilename || null);
+                if (!relPath) {
+                    byId.set(t.id, null);
+                } else {
+                    const joined = safeJoin(pixelDataRoot, relPath);
+                    if (!joined.safe || !(await fileExists(joined.fullPath))) {
+                        byId.set(t.id, null);
+                    } else {
+                        byId.set(t.id, { itemId: t.id, npzPath: joined.fullPath });
+                    }
+                }
+            }
+            refs.push({ itemId: t.id, threat: t });
+        }
+    }
+
+    // Gather the tasks we actually need to compute (deduped by item id).
+    const tasks = [];
+    for (const entry of byId.values()) {
+        if (entry) tasks.push(entry);
+    }
+    // Bound the work each python child does to BATCH_FILES_PER_PROCESS files so a
+    // very large Save All (thousands of layouts) never floods a single interpreter.
+    const maskById = new Map();
+    if (tasks.length > 0) {
+        const chunks = [];
+        for (let i = 0; i < tasks.length; i += BATCH_FILES_PER_PROCESS) {
+            chunks.push(tasks.slice(i, i + BATCH_FILES_PER_PROCESS));
+        }
+        for (const chunk of chunks) {
+            let results = [];
+            try {
+                results = await generateValidRegionBatch(chunk);
+            } catch (err) {
+                console.warn(`[saved-layouts] Segmentation mask batch failed: ${err.message || err}`);
+                results = [];
+            }
+            for (const r of results) {
+                if (r && r.ok && Array.isArray(r.data?.points) && r.data.points.length >= 3) {
+                    maskById.set(r.itemId, r.data.points);
+                } else if (r && !r.ok) {
+                    console.warn(`[saved-layouts] Segmentation mask skipped for ${r.itemId}: ${r.error || 'unknown'}`);
+                }
+            }
+        }
+    }
+
+    // Attach the computed mask points to each threat in place (existing masks, if
+    // any, were already kept intact during collection).
+    for (const ref of refs) {
+        const mask = maskById.get(ref.itemId);
+        if (mask && Array.isArray(mask)) ref.threat.segmentationMask = mask;
+    }
+}
+
+// Tiny helper: true when the file exists at the given path.
+async function fileExists(p) {
+    try { await fs.access(p); return true; } catch { return false; }
+}
+
 // Helper: inject pixel_data_path into flat objects array from items database
 async function enrichObjectsWithPixelData(objects) {
   const allItems = await getItems();
@@ -3490,8 +3625,8 @@ if (config.nodeEnv !== 'test') {
     server.maxConnections = 1000;
     server.keepAliveTimeout = 120000; // 2 minutes
     server.headersTimeout = 125000;   // Slightly above keepAliveTimeout
-    server.timeout = 300000;          // 5 minutes
-    server.requestTimeout = 300000;   // 5 minutes
+    server.timeout = 1800000;          // 30 minutes — bulk Save All (1000s of layouts) exceeds 5 min
+    server.requestTimeout = 1800000;   // 30 minutes
 }
 
 export default app;

@@ -212,7 +212,6 @@ function comboToLayout(combo: CombinatorialResult): any {
     size: { width: bagObject.transform.width, height: bagObject.transform.height },
     originalPixelValue: bagObject.originalPixelValue,
     currentPixelValue: bagObject.currentPixelValue,
-    oldPixelValue: bagObject.oldPixelValue,
     polygonOutline: bagObject.polygonOutline,
     validRegionPolygon,
     layer: bagObject.layer,
@@ -230,7 +229,6 @@ function comboToLayout(combo: CombinatorialResult): any {
       rotation: obj.transform.rotation,
       originalPixelValue: obj.originalPixelValue,
       currentPixelValue: obj.currentPixelValue,
-      oldPixelValue: obj.oldPixelValue,
       layer: obj.layer,
     }));
 
@@ -245,7 +243,6 @@ function comboToLayout(combo: CombinatorialResult): any {
       rotation: obj.transform.rotation,
       originalPixelValue: obj.originalPixelValue,
       currentPixelValue: obj.currentPixelValue,
-      oldPixelValue: obj.oldPixelValue,
       layer: obj.layer,
     }));
 

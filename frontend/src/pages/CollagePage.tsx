@@ -53,7 +53,6 @@ function buildLayoutPayload(comb: CombinatorialResult) {
     size: { width: bagObject.transform.width, height: bagObject.transform.height },
     originalPixelValue: bagObject.originalPixelValue,
     currentPixelValue: bagObject.currentPixelValue,
-    oldPixelValue: bagObject.oldPixelValue,
     polygonOutline: bagObject.polygonOutline,
     validRegionPolygon,
     layer: bagObject.layer,
@@ -66,11 +65,10 @@ function buildLayoutPayload(comb: CombinatorialResult) {
     center: { x: obj.transform.x, y: obj.transform.y },
     size: { width: obj.transform.width, height: obj.transform.height },
     rotation: obj.transform.rotation,
-    originalPixelValue: obj.originalPixelValue,
-    currentPixelValue: obj.currentPixelValue,
-    oldPixelValue: obj.oldPixelValue,
-    layer: obj.layer,
-  }));
+      originalPixelValue: obj.originalPixelValue,
+      currentPixelValue: obj.currentPixelValue,
+      layer: obj.layer,
+    }));
   const nonThreats = comb.objects.filter((o: any) => o.library !== "bag" && o.library !== "threat").map((obj: any) => ({
     id: obj.id,
     subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
@@ -80,7 +78,6 @@ function buildLayoutPayload(comb: CombinatorialResult) {
     rotation: obj.transform.rotation,
     originalPixelValue: obj.originalPixelValue,
     currentPixelValue: obj.currentPixelValue,
-    oldPixelValue: obj.oldPixelValue,
     layer: obj.layer,
   }));
   return {
@@ -719,10 +716,9 @@ export default function CollagePage() {
             filepath: bagObject.filepath,
             center: { x: bagObject.transform.x, y: bagObject.transform.y },
             size: { width: bagObject.transform.width, height: bagObject.transform.height },
-            originalPixelValue: bagObject.originalPixelValue,
-            currentPixelValue: bagObject.currentPixelValue,
-            oldPixelValue: bagObject.oldPixelValue,
-            polygonOutline: bagObject.polygonOutline,
+    originalPixelValue: bagObject.originalPixelValue,
+    currentPixelValue: bagObject.currentPixelValue,
+    polygonOutline: bagObject.polygonOutline,
             validRegionPolygon,
             layer: bagObject.layer,
             tags: bagObject.tags || [],
@@ -734,10 +730,9 @@ export default function CollagePage() {
             center: { x: obj.transform.x, y: obj.transform.y },
             size: { width: obj.transform.width, height: obj.transform.height },
             rotation: obj.transform.rotation,
-            originalPixelValue: obj.originalPixelValue,
-            currentPixelValue: obj.currentPixelValue,
-            oldPixelValue: obj.oldPixelValue,
-            layer: obj.layer,
+      originalPixelValue: obj.originalPixelValue,
+      currentPixelValue: obj.currentPixelValue,
+      layer: obj.layer,
           }));
           const nonThreats = comb.objects.filter((o: any) => o.library !== "bag" && o.library !== "threat").map((obj: any) => ({
             id: obj.id,
@@ -746,10 +741,9 @@ export default function CollagePage() {
             center: { x: obj.transform.x, y: obj.transform.y },
             size: { width: obj.transform.width, height: obj.transform.height },
             rotation: obj.transform.rotation,
-            originalPixelValue: obj.originalPixelValue,
-            currentPixelValue: obj.currentPixelValue,
-            oldPixelValue: obj.oldPixelValue,
-            layer: obj.layer,
+      originalPixelValue: obj.originalPixelValue,
+      currentPixelValue: obj.currentPixelValue,
+      layer: obj.layer,
           }));
           const layout_json = {
             threat_count: threats.length,

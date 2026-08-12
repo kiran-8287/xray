@@ -4,7 +4,6 @@ export type SceneObject = {
   library: string;
   originalPixelValue: number;
   currentPixelValue: number;
-  oldPixelValue: number | null;
   stencilId: string;
   filepath?: string;
   polygonOutline?: { x: number; y: number }[];

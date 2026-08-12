@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from
 import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check, CheckCircle2, Loader2, Trash2, Download } from "lucide-react";
 import { getLibrarySubcategories } from "../config/categories";
 import { API_BASE_URL } from "../config/api";
-import { fetchWithTimeout } from "../lib/fetchWithTimeout";
+import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
 import ExportLocationSelector from "../components/common/ExportLocationSelector";
 
 interface SavedLayout {
@@ -411,10 +411,13 @@ export default function SavedPage() {
   const [exporting, setExporting] = useState(false);
   const [exportMode, setExportMode] = useState<'all' | 'selected' | 'single' | null>(null);
   const [selectedForExport, setSelectedForExport] = useState<Set<string>>(new Set());
+  // Live progress bar for bulk saves (Save All / Save Selected): { done, total } layouts saved so far.
+  const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
   
   // References for cancelling a running bulk export (Save All / Save Selected)
   const exportAbortRef = useRef<AbortController | null>(null);
   const exportJobIdRef = useRef<string | null>(null);
+  const exportProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Save-options modal state
   const [showSaveOptionsModal, setShowSaveOptionsModal] = useState(false);
@@ -759,6 +762,8 @@ export default function SavedPage() {
     exportJobIdRef.current = null;
     setExporting(false);
     setExportMode(null);
+    stopExportProgressPolling();
+    setExportProgress(null);
 
     // Abort the client-side fetch so we stop waiting for the response.
     if (controller) {
@@ -783,6 +788,33 @@ export default function SavedPage() {
     }
 
     showToast('info', 'Save process stopped.');
+  };
+
+  // Stop the live progress poll that advances the Save All / Save Selected progress bar.
+  const stopExportProgressPolling = () => {
+    if (exportProgressTimerRef.current) {
+      clearInterval(exportProgressTimerRef.current);
+      exportProgressTimerRef.current = null;
+    }
+  };
+
+  // Start polling the backend for live progress of a running bulk export (Save All /
+  // Save Selected). The backend updates a per-job counter as each layout is saved, so
+  // the progress bar advances during the run instead of sitting at 0 until it finishes.
+  const startExportProgressPolling = (total: number, controller: AbortController) => {
+    stopExportProgressPolling();
+    exportProgressTimerRef.current = setInterval(() => {
+      const jobId = exportJobIdRef.current;
+      if (!jobId || controller.signal.aborted) return;
+      fetch(`${API_BASE}/api/saved-layouts/export/progress?jobId=${encodeURIComponent(jobId)}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (d && d.ok && d.found && typeof d.done === 'number' && typeof d.total === 'number') {
+            setExportProgress({ done: Math.min(d.done, total), total });
+          }
+        })
+        .catch(() => { /* polling is best-effort; ignore transient errors */ });
+    }, 800);
   };
 
   // Export a single layout by id.
@@ -867,6 +899,8 @@ export default function SavedPage() {
 
     setExporting(true);
     setExportMode('selected');
+    setExportProgress({ done: 0, total: selectedForExport.size });
+    startExportProgressPolling(selectedForExport.size, controller);
 
     try {
       const ids = Array.from(selectedForExport).join(',');
@@ -886,7 +920,7 @@ export default function SavedPage() {
       const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}&saveMode=selected&includeImages=${includeImages}&scope=saved`, {
         headers,
         signal: controller.signal,
-      }, 300000);
+      }, LONG_REQUEST_TIMEOUT_MS);
       
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -958,6 +992,8 @@ export default function SavedPage() {
       exportJobIdRef.current = null;
       setExporting(false);
       setExportMode(null);
+      stopExportProgressPolling();
+      setExportProgress(null);
     }
   };
 
@@ -984,6 +1020,8 @@ export default function SavedPage() {
 
     setExporting(true);
     setExportMode('all');
+    setExportProgress({ done: 0, total: pagination.total });
+    startExportProgressPolling(pagination.total, controller);
 
     try {
       // Get API key from localStorage
@@ -1001,7 +1039,7 @@ export default function SavedPage() {
       const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}&saveMode=all&includeImages=${includeImages}&scope=saved`, {
         headers,
         signal: controller.signal,
-      }, 300000); // 5 minute timeout
+      }, LONG_REQUEST_TIMEOUT_MS); // 30 minute timeout
       
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -1073,6 +1111,8 @@ export default function SavedPage() {
       exportJobIdRef.current = null;
       setExporting(false);
       setExportMode(null);
+      stopExportProgressPolling();
+      setExportProgress(null);
     }
   };
 
@@ -1125,6 +1165,16 @@ export default function SavedPage() {
       setDeleting(false);
     }
   };
+
+  // Clean up the progress-polling interval on unmount so it never leaks.
+  useEffect(() => {
+    return () => {
+      if (exportProgressTimerRef.current) {
+        clearInterval(exportProgressTimerRef.current);
+        exportProgressTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Close detail on Escape
   useEffect(() => {
@@ -1269,6 +1319,26 @@ export default function SavedPage() {
           </button>
         )}
       </div>
+
+      {/* Live progress bar — shown only while a bulk save (Save All / Save Selected) is running */}
+      {exporting && exportProgress && (exportMode === 'all' || exportMode === 'selected') && (
+        <div className="mb-4 rounded-xl border border-border bg-panel p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-semibold text-ink flex items-center gap-2">
+              <Loader2 size={16} className="animate-spin text-accent" /> Saving...
+            </span>
+            <span className="text-xs text-muted">
+              {exportProgress.done}/{exportProgress.total} saved
+            </span>
+          </div>
+          <div className="h-2 w-full rounded-full bg-surface overflow-hidden">
+            <div
+              className="h-full bg-accent transition-all duration-300"
+              style={{ width: `${exportProgress.total > 0 ? (exportProgress.done / exportProgress.total) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Filter Bar */}
       <div className="mb-6 rounded-2xl border border-border bg-panel p-4 shadow-sm">
