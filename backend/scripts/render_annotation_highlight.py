@@ -170,17 +170,23 @@ def mask_points_to_image(mask, obj):
     return np.round(world).astype(np.int32).reshape((-1, 1, 2))
 
 
-def box_corners(obj):
-    """Return the 4 rotated corners of the threat's bounding box."""
-    cx = float(obj["center"]["x"])
-    cy = float(obj["center"]["y"])
-    box_w = float(obj["size"]["width"])
-    box_h = float(obj["size"]["height"])
-    angle = float(obj.get("rotation", 0))
-    half = np.array([box_w, box_h]) / 2.0
-    local = np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]], dtype=np.float64) * half
-    world = local @ rot2d(angle).T + np.array([cx, cy])
-    return np.round(world).astype(np.int32)
+def axis_aligned_box(poly):
+    """Return an axis-aligned bounding box (4 corners) tightly enclosing the
+    segmentation-mask polygon. The box is never tilted: it's just the min/max
+    of the mask's filled pixels, which is the standard detection-model format
+    and drops the empty corners of a rotated box.
+    """
+    m = np.zeros((CANVAS_H, CANVAS_W), dtype=np.uint8)
+    cv2.fillPoly(m, [poly.reshape(-1, 1, 2).astype(np.int32)], 1)
+    ys, xs = np.where(m > 0)
+    if len(xs) == 0:
+        pts = poly.reshape(-1, 2)
+        x0, x1 = int(pts[:, 0].min()), int(pts[:, 0].max())
+        y0, y1 = int(pts[:, 1].min()), int(pts[:, 1].max())
+    else:
+        x0, x1 = int(xs.min()), int(xs.max())
+        y0, y1 = int(ys.min()), int(ys.max())
+    return np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.int32)
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +239,10 @@ def highlight_threats(canvas, flat_objects):
         threat_idx += 1
 
         poly = mask_points_to_image(mask, obj)
-        corners = box_corners(obj)
+        # Bounding box derived from the segmentation mask as an axis-aligned box
+        # (standard detection format, never tilted). We ignore the annotation's
+        # rotated center/size/rotation for the box.
+        corners = axis_aligned_box(poly)
 
         # 1) fill the mask in the threat's colour (semi-transparent so the threat
         #    underneath stays visible)

@@ -411,6 +411,7 @@ export default function CustomizationPage() {
 
     const newObject: SceneObject = {
       id: `custom-object-${Date.now()}`,
+      sourceItemId: item.id,
       name: item.name || item.id,
       library: getStencilKind(item.category),
       subcategory: item.subcategory,

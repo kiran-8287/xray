@@ -1,5 +1,9 @@
 export type SceneObject = {
   id: string;
+  /** Original backend library item id when this object was added from the library.
+   *  The renderer uses this to fetch 16-bit .npz pixel data; `id` itself may be a
+   *  throwaway `custom-object-*` key used only for React-list identity. */
+  sourceItemId?: string;
   name: string;
   library: string;
   originalPixelValue: number;
