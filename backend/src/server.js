@@ -1143,7 +1143,7 @@ app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
       const code = err && err.code ? err.code : String(err);
       let message = `Could not create the export folder. Check that the drive exists and is writable. (${code})`;
       if (code === 'EACCES' || code === 'EPERM') {
-        message += ' The container runs as a non-root user (UID 1000). If this is a bind-mounted host folder, make sure the host directory is writable by UID 1000, or choose a path under /app/data (which is automatically fixed on startup).';
+        message += ' The container runs as a non-root user (the uid/gid from PUID/PGID — default 1000). If this is a bind-mounted host folder, make sure the host directory is writable by that user, or choose a path under /app/data (which is automatically fixed on startup).';
       }
       return res.status(400).json({ ok: false, error: message });
     }
