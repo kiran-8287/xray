@@ -6,6 +6,10 @@ Full-stack app for generating and reviewing synthetic X-ray bag scan data.
 - **Backend** — Express + file processing pipelines → http://localhost:8080
 - **Python scripts** — NumPy / SciPy / OpenCV / Pillow spawned by the backend for raw pixel processing
 
+## Documentation
+
+For full documentation, see **[USER_GUIDE.pdf](./USER_GUIDE.pdf)** in the repository. It is the combined page documentation for this project.
+
 ## Installation
 
 The fastest way to run the application is with Docker Compose.
