@@ -17,6 +17,10 @@ export interface Item {
   height?: number;
   /** Normalized polygon outline as [{x, y}] where values are in -0.5..0.5 range */
   polygon_json?: Point[] | string;
+  /** Segmentation mask (normalized [0,1] polygon over the item's own width/height)
+   *  returned by GET /api/items/segmentation-masks. Used to place objects using a
+   *  tight axis-aligned box (from the mask) instead of the raw image rectangle. */
+  segmentationMask?: Point[];
   /** Tags from non-threat list associated with this item (for bags) */
   tags?: string[];
 }

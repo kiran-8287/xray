@@ -61,6 +61,11 @@ const config = {
 
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',
+  // Log retention: rotated monitoring.log.* files older than this are purged.
+  logRetentionDays: parseInt(process.env.LOG_RETENTION_DAYS || '14', 10),
+  // Rotate the active monitoring.log once it exceeds this size (MB) so the
+  // active file is never deleted/truncated while the process is running.
+  logMaxSizeMb: parseInt(process.env.LOG_MAX_SIZE_MB || '100', 10),
 
   // Upload limits
   maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '104857600', 10), // 100MB

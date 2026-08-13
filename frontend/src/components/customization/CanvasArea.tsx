@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from "react";
 import { RotateCw, GripVertical } from "lucide-react";
 import type { SceneObject } from "../../types/customization";
-import { getTransformedValidRegion } from "../../lib/customizationHelpers";
+import { getTransformedValidRegion, getObjectAxisAlignedBox } from "../../lib/customizationHelpers";
 import { drawXRayComposite, imgCache } from "../../lib/xrayRenderer";
 import { API_BASE_URL } from "../../config/api";
 
@@ -145,9 +145,10 @@ export default function CanvasArea({
           .filter((obj) => obj.library !== "bag")
           .map((obj) => {
             const isSelected = selectedObjectId === obj.id;
-            // Use transform dimensions (now set to natural dimensions from CustomizationPage)
-            const objWidth = obj.transform.width;
-            const objHeight = obj.transform.height;
+            // Use the object's footprint (segmentation mask/outline) axis-aligned
+            // box so the visible box hugs the threat — never the full original
+            // image rectangle.
+            const box = getObjectAxisAlignedBox(obj);
 
             return (
               <React.Fragment key={obj.id}>
@@ -156,11 +157,10 @@ export default function CanvasArea({
                     isSelected ? "z-30" : "z-20"
                   }`}
                   style={{
-                    left: obj.transform.x - objWidth / 2,
-                    top: obj.transform.y - objHeight / 2,
-                    width: objWidth,
-                    height: objHeight,
-                    transform: `rotate(${obj.transform.rotation}deg)`,
+                    left: box.left,
+                    top: box.top,
+                    width: box.width,
+                    height: box.height,
                     cursor: "move",
                   }}
                   onMouseDown={(e) => handleMouseDown(e, obj)}
@@ -171,9 +171,8 @@ export default function CanvasArea({
                 </div>
 
                 {isSelected && (() => {
-                  const angleRad = (obj.transform.rotation * Math.PI) / 180;
-                  const topCenterX = obj.transform.x + (objHeight / 2) * Math.sin(angleRad);
-                  const topCenterY = obj.transform.y - (objHeight / 2) * Math.cos(angleRad);
+                  const topCenterX = box.centerX;
+                  const topCenterY = box.top;
 
                   return (
                     <div
@@ -200,7 +199,7 @@ export default function CanvasArea({
                   <div
                     className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-panel/90 border border-border rounded-md px-2 py-0.5 text-[10px] font-semibold text-ink whitespace-nowrap pointer-events-none shadow-card z-40"
                     style={{
-                      left: obj.transform.x,
+                      left: box.centerX,
                     }}
                   >
                     {obj.name || obj.id}

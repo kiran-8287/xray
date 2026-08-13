@@ -24,6 +24,67 @@ export const getTransformedValidRegion = (
   return [];
 };
 
+/**
+ * Return the object's footprint polygon in canvas coords. Uses the segmentation
+ * mask / polygonOutline when present (normalized [0,1], shifted to [-0.5,0.5]),
+ * otherwise the transformed rect corners.
+ */
+export const getObjectFootprintPolygon = (
+  obj: {
+    polygonOutline?: Point[];
+    transform: { x: number; y: number; width: number; height: number; rotation: number };
+  }
+): Point[] => {
+  if (obj.polygonOutline && obj.polygonOutline.length >= 3) {
+    return getTransformedPolygon(
+      { x: obj.transform.x, y: obj.transform.y },
+      { width: obj.transform.width, height: obj.transform.height },
+      obj.transform.rotation,
+      obj.polygonOutline.map(p => ({ x: p.x - 0.5, y: p.y - 0.5 }))
+    );
+  }
+  return getRectCorners(
+    { x: obj.transform.x, y: obj.transform.y },
+    { width: obj.transform.width, height: obj.transform.height },
+    obj.transform.rotation
+  );
+};
+
+/**
+ * Axis-aligned bounding box (in canvas coords, never tilted) of the object's
+ * footprint — i.e. derived from the segmentation mask/outline, so the box hugs
+ * the threat instead of the full original image rectangle.
+ */
+export const getObjectAxisAlignedBox = (
+  obj: {
+    polygonOutline?: Point[];
+    transform: { x: number; y: number; width: number; height: number; rotation: number };
+  }
+): { left: number; top: number; width: number; height: number; centerX: number; centerY: number } => {
+  const b = getAxisAlignedBounds(getObjectFootprintPolygon(obj));
+  const left = b.minX;
+  const top = b.minY;
+  const width = Math.max(1, b.maxX - b.minX);
+  const height = Math.max(1, b.maxY - b.minY);
+  return { left, top, width, height, centerX: left + width / 2, centerY: top + height / 2 };
+};
+
+/**
+ * Compute the axis-aligned bounding box (AABB) of a set of points.
+ * Used so placement/out-of-bounds checks use standard detection-style boxes
+ * (never tilted), regardless of the object's/mask's rotation.
+ */
+export const getAxisAlignedBounds = (points: Point[]): { minX: number; minY: number; maxX: number; maxY: number } => {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, minY, maxX, maxY };
+};
+
 export const isObjectInsideContainer = (
   obj: {
     polygonOutline?: Point[];
@@ -47,18 +108,28 @@ export const isObjectInsideContainer = (
         { width: obj.transform.width, height: obj.transform.height },
         obj.transform.rotation
       );
-  
-  // 1. Verify all corners are inside the valid region
-  for (const corner of objectOutline) {
+
+  // Use the tight axis-aligned bounding box of the footprint (mask boundary),
+  // never the tilted polygon, matching standard detection-model box format.
+  const b = getAxisAlignedBounds(objectOutline);
+  const objectBox: Point[] = [
+    { x: b.minX, y: b.minY },
+    { x: b.maxX, y: b.minY },
+    { x: b.maxX, y: b.maxY },
+    { x: b.minX, y: b.maxY },
+  ];
+
+  // 1. Verify all axis-aligned corners are inside the valid region
+  for (const corner of objectBox) {
     if (!isPointInPolygon(corner, validRegion)) {
       return false;
     }
   }
   
-  // 2. Verify no edge crosses the valid region boundary
-  for (let i = 0; i < objectOutline.length; i++) {
-    const a = objectOutline[i];
-    const b = objectOutline[(i + 1) % objectOutline.length];
+  // 2. Verify no box edge crosses the valid region boundary
+  for (let i = 0; i < objectBox.length; i++) {
+    const a = objectBox[i];
+    const b = objectBox[(i + 1) % objectBox.length];
     if (edgeIntersectsPolygon(a, b, validRegion)) {
       return false;
     }
@@ -66,6 +137,7 @@ export const isObjectInsideContainer = (
   
   return true;
 };
+
 
 export const getRandomPositionInContainer = (
   width: number,

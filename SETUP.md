@@ -40,6 +40,8 @@ To stop:
 docker compose down
 ```
 
+> **File ownership (no sudo needed):** on Linux/macOS, prefer `./bootstrap.sh` (instead of `docker compose up`) — it starts the backend with your own uid/gid (`PUID`/`PGID`). Every file the backend writes into `backend/data` is then owned by *your* account, so you can delete/copy it without `sudo` — essential on office laptops that have no sudo. See **Known deployment issues → `backend/data` is "undeletable"** below.
+
 ### Step 3: Verify the setup
 
 1. Open http://localhost:5174 in your browser.
@@ -99,6 +101,9 @@ Most variables have safe built-in defaults. You only need to change them if you 
 | `EXPORTS_PATH` | `<project>/backend/data/exports` | Only if you want exports saved elsewhere |
 | `TEMP_PATH` | `<project>/backend/data/temp` | Only if you want temp files saved elsewhere |
 | `LOG_LEVEL` | `info` | Only if you want more/less server logging |
+| `LOG_RETENTION_DAYS` | `14` | Number of days to keep rotated `monitoring.log` archives before purging them |
+| `LOG_MAX_SIZE_MB` | `100` | Rotate the active `monitoring.log` once it grows past this size (MB) |
+| `PUID` / `PGID` | `1000` | Linux/macOS only — run the backend as your own uid/gid so `backend/data` files are owned by you (no sudo needed to delete them). Set automatically by `./bootstrap.sh` |
 | `MAX_FILE_SIZE` | `104857600` (100 MB) | Only if you need a different max file size for the `/api/upload` endpoint |
 | `MAX_FILES_PER_UPLOAD` | `5000` | Only if you need to raise/lower the max files per request for `/api/upload` |
 | `UPLOAD_TIMEOUT_MS` | `1800000` (30 min) | Only if you need a longer/shorter timeout for `/api/upload` |
@@ -237,3 +242,104 @@ From `frontend/`:
 - **Multiple Python versions installed:** Make sure the `python` and `pip` commands on your `PATH` point to the same installation where you installed the requirements.
 - **Backend fails to start:** Check that `PORT` is not already in use and that `.env` exists in the project root and `backend/` directories.
 - **Upload fails with large files:** Adjust `MAX_FILE_SIZE` and `UPLOAD_TIMEOUT_MS` in `.env` if needed.
+
+### Logging & monitoring
+
+Logging is **always on**.
+
+- **Request / error log (live, append-only):** every API request writes two newline-delimited JSON entries (`request_started` / `request_finished` with status, latency, memory, page hint, etc.) to:
+  - Local run: `backend/data/storage/monitoring.log`
+  - Docker run: `/app/data/storage/monitoring.log` → host `backend/data/storage/monitoring.log`
+- **Console / app logs:** the backend uses `pino`. The Docker image sets `LOG_LEVEL=warn` by default (quieter terminals); set `LOG_LEVEL=info` for more detail.
+- **Rotation & retention:** the active `monitoring.log` is rotated once it exceeds `LOG_MAX_SIZE_MB` (default **100 MB**), and rotated archives older than `LOG_RETENTION_DAYS` (default **14 days**) are purged automatically — the active file is never deleted or truncated while running.
+- **Dashboard:** a Streamlit dashboard that visualizes these logs lives in `perf/monitoring/` (`streamlit run monitoring_dashboard.py`).
+
+> **Why you might not see any logs:** the log file lives *inside the data folder* (`backend/data/storage/`), not in a top-level `logs/` folder, and the Docker image sets `LOG_LEVEL=warn` so the terminal is quiet while the file still gets written.
+
+### Known deployment issues
+
+#### Backend fails to start: bind-mounted data directory ownership mismatch
+
+**Symptoms:** backend exits immediately with `EACCES: permission denied, mkdir '/app/data/storage'`.
+
+**Cause:** `docker-compose.yml` bind-mounts `./backend/data` to `/app/data`. If that host folder was created/owned by a different UID/GID than the container runtime user, the non-root container process cannot create subdirectories inside it.
+
+**Permanent fix included in this repo:** the backend uses an entrypoint script that self-heals `/app/data` ownership on every container start, so no host-side `sudo`/`chown` is required.
+
+**One-time workaround commands (if needed):**
+
+```bash
+# Option 1: fix ownership from inside a throwaway root container
+docker compose run --rm --user root backend chown -R 1000:1000 /app/data
+
+# Option 2: if Option 1 is blocked by host security policies, run the backend
+# container as the host folder's owner instead of the default node UID.
+# Replace 2263 and 1001 with the UID/GID shown by:
+#   docker compose run --rm --user root backend sh -c "ls -ld /app/data"
+docker compose run --rm --user root backend sh -c "id -u node; ls -ld /app/data"
+```
+
+After applying either option, restart normally:
+
+```bash
+docker compose up --build
+```
+
+#### Custom export folder "does nothing" — files are saved but never show up (Linux + Docker)
+
+**Symptoms:** using the **Export location** button, you pick a custom path on an absolute Linux path such as `/home/you/exports` — saving works (no error, a success toast appears), but **no files appear in the folder** on your machine. Saving to the *default* folders (`backend/data/...`) works fine.
+
+**First: the app never blocks custom paths.** The backend happily creates and writes to any absolute path it can reach. Whether "it can reach" your folder depends on **where the backend is running**:
+
+- **Running natively on Linux (no Docker):** any absolute path works. The user can save anywhere the Linux user running the backend has write permission (`/home/you/exports`, `/mnt/data/...`). Path = host path. Done.
+- **Running inside Docker:** the container is effectively a separate machine with its **own filesystem**. It can only see (1) folders inside the container and (2) folders explicitly **bind-mounted** from the host. In our `docker-compose.yml` only one host folder is mounted:
+  ```
+  ./backend/data  →  /app/data
+  ```
+  So typing `/home/you/exports` is interpreted as `/home/you/exports` **inside the container**. The container creates that folder, writes the files and reports "success!" — but the host never sees the container's private filesystem, so the folder on the host stays empty. The files also disappear if the container is recreated.
+
+That is the whole "silent failure": not a permission check rejecting the path, but a **host-path vs container-path mismatch**.
+
+**Fix — so users can still "save wherever they want":**
+
+1. **Recommended — pick a folder under the mounted data folder:** use `/app/data/exports_custom` (or any `/app/data/...`) in the UI. It persists on the host at `./backend/data/exports_custom`. No config change.
+2. **Map a specific host folder into the container:** add a bind-mount in `docker-compose.yml`, then use the *container-side* path in the UI:
+   ```yaml
+   services:
+     backend:
+       volumes:
+         - ./backend/data:/app/data
+         - /home/you/exports:/exports   # expose a real host folder at /exports
+   ```
+   Now typing `/exports` in the UI writes to `/home/you/exports` on the host. (The host folder must be writable by the container's UID 1000 — `sudo chown -R 1000:1000 /home/you/exports` if needed.)
+3. **Run the backend natively (no Docker):** every absolute host path just works, no mounts required.
+
+The UI **warns you** (instead of silently accepting) when you pick a path that isn't mapped to the host, and the backend rejects read-only destinations immediately at save time.
+
+#### `backend/data` is "undeletable" and you can't manually copy files out of it
+
+**Symptoms:** on Linux you cannot `rm`/modify files or folders under `backend/data`, and pulling generated images out of that folder "doesn't work". You might suspect the app intentionally locks those folders and only lets you change them through the UI.
+
+**That's not the case.** Nothing in the code restricts file access there. The cause is **ownership, not design**: the backend runs in Docker as a fixed UID (previously `node`, UID 1000), so every file it writes into the bind-mounted `./backend/data` is owned by that UID on the host. If your laptop account has a different UID, Linux blocks you from deleting/modifying those files without elevated privileges — no sudo on office laptops means they look "undeletable".
+
+**Recommended fix (no sudo needed) — run the backend as your own UID/GID.** This project now supports `PUID`/`PGID` so the container creates files owned by *your* account. On Linux/macOS the simplest way is:
+
+```bash
+./bootstrap.sh
+```
+
+which automatically starts Docker with `PUID=$(id -u)` / `PGID=$(id -g)`. Or do it manually:
+
+```bash
+PUID=$(id -u) PGID=$(id -g) docker compose up -d --build
+```
+
+From then on, every new file in `backend/data` belongs to you and can be deleted/copied normally — no `sudo` required.
+
+**One-time fallback for files that were already created under an old UID:** on a system that has sudo, you can re-own them once (this also works after switching to `PUID`/`PGID`, since the entrypoint re-chowns `/app/data` on every start):
+
+```bash
+sudo chown -R "$USER":"$USER" backend/data
+```
+
+After either approach, copy/delete files normally. Ownership does not change how the app works — it only controls who can manage the files.

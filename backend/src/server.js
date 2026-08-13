@@ -81,6 +81,53 @@ const importCancellations = new Map();
 const collectDefaultMetrics = client.collectDefaultMetrics;
 collectDefaultMetrics({ timeout: 5000 });
 
+// In Docker the only host-visible folder is the bind-mounted /app/data (see
+// docker-compose.yml). Any custom export path OUTSIDE it lives in the container's
+// ephemeral overlay filesystem: the write silently succeeds but the files never
+// show up on the host and are lost when the container is recreated. We detect that
+// case so we can warn the user instead of letting them "lose" their exports.
+const CONTAINER_DATA_MOUNT = process.env.DATA_MOUNT_PATH || '/app/data';
+
+// True when the backend is running inside a container (Docker sets /.dockerenv).
+async function isContainerized() {
+  try {
+    await fs.access('/.dockerenv');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Prove a directory is actually writable by writing + deleting a tiny probe file.
+// A plain recursive mkdir is a silent no-op on an already-existing directory even
+// when it is read-only, so this is the only reliable way to fail fast.
+async function probeWritableDir(dir) {
+  const probe = path.join(dir, `.xray-write-probe-${process.pid}-${Date.now()}.tmp`);
+  try {
+    await fs.writeFile(probe, 'ok', 'utf8');
+    await fs.unlink(probe);
+    return { ok: true };
+  } catch (err) {
+    const code = err && err.code ? err.code : String(err);
+    const message = err && err.message ? err.message : String(err);
+    try { await fs.unlink(probe); } catch (_) { /* ignore */ }
+    return { ok: false, code, message };
+  }
+}
+
+// Human-friendly explanation for an unwritable export destination, tuned to the
+// current environment so the user actually knows how to fix it.
+function writableErrorText(result, insideContainer) {
+  const code = result.code || 'ERR';
+  if (code === 'EACCES' || code === 'EPERM') {
+    if (insideContainer) {
+      return `The export folder exists but the container's server user cannot write to it (${code}). Pick a folder under ${CONTAINER_DATA_MOUNT}/… (the only folder that is writable and visible on the host), or map an extra bind-mount for your chosen folder in docker-compose.yml.`;
+    }
+    return `The export folder exists but is not writable by the server user (${code}). Choose a folder the server process can write to, or fix the folder's permissions.`;
+  }
+  return `Could not write a test file into the export folder (${code}). Pick a different, writable folder.`;
+}
+
 const httpRequestDuration = new client.Histogram({
     name: 'http_request_duration_seconds',
     help: 'Duration of HTTP requests in seconds',
@@ -118,8 +165,67 @@ const LOG_PATH = path.join(config.dataDir, 'monitoring.log');
 // IMPORTANT: monitoring.log must NEVER be cleared or deleted.
 // These logs are used for presentations and historical analysis.
 // The 'a' flag ensures we only append, never truncate or overwrite.
-const logStream = createWriteStream(LOG_PATH, { flags: 'a' });
+let logStream = createWriteStream(LOG_PATH, { flags: 'a' });
 let inFlightCounter = 0;
+
+// ---- Monitoring log rotation & retention ----
+// monitoring.log is append-only and grows forever unless managed. We rotate it
+// once it exceeds LOG_MAX_SIZE_MB (the active file is renamed, never truncated),
+// and purge rotated files that are older than LOG_RETENTION_DAYS. This gives the
+// archive/purge behaviour asked for in production while keeping the active file
+// (and any in-progress writes) safe.
+const LOG_MAX_BYTES = Math.max(1, config.logMaxSizeMb || 100) * 1024 * 1024;
+const LOG_RETENTION_MS = Math.max(1, config.logRetentionDays || 14) * 24 * 60 * 60 * 1000;
+
+// Matches rotated filenames produced by this module: monitoring.log.<YYYY-MM-DD_HH-mm-ss>
+const ROTATED_LOG_PATTERN = /^monitoring\.log\.\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/;
+
+async function rotateMonitoringLogIfNeeded() {
+  try {
+    const stat = await fs.stat(LOG_PATH);
+    if (stat.size < LOG_MAX_BYTES) return false;
+    const stamp = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-'); // YYYY-MM-DD_HH-mm-ss
+    const rotated = `${LOG_PATH}.${stamp}`;
+    logStream.end();
+    await fs.rename(LOG_PATH, rotated);
+    logStream = createWriteStream(LOG_PATH, { flags: 'a' });
+    logger.warn({ rotated }, 'Monitoring log rotated');
+    return true;
+  } catch (err) {
+    console.warn('[monitoring] Log rotation failed:', err && err.message ? err.message : err);
+    return false;
+  }
+}
+
+async function purgeOldMonitoringLogs() {
+  let removed = 0;
+  try {
+    const files = await fs.readdir(config.dataDir);
+    const now = Date.now();
+    for (const name of files) {
+      if (!ROTATED_LOG_PATTERN.test(name)) continue;
+      const full = path.join(config.dataDir, name);
+      try {
+        const stat = await fs.stat(full);
+        if (now - stat.mtimeMs > LOG_RETENTION_MS) {
+          await fs.unlink(full);
+          removed++;
+        }
+      } catch (_err) { /* ignore per-file errors */ }
+    }
+  } catch (err) {
+    console.warn('[monitoring] Log purge failed:', err && err.message ? err.message : err);
+  }
+  if (removed > 0) logger.warn({ removed }, 'Purged old monitoring log files');
+  return removed;
+}
+
+// Purge stale rotated logs on startup, then every 10 minutes rotate (if needed)
+// and purge. Unref'd so it never keeps the process alive on its own.
+void purgeOldMonitoringLogs();
+setInterval(() => {
+  void rotateMonitoringLogIfNeeded().then(purgeOldMonitoringLogs);
+}, 10 * 60 * 1000).unref?.();
 
 function classifyPageHint(req) {
     const explicit = req.headers['x-spa-page'];
@@ -1042,9 +1148,30 @@ app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
       return res.status(400).json({ ok: false, error: message });
     }
 
+    // Prove the destination is actually writable BEFORE accepting it. Otherwise a
+    // read-only folder (or a host-only path inside Docker) is accepted fine and
+    // then silently "exports 0 files" later with no error.
+    const probe = await probeWritableDir(resolvedPath);
+    if (!probe.ok) {
+      console.error('[user-config/exports-path] Destination is not writable:', probe.message);
+      const insideContainer = await isContainerized();
+      return res.status(400).json({ ok: false, error: writableErrorText(probe, insideContainer) });
+    }
+
+    // In Docker, warn when the chosen path is outside the only host-visible mount.
+    // The folder will be created and written inside the container, but the files
+    // will never appear on the host and will be lost when the container is recreated.
+    let warning = null;
+    if (await isContainerized()) {
+      const mountedRoot = path.resolve(CONTAINER_DATA_MOUNT);
+      if (!resolvedPath.startsWith(mountedRoot)) {
+        warning = `This folder is inside the container but is NOT mapped to your host machine, so files saved here will only exist inside the container and will be lost when the container is recreated. Prefer a path under ${mountedRoot}/…, or add a bind-mount for this folder in docker-compose.yml.`;
+      }
+    }
+
     const userConfig = await setExportsPath(requestedScope, resolvedPath);
     const key = requestedScope === 'load' ? 'loadExportsPath' : requestedScope === 'collage' ? 'collageExportsPath' : 'savedExportsPath';
-    res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key] });
+    res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key], warning });
   } catch (err) {
     console.error('[user-config/exports-path] Error:', err);
     res.status(500).json({ ok: false, error: String(err) });
@@ -1641,6 +1768,17 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
         await fs.mkdir(exportsLowRoot, { recursive: true });
         await fs.mkdir(exportsAnnotationsRoot, { recursive: true });
 
+        // Fail fast if the chosen export folder is read-only / not writable instead
+        // of rendering everything and then reporting every layout as failed.
+        const wrProbe = await probeWritableDir(exportsRoot);
+        if (!wrProbe.ok) {
+          console.error('[saved-layouts/export] Destination not writable:', wrProbe.message);
+          const insideContainer = await isContainerized();
+          if (!res.headersSent) {
+            return res.status(400).json({ ok: false, error: `The export folder is not writable: ${writableErrorText(wrProbe, insideContainer)}` });
+          }
+        }
+
         const exported = [];
         const savedPaths = { high: [], low: [], annotations: [] };
         const annotationRecords = [];
@@ -1959,6 +2097,17 @@ app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
         const exportsRoot = path.resolve(userExportsRoot);
 
         await fs.mkdir(exportsRoot, { recursive: true });
+
+        // Fail fast if the destination is read-only / not writable, instead of
+        // rendering every combination and then reporting "0 exported" with no error.
+        const wrProbe = await probeWritableDir(exportsRoot);
+        if (!wrProbe.ok) {
+          console.error('[export-combinations] Destination not writable:', wrProbe.message);
+          const insideContainer = await isContainerized();
+          if (!res.headersSent) {
+            return res.status(400).json({ ok: false, error: `The export folder is not writable: ${writableErrorText(wrProbe, insideContainer)}` });
+          }
+        }
 
         const exported = [];
         const savedPaths = { high: [], low: [] };
@@ -2874,6 +3023,86 @@ app.post("/api/auto-valid-region-batch", requireAuth, async (req, res) => {
     } catch (error) {
         console.error(`[auto-valid-region-batch] Error:`, error);
         res.status(500).json({ ok: false, error: String(error) });
+    }
+});
+
+// Return cached/computed segmentation masks (normalized [0,1] polygon over each
+// item's own width/height) for the given threat/non-threat item ids.
+// Used so the frontend can attach masks *before* generating/placing objects (so
+// random placement + out-of-bounds checks in the Customization page use the mask,
+// i.e. a tight axis-aligned box) instead of only computing them at save time.
+// Masks are cached in-process per item id so repeat requests are cheap.
+const segmentationMaskCache = new Map(); // itemId -> points[]
+async function getSegmentationMasksByIds(itemIds) {
+    const allItems = await getItems();
+    const itemMap = new Map(allItems.map((i) => [i.id, i]));
+
+    // Resolve pixel-data paths only for ids we don't already have.
+    const wanted = itemIds.filter((id) => id && !segmentationMaskCache.has(id));
+    const byId = new Map(); // itemId -> { itemId, npzPath } | null (unresolvable)
+    for (const id of wanted) {
+        if (!id || byId.has(id)) continue;
+        const item = itemMap.get(id);
+        const relPath = await resolvePixelDataPath(id, item?.pixel_data_path || item?.pixelDataFilename || null);
+        if (!relPath) {
+            byId.set(id, null);
+        } else {
+            const joined = safeJoin(pixelDataRoot, relPath);
+            if (!joined.safe || !(await fileExists(joined.fullPath))) {
+                byId.set(id, null);
+            } else {
+                byId.set(id, { itemId: id, npzPath: joined.fullPath });
+            }
+        }
+    }
+
+    const tasks = [];
+    for (const entry of byId.values()) {
+        if (entry) tasks.push(entry);
+    }
+    if (tasks.length > 0) {
+        const chunks = [];
+        for (let i = 0; i < tasks.length; i += BATCH_FILES_PER_PROCESS) {
+            chunks.push(tasks.slice(i, i + BATCH_FILES_PER_PROCESS));
+        }
+        for (const chunk of chunks) {
+            let results = [];
+            try {
+                results = await generateValidRegionBatch(chunk);
+            } catch (err) {
+                console.warn(`[segmentation-masks] batch failed: ${err.message || err}`);
+                results = [];
+            }
+            for (const r of results) {
+                if (r && r.ok && Array.isArray(r.data?.points) && r.data.points.length >= 3) {
+                    segmentationMaskCache.set(r.itemId, r.data.points);
+                }
+            }
+        }
+    }
+
+    const masks = {};
+    for (const id of itemIds) {
+        const pts = segmentationMaskCache.get(id);
+        if (pts) masks[id] = pts;
+    }
+    return masks;
+}
+
+// GET /api/items/segmentation-masks?ids=id1,id2,... — batch-compute masks for
+// threat/non-threat items so the frontend can use them for placement.
+app.get("/api/items/segmentation-masks", publicApiRateLimiter.middleware(), async (req, res) => {
+    try {
+        const raw = typeof req.query.ids === "string" ? req.query.ids : "";
+        const ids = raw.split(",").map((s) => s.trim()).filter(Boolean);
+        if (ids.length === 0) {
+            return res.json({ ok: true, masks: {} });
+        }
+        const masks = await getSegmentationMasksByIds(ids);
+        res.json({ ok: true, masks });
+    } catch (err) {
+        console.error("[segmentation-masks] Error:", err);
+        res.status(500).json({ ok: false, error: String(err) });
     }
 });
 

@@ -6,6 +6,7 @@ import type { CombinatorialResult, FailureLog } from "../types/customization";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 import { GenerationService } from "../lib/generationService";
+import { attachSegmentationMasks } from "../lib/segmentationMasks";
 import { addCombos, addFailures, getAllCombos, getAllFailures, clearAll as storageClearAll } from "../lib/storageService";
 import { getCategoryConfig, normalizeCategoryName, normalizeCategorizedItems, LIBRARIES_UI, getLibrarySubcategories, clearCustomSubcategoriesCache } from "../config/categories";
 import AddSubcategoryModal from "../components/common/AddSubcategoryModal";
@@ -243,7 +244,12 @@ export default function LibraryPage() {
       // First, determine total pages by fetching page 1
       const BATCH_SIZE = 500;
       const firstRes = await fetchWithTimeout(
-        `${API_BASE_URL}/api/items/categorized?page=1&limit=${BATCH_SIZE}`
+        `${API_BASE_URL}/api/items/categorized?page=1&limit=${BATCH_SIZE}`,
+        undefined,
+        30000,
+        3,
+        1000,
+        [429]
       );
       const firstData = await firstRes.json();
       
@@ -284,7 +290,7 @@ export default function LibraryPage() {
       for (let i = 0; i < remainingPages.length; i += CONCURRENT_LIMIT) {
         const batch = remainingPages.slice(i, i + CONCURRENT_LIMIT);
         const pageFetches = batch.map(page =>
-          fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?page=${page}&limit=${BATCH_SIZE}`)
+          fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?page=${page}&limit=${BATCH_SIZE}`, undefined, 30000, 3, 1000, [429])
             .then(res => res.json())
         );
 
@@ -871,6 +877,14 @@ export default function LibraryPage() {
     setFailures([]);
     setIsGenerating(true);
     setGenerationProgress(`Generating ${kValue} combinations...`);
+
+    // Attach segmentation masks before the worker clones these items so
+    // placement uses the tight mask footprint (-> axis-aligned box).
+    try {
+      await attachSegmentationMasks([...selectedThreats, ...selectedOthers]);
+    } catch (err) {
+      console.warn("Could not attach segmentation masks:", err);
+    }
 
     // Fetch previously-saved layout IDs
     let existingIds: string[] = [];

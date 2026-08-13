@@ -262,7 +262,7 @@ export default function CollagePage() {
         restoredBags.length === 0 && restoredThreats.length === 0 && restoredOthers.length === 0) {
       (async () => {
         try {
-          const res = await fetchWithTimeout(API_BASE_URL + "/api/items/categorized");
+          const res = await fetchWithTimeout(API_BASE_URL + "/api/items/categorized", undefined, 30000, 3, 1000, [429]);
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
           const cat = data.categorized || data;
