@@ -127,7 +127,6 @@ The backend enforces upload limits to protect against resource exhaustion. These
 - **UPLOAD_TIMEOUT_MS** — Request timeout for `/api/upload` (default: 30 minutes). If exceeded, the server returns a clean `408` error instead of crashing.
 
 **For the current frontend upload flow**, files are sent to `/api/process-raw-files` in pages of 100. That endpoint uses a separate hardcoded limit of 5,000 files per request and does not use the timeout setting above. So for typical use, the defaults are sufficient and these settings only need changing if you are using the `/api/upload` endpoint directly.
-From the repository root:
 
 ---
 
@@ -262,24 +261,23 @@ Logging is **always on**.
 
 **Symptoms:** backend exits immediately with `EACCES: permission denied, mkdir '/app/data/storage'`.
 
-**Cause:** `docker-compose.yml` bind-mounts `./backend/data` to `/app/data`. If that host folder was created/owned by a different UID/GID than the container runtime user, the non-root container process cannot create subdirectories inside it.
+**Cause:** `docker-compose.yml` bind-mounts `./backend/data` to `/app/data`. If that host folder is owned by a different UID/GID than the user the container runs as, the non-root container process cannot create subdirectories inside it.
 
-**Permanent fix included in this repo:** the backend uses an entrypoint script that self-heals `/app/data` ownership on every container start, so no host-side `sudo`/`chown` is required.
+**Permanent fix included in this repo:** the backend's entrypoint self-heals `/app/data` ownership on every container start to the `PUID`/`PGID` the backend runs as (defaults: `1000`). On Linux/macOS start with `./bootstrap.sh` so it self-heals to *your* uid/gid — no host-side `sudo`/`chown` and no `EACCES`.
 
-**One-time workaround commands (if needed):**
+**One-time workaround commands (only if you can't use `./bootstrap.sh`):**
 
 ```bash
-# Option 1: fix ownership from inside a throwaway root container
+# Option 1: fix ownership from inside a throwaway root container, using the
+# uid/gid your backend will run as (swap in your own if you started with
+# bootstrap.sh, i.e. PUID=... PGID=...):
 docker compose run --rm --user root backend chown -R 1000:1000 /app/data
 
-# Option 2: if Option 1 is blocked by host security policies, run the backend
-# container as the host folder's owner instead of the default node UID.
-# Replace 2263 and 1001 with the UID/GID shown by:
-#   docker compose run --rm --user root backend sh -c "ls -ld /app/data"
-docker compose run --rm --user root backend sh -c "id -u node; ls -ld /app/data"
+# Option 2: if Option 1 is blocked, inspect the current owner so you can match it:
+docker compose run --rm --user root backend sh -c "ls -ld /app/data"
 ```
 
-After applying either option, restart normally:
+After applying either option, restart normally (or simply run `./bootstrap.sh`):
 
 ```bash
 docker compose up --build
@@ -311,7 +309,7 @@ That is the whole "silent failure": not a permission check rejecting the path, b
          - ./backend/data:/app/data
          - /home/you/exports:/exports   # expose a real host folder at /exports
    ```
-   Now typing `/exports` in the UI writes to `/home/you/exports` on the host. (The host folder must be writable by the container's UID 1000 — `sudo chown -R 1000:1000 /home/you/exports` if needed.)
+   Now typing `/exports` in the UI writes to `/home/you/exports` on the host. (The host folder must be writable by the account the backend runs as — when using `./bootstrap.sh` that is your own uid/gid, so a folder you already own works with no extra setup.)
 3. **Run the backend natively (no Docker):** every absolute host path just works, no mounts required.
 
 The UI **warns you** (instead of silently accepting) when you pick a path that isn't mapped to the host, and the backend rejects read-only destinations immediately at save time.
