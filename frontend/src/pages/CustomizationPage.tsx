@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { 
-  ZoomIn, ZoomOut, Maximize2, Sliders, ShieldAlert, ShieldCheck, Loader2, X
+import {
+  ZoomIn, ZoomOut, Maximize2, Sliders, ShieldAlert, ShieldCheck, Loader2, X, AlertCircle
 } from "lucide-react";
 import type { SceneObject } from "../types/customization";
 import type { Item } from "../types/library";
@@ -17,6 +17,7 @@ import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 import { normalizeCategoryName, getCategoryConfig, normalizeCategorizedItems } from "../config/categories";
 import { GenerationService } from "../lib/generationService";
+import { attachSegmentationMasks, resolveItemOutline } from "../lib/segmentationMasks";
 import ScannedBagsSidebar from "../components/customization/ScannedBagsSidebar";
 import WorkspaceToolbar from "../components/customization/WorkspaceToolbar";
 import CanvasArea from "../components/customization/CanvasArea";
@@ -53,6 +54,14 @@ function getObjectSubcategory(obj: SceneObject, categorizedList: any): string | 
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
+
+const toastStyles = `
+  @keyframes slide-down {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-slide-down { animation: slide-down 0.2s ease-out; }
+`;
 
 function getItemDisplaySize(item: Item): { width: number; height: number } {
   const width = Number.isFinite(item.width) ? Math.round(item.width as number) : 0;
@@ -100,6 +109,14 @@ export default function CustomizationPage() {
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   const lastSavedObjectsRef = useRef<SceneObject[] | null>(null);
 
+  const [toasts, setToasts] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
+
+  const showToast = (type: 'success' | 'error' | 'info', message: string) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setToasts(prev => [...prev, { id, type, message }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+  };
+
   useEffect(() => {
     (async () => {
       // Guard against concurrent fetches that pile up requests
@@ -109,7 +126,7 @@ export default function CustomizationPage() {
       fetchInProgressRef.current = true;
       try {
         const BATCH_SIZE = 500;
-        const firstRes = await fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?page=1&limit=${BATCH_SIZE}`);
+        const firstRes = await fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?page=1&limit=${BATCH_SIZE}`, undefined, 30000, 3, 1000, [429]);
         const firstData = await firstRes.json();
         if (!firstData.ok) {
           setLoadError(firstData.error || "Failed to load library items.");
@@ -136,7 +153,7 @@ export default function CustomizationPage() {
         const remainingPages = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
         for (let i = 0; i < remainingPages.length; i += CONCURRENT_LIMIT) {
           const batch = remainingPages.slice(i, i + CONCURRENT_LIMIT);
-          const pageFetches = batch.map(page => fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?page=${page}&limit=${BATCH_SIZE}`).then(res => res.json()));
+          const pageFetches = batch.map(page => fetchWithTimeout(`${API_BASE_URL}/api/items/categorized?page=${page}&limit=${BATCH_SIZE}`, undefined, 30000, 3, 1000, [429]).then(res => res.json()));
           const batchResponses = await Promise.all(pageFetches);
 
           for (const data of batchResponses) {
@@ -233,7 +250,7 @@ export default function CustomizationPage() {
     localStorage.setItem(storageKey, JSON.stringify(objects));
   }, [objects, searchParams]);
 
-  function buildAndSetObjects(
+  async function buildAndSetObjects(
     catList: any, 
     params: URLSearchParams, 
     setObj: typeof setObjects, 
@@ -254,6 +271,15 @@ export default function CustomizationPage() {
         if (Array.isArray(items)) allItems.push(...items);
       });
     });
+
+    // Attach segmentation masks to threats/non-threats BEFORE placement so random
+    // placement + out-of-bounds checks use the tight mask footprint (-> axis-aligned
+    // box) instead of the original image rectangle.
+    try {
+      await attachSegmentationMasks(allItems.filter((it) => normalizeCategoryName(it.category) !== "bags"));
+    } catch (err) {
+      console.warn("Could not attach segmentation masks:", err);
+    }
 
     const normCat = (c: string) => normalizeCategoryName(c);
     const isBag = (item: Item) => normCat(item.category) === "bags";
@@ -314,8 +340,7 @@ export default function CustomizationPage() {
     const itemsToPlace = hasQueryParams ? matchedOthers : (matchedOthers.length > 0 ? matchedOthers : allOthers.slice(0, 2));
 
     itemsToPlace.forEach((item, i) => {
-      let itemOutline = null;
-      if (item.polygon_json) itemOutline = typeof item.polygon_json === "string" ? JSON.parse(item.polygon_json) : item.polygon_json;
+      let itemOutline = resolveItemOutline(item);
       const naturalDims = imageDimensions.get(item.filepath);
       const w = naturalDims?.width && naturalDims.width > 0 ? naturalDims.width : getItemDisplaySize(item).width;
       const h = naturalDims?.height && naturalDims.height > 0 ? naturalDims.height : getItemDisplaySize(item).height;
@@ -343,8 +368,7 @@ export default function CustomizationPage() {
     const matchedThreats = threatIds.map((id) => allThreats.find((t) => t.id === id)).filter(Boolean) as Item[];
 
     matchedThreats.forEach((threatItem, i) => {
-      let threatOutline = null;
-      if (threatItem.polygon_json) threatOutline = typeof threatItem.polygon_json === "string" ? JSON.parse(threatItem.polygon_json) : threatItem.polygon_json;
+      let threatOutline = resolveItemOutline(threatItem);
       const naturalDims = imageDimensions.get(threatItem.filepath);
       const w = naturalDims?.width && naturalDims.width > 0 ? naturalDims.width : getItemDisplaySize(threatItem).width;
       const h = naturalDims?.height && naturalDims.height > 0 ? naturalDims.height : getItemDisplaySize(threatItem).height;
@@ -398,11 +422,25 @@ export default function CustomizationPage() {
     setHistoryIndex(updatedHistory.length - 1);
   };
 
-  const handleAddObject = (item: Item) => {
+  const handleAddObject = async (item: Item) => {
+    if (objects.some((obj) => obj.id === item.id)) {
+      showToast('error', `${item.name || item.id} is already on the canvas. Each combination must contain unique objects.`);
+      return;
+    }
+
+    // Attach the segmentation mask (if not already present) so this object is
+    // placed with the tight mask footprint (-> axis-aligned box).
+    if (item.category !== "bags") {
+      try {
+        await attachSegmentationMasks([item]);
+      } catch (err) {
+        console.warn("Could not attach segmentation mask:", err);
+      }
+    }
+
     let width = item.width || 100;
     let height = item.height || 100;
-    let itemOutline = null;
-    if (item.polygon_json) itemOutline = typeof item.polygon_json === "string" ? JSON.parse(item.polygon_json) : item.polygon_json;
+    let itemOutline = resolveItemOutline(item);
 
     const bagObject = objects.find((obj) => obj.library === "bag");
     let pos = null as { x: number; y: number; rotation?: number } | null;
@@ -410,8 +448,7 @@ export default function CustomizationPage() {
     if (!pos) pos = { x: 50 + Math.random() * (CANVAS_W - 100), y: 50 + Math.random() * (CANVAS_H - 100), rotation: Math.random() * 360 };
 
     const newObject: SceneObject = {
-      id: `custom-object-${Date.now()}`,
-      sourceItemId: item.id,
+      id: item.id,
       name: item.name || item.id,
       library: getStencilKind(item.category),
       subcategory: item.subcategory,
@@ -935,6 +972,30 @@ export default function CustomizationPage() {
             </div>
           )}
         </aside>
+
+        {toasts.length > 0 && (
+          <>
+            <style>{toastStyles}</style>
+            <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 pointer-events-none">
+              {toasts.map(t => (
+                <div
+                  key={t.id}
+                  className="flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg text-sm font-medium animate-slide-down"
+                  style={{
+                    backgroundColor: t.type === 'success' ? '#ECFDF5' : t.type === 'error' ? '#FEF2F2' : '#EFF4FF',
+                    borderColor: t.type === 'success' ? '#6EE7B7' : t.type === 'error' ? '#FCA5A5' : '#BFDBFE',
+                    color: t.type === 'success' ? '#065F46' : t.type === 'error' ? '#991B1B' : '#1E40AF'
+                  }}
+                >
+                  {t.type === 'success' && <ShieldCheck size={16} />}
+                  {t.type === 'error' && <ShieldAlert size={16} />}
+                  {t.type === 'info' && <AlertCircle size={16} />}
+                  {t.message}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

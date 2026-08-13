@@ -34,6 +34,12 @@ function nextSynthesizedId(usedIds: Set<string>): string {
 }
 
 function parseOutline(item: Item): { x: number; y: number }[] | undefined {
+  // Prefer the segmentation mask (normalized [0,1] polygon over the item) so
+  // random placement uses the tight mask footprint -> axis-aligned box, never
+  // the original image rectangle.
+  if (Array.isArray(item.segmentationMask) && item.segmentationMask.length >= 3) {
+    return item.segmentationMask;
+  }
   if (item.valid_region_points) {
     const raw = typeof item.valid_region_points === "string" ? JSON.parse(item.valid_region_points) : item.valid_region_points;
     if (Array.isArray(raw)) return raw;
@@ -499,7 +505,8 @@ export async function generateCombinations(
     const day = String(now.getDate()).padStart(2, '0');
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const year = String(now.getFullYear()).slice(-2);
-    _idBasePrefix = `SB${day}${month}${year}`;
+    const hour = String(now.getHours()).padStart(2, '0');
+    _idBasePrefix = `SB${day}${month}${year}${hour}`;
     let maxSeq = 0;
     for (const id of existingIds) {
       if (id.startsWith(_idBasePrefix + '-')) {
@@ -795,7 +802,8 @@ export async function generateCombinationsIncremental(
     const day = String(now.getDate()).padStart(2, '0');
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const year = String(now.getFullYear()).slice(-2);
-    _idBasePrefix = `SB${day}${month}${year}`;
+    const hour = String(now.getHours()).padStart(2, '0');
+    _idBasePrefix = `SB${day}${month}${year}${hour}`;
     let maxSeq = 0;
     for (const id of existingIds) {
       if (id.startsWith(_idBasePrefix + '-')) {

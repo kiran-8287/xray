@@ -405,7 +405,11 @@ export default function SavedPage() {
   
   // Delete confirmation state
   const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; layout: SavedLayout | null }>({ show: false, layout: null });
+  const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Export confirmation state
+  const [exportConfirm, setExportConfirm] = useState<{ show: boolean; includeImages: boolean }>({ show: false, includeImages: true });
   
   // Toast notifications
   const [exporting, setExporting] = useState(false);
@@ -685,12 +689,11 @@ export default function SavedPage() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Are you sure you want to delete ${selectedForExport.size} layout(s)?\n\nThis action cannot be undone.`
-    );
+    setBatchDeleteConfirm(true);
+  };
 
-    if (!confirmed) return;
-
+  const confirmBatchDelete = async () => {
+    setBatchDeleteConfirm(false);
     setDeleting(true);
     try {
       const ids = Array.from(selectedForExport);
@@ -1006,12 +1009,18 @@ export default function SavedPage() {
     }
     if (exporting) return;
 
-    const action = includeImages ? 'export layouts with images' : 'export annotations only';
-    const confirmed = window.confirm(
-      `Export all ${pagination.total} layouts?\n\nThis will ${action}.`
-    );
+    setExportConfirm({ show: true, includeImages });
+  };
 
-    if (!confirmed) return;
+  const confirmExportAll = async () => {
+    const { includeImages } = exportConfirm;
+    setExportConfirm({ show: false, includeImages: true });
+    
+    if (!pagination || pagination.total === 0) {
+      showToast('error', 'No layouts to export');
+      return;
+    }
+    if (exporting) return;
 
     const jobId = `exp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     const controller = new AbortController();
@@ -1851,6 +1860,113 @@ export default function SavedPage() {
                 className="px-4 py-2 rounded-lg border border-border bg-white text-sm text-ink hover:bg-surface transition-colors"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Delete Confirmation Modal */}
+      {batchDeleteConfirm && (
+        <div className="fixed inset-0 z-[60] bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setBatchDeleteConfirm(false)}>
+          <div
+            className="w-full max-w-md bg-panel rounded-2xl border border-border shadow-2xl p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center">
+                <Trash2 size={20} className="text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-ink">Delete Layouts</h3>
+                <p className="text-xs text-muted">This action cannot be undone</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-ink mb-6">
+              Are you sure you want to delete <span className="font-mono font-semibold text-accent-sky">{selectedForExport.size}</span> layout(s)?
+              This will permanently remove them from the backend storage.
+            </p>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setBatchDeleteConfirm(false)}
+                disabled={deleting}
+                className="px-4 py-2 rounded-lg border border-border bg-white text-sm text-ink hover:bg-surface transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmBatchDelete}
+                disabled={deleting}
+                className="px-4 py-2 rounded-lg bg-rose-600 text-white text-sm font-medium hover:bg-rose-700 transition-colors disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-2"
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    Delete
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Confirmation Modal */}
+      {exportConfirm.show && (
+        <div className="fixed inset-0 z-[60] bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setExportConfirm({ show: false, includeImages: true })}>
+          <div
+            className="w-full max-w-md bg-panel rounded-2xl border border-border shadow-2xl p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-sky-100 flex items-center justify-center">
+                <Download size={20} className="text-sky-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-ink">Export Layouts</h3>
+                <p className="text-xs text-muted">Confirm export settings</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-ink mb-6">
+              Export all <span className="font-mono font-semibold text-accent-sky">{pagination?.total ?? 0}</span> layouts?
+              <br />
+              <span className="text-muted">
+                This will {exportConfirm.includeImages ? 'export layouts with images' : 'export annotations only'}.
+              </span>
+            </p>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setExportConfirm({ show: false, includeImages: true })}
+                disabled={exporting}
+                className="px-4 py-2 rounded-lg border border-border bg-white text-sm text-ink hover:bg-surface transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmExportAll}
+                disabled={exporting}
+                className="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm font-medium hover:bg-sky-700 transition-colors disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-2"
+              >
+                {exporting ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Exporting...
+                  </>
+                ) : (
+                  <>
+                    <Download size={14} />
+                    Export
+                  </>
+                )}
               </button>
             </div>
           </div>

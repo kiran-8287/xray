@@ -41,6 +41,7 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
     const [input, setInput] = useState("");
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
+    const [saveWarning, setSaveWarning] = useState<string | null>(null);
 
     // Load current configuration once.
     useEffect(() => {
@@ -81,6 +82,7 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
     const openModal = () => {
       setInput(exportsPath ?? "");
       setSaveError(null);
+      setSaveWarning(null);
       setShowModal(true);
     };
 
@@ -116,7 +118,12 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
         setExportsPath(p);
         setConfigured(isConfigured);
         setInput(p ?? "");
-        setShowModal(false);
+        // If the backend returned a persistence warning (e.g. a Docker path that is
+        // not mapped to the host), keep the modal open so the user actually reads it
+        // before relying on this folder.
+        const warning = typeof data.warning === "string" && data.warning.length > 0 ? data.warning : null;
+        setSaveWarning(warning);
+        if (!warning) setShowModal(false);
         try {
           localStorage.setItem("exportsPathConfigured", isConfigured ? "true" : "false");
         } catch {
@@ -190,6 +197,7 @@ return (
                   onChange={(e) => {
                     setInput(e.target.value);
                     setSaveError(null);
+                    setSaveWarning(null);
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && validation.ok && !saving) submit(false);
@@ -280,6 +288,12 @@ return (
               {saveError && (
                 <div className="mb-4 rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700 flex items-start gap-1.5">
                   <AlertTriangle size={14} className="mt-0.5 shrink-0" /> {saveError}
+                </div>
+              )}
+
+              {saveWarning && (
+                <div className="mb-4 rounded-lg bg-amber-50 border border-amber-300 px-3 py-2 text-xs text-amber-800 flex items-start gap-1.5">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" /> {saveWarning}
                 </div>
               )}
 

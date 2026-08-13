@@ -24,6 +24,7 @@ import type {
   DistributionQuota,
 } from "../types/generation";
 import { getTransformedPolygon } from "./geometry";
+import { attachSegmentationMasks } from "./segmentationMasks";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "./fetchWithTimeout";
 import {
@@ -758,6 +759,15 @@ export const GenerationService = {
     // Reset abort flag at the start of any new generation
     generationAborted = false;
     
+    // Attach segmentation masks to the selected threats/non-threats BEFORE
+    // generation so every chunk re-sends the same (mask-enriched) Item objects
+    // and placement uses the tight mask footprint (-> axis-aligned box).
+    try {
+      await attachSegmentationMasks([...params.selectedThreats, ...params.selectedOthers]);
+    } catch (err) {
+      console.warn("[GenerationService] Could not attach segmentation masks:", err);
+    }
+    
     // Check if we should use split generation for large k values
     if (shouldUseSplitGeneration(params.kValue, splitParams)) {
       console.log(`[GenerationService] Using split generation for k=${params.kValue.toLocaleString()}`);
@@ -981,6 +991,15 @@ export const GenerationService = {
 
   async startSplitGeneration(params: SplitGenerationParams) {
     const { splitBatchSize = 25_000 } = params;
+
+    // Attach segmentation masks to the selected threats/non-threats so the
+    // split worker uses the tight mask footprint (-> axis-aligned box) for
+    // placement instead of the original image rectangle.
+    try {
+      await attachSegmentationMasks([...params.selectedThreats, ...params.selectedOthers]);
+    } catch (err) {
+      console.warn("[GenerationService] Could not attach segmentation masks:", err);
+    }
     
     // Reset abort flag for this generation run
     generationAborted = false;

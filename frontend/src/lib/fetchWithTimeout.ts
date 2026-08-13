@@ -17,7 +17,8 @@ export async function fetchWithTimeout(
   options: Parameters<typeof fetch>[1] = {},
   timeoutMs = 30000,
   retries = 0,
-  retryDelayMs = 1000
+  retryDelayMs = 1000,
+  retryOnStatus?: number[]
 ): Promise<Response> {
   let attempt = 0;
   let lastError: unknown;
@@ -48,6 +49,13 @@ export async function fetchWithTimeout(
         // Our internal controller is the source of truth for the timeout.
         signal: controller.signal,
       });
+
+      if (retryOnStatus && retryOnStatus.includes(response.status) && attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+        attempt += 1;
+        continue;
+      }
+
       return response;
     } catch (err: any) {
       lastError = err;

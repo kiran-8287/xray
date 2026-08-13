@@ -1,10 +1,10 @@
 /**
- * Generates a unique ID for synthesized bags in format: SB{DDMMYY}-{X}{ABCDE}
- * Example: SB030726-A00001 (generated on July 3, 2026, first sequence)
+ * Generates a unique ID for synthesized bags in format: SB{DDMMYYHH}-{X}{ABCDE}
+ * Example: SB13082619-A01001 (generated on August 13, 2026 at 19:00, first sequence)
  * 
  * Format breakdown:
  * - SB: Prefix for Synthesized Bag
- * - {DDMMYY}: 2-digit day, month, year
+ * - {DDMMYYHH}: 2-digit day, month, year, hour
  * - {X}: Letter suffix (A-Z)
  * - {ABCDE}: 5-digit sequence number (00001-99999)
  * 
@@ -12,7 +12,7 @@
  * - A00001 to A99999 (99,999 combinations)
  * - B00001 to B99999 (99,999 combinations)
  * - ... up to Z99999
- * - Total: 26 letters × 99,999 = ~2.6 million combinations per day
+ * - Total: 24 hours × 26 letters × 99,999 = ~62.4 million combinations per day
  */
 
 export interface GeneratedId {
@@ -34,12 +34,13 @@ export function generateSynthesizedId(
   const now = new Date();
   const timestamp = now.getTime();
   
-  // Format: DDMMYY (2-digit day, month, year)
+  // Format: DDMMYYHH (2-digit day, month, year, hour)
   const day = String(now.getDate()).padStart(2, '0');
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const year = String(now.getFullYear()).slice(-2);
+  const hour = String(now.getHours()).padStart(2, '0');
   
-  const datePrefix = `${day}${month}${year}`;
+  const datePrefix = `${day}${month}${year}${hour}`;
   
   // Find the next available sequence
   const baseId = `SB${datePrefix}`;
@@ -60,7 +61,7 @@ export function generateSynthesizedId(
 
 /**
  * Find the next available sequence number for a given base ID
- * @param baseId - The base ID without sequence (e.g., "SB030726")
+ * @param baseId - The base ID without sequence (e.g., "SB03072614")
  * @param existingIds - Array of existing IDs to check
  * @returns Next available sequence number (1-based)
  */
@@ -74,7 +75,7 @@ function findNextSequence(baseId: string, existingIds: string[]): number {
   for (const existingId of existingIds) {
     // Check if this ID starts with our base ID
     if (existingId.startsWith(baseId + '-')) {
-      // Extract the letter+number suffix (e.g., "A00001" from "SB030726-A00001")
+      // Extract the letter+number suffix (e.g., "A00001" from "SB03072614-A00001")
       const suffix = existingId.slice(baseId.length + 1);
       
       // Parse the letter and number

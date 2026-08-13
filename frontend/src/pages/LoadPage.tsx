@@ -101,7 +101,7 @@ export default function LoadPage() {
           let page = 1;
           let totalPages = 1;
           do {
-            const res = await fetchWithTimeout(`${API_BASE}/api/items/categorized?page=${page}&limit=500`);
+             const res = await fetchWithTimeout(`${API_BASE}/api/items/categorized?page=${page}&limit=500`, undefined, 30000, 3, 1000, [429]);
             const data = await res.json();
             if (!data.ok || !data.categorized) break;
             for (const cat of Object.values(data.categorized) as any) {
@@ -456,8 +456,10 @@ export default function LoadPage() {
     const EXPORT_BATCH_SIZE = PAGE_SIZE;
     try {
       let exportedCount = 0;
+      let totalFailed = 0;
       let highFiles = 0;
       let lowFiles = 0;
+      let lastErrorMsg = "";
 
       for (let start = 0; start < combos.length; start += EXPORT_BATCH_SIZE) {
         if (controller.signal.aborted) { showToast("info", "Export stopped."); break; }
@@ -470,14 +472,30 @@ export default function LoadPage() {
           LONG_REQUEST_TIMEOUT_MS);
         const data = await res.json();
         if (!data.ok) { throw new Error(data.error || "Export failed"); }
-        exportedCount += data.summary?.success || batch.length;
+        // Use the backend's REAL success count. Never fall back to batch.length when
+        // 0 succeeded — that used to turn silent write failures (unwritable folder /
+        // custom path that doesn't exist on the host) into a false green "Exported N"
+        // toast while zero files were actually saved.
+        const batchSuccess = data.summary?.success ?? 0;
+        const batchFailed = data.summary?.failed ?? 0;
+        const batchErrors = Array.isArray(data.exported) ? data.exported : [];
+        const firstErr = batchErrors.find((e: any) => e && e.error);
+        if (firstErr?.error) lastErrorMsg = firstErr.error;
+        exportedCount += batchSuccess;
+        totalFailed += batchFailed;
         highFiles += data.summary?.fileCount?.high || 0;
         lowFiles += data.summary?.fileCount?.low || 0;
         setExportProgress({ done: Math.min(start + EXPORT_BATCH_SIZE, combos.length), total: combos.length });
       }
 
       if (!controller.signal.aborted) {
-        showToast("success", `Exported ${exportedCount} combination(s) (${highFiles} high, ${lowFiles} low)`);
+        if (exportedCount === 0 && totalFailed > 0) {
+          showToast("error", `Export failed — 0 of ${combos.length} combination(s) were saved (${totalFailed} failed). ${lastErrorMsg ? `Reason: ${lastErrorMsg}` : "Check that the export folder exists and is writable, then try again."}`);
+        } else if (totalFailed > 0) {
+          showToast("error", `Partially exported — ${exportedCount}/${combos.length} saved (${totalFailed} failed). ${lastErrorMsg ? `Reason: ${lastErrorMsg}` : ""}`);
+        } else {
+          showToast("success", `Exported ${exportedCount} combination(s) (${highFiles} high, ${lowFiles} low)`);
+        }
         showToast("info", `Saved to: ${exportsPath || "load layouts folder (default)"}`);
 
         // Save-This-Page workflow: once a page is saved, move on to the buffered
