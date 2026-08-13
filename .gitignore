@@ -83,7 +83,7 @@ PROJECT_REPORT.md
 *.tex
 *.aux
 *.log
-*.pdf
+!USER_GUIDE.pdf
 *.out
 *.toc
 
@@ -106,3 +106,4 @@ backend/data/
 !backend/data/.gitkeep
 
 ss
+docs
