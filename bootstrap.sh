@@ -19,7 +19,19 @@ if [ -n "$DOCKER_COMPOSE_CMD" ]; then
     
     # Disable BuildKit to avoid Windows/Linux compatibility issues
     export DOCKER_BUILDKIT=0
-    
+
+    # Run the backend as the CURRENT user's uid/gid so files it writes into the
+    # bind-mounted backend/data are owned by you and can be deleted WITHOUT sudo
+    # (essential on office laptops that have no sudo access).
+    if command -v id &> /dev/null; then
+        export PUID="$(id -u)"
+        export PGID="$(id -g)"
+        echo "Running backend as uid=$PUID gid=$PGID (your user) — no sudo needed to manage backend/data."
+    else
+        export PUID="${PUID:-1000}"
+        export PGID="${PGID:-1000}"
+    fi
+
     $DOCKER_COMPOSE_CMD up -d --build
     echo ""
     echo "✅ Success! The app is now running!"

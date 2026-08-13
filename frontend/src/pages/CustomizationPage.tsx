@@ -506,10 +506,12 @@ export default function CustomizationPage() {
     setSelectedObjectId(obj.id);
     if (!canvasDivRef.current) return;
     const rect = canvasDivRef.current.getBoundingClientRect();
-    const centerX = obj.transform.x * zoom;
-    const centerY = obj.transform.y * zoom;
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    // Use the same coordinate space as handleMouseMove: canvas coordinates
+    // (center is already in canvas space; convert the client mouse pos by /zoom).
+    const centerX = obj.transform.x;
+    const centerY = obj.transform.y;
+    const mouseX = (e.clientX - rect.left) / zoom;
+    const mouseY = (e.clientY - rect.top) / zoom;
     rotationStartAngleRef.current = Math.atan2(mouseY - centerY, mouseX - centerX) * (180 / Math.PI);
     rotationStartRotationRef.current = obj.transform.rotation;
     setIsRotating(true);
@@ -530,7 +532,10 @@ export default function CustomizationPage() {
       const mouseY = (e.clientY - rect.top) / zoom;
       const currentAngle = Math.atan2(mouseY - centerY, mouseX - centerX) * (180 / Math.PI);
       const deltaAngle = currentAngle - rotationStartAngleRef.current;
-      const angle = rotationStartRotationRef.current + deltaAngle;
+      let angle = rotationStartRotationRef.current + deltaAngle;
+      // Normalize so it never accumulates past 360° (487° === 127° visually,
+      // but keeps the displayed value in the expected 0–360 range).
+      angle = ((angle % 360) + 360) % 360;
       setObjects(objects.map((obj) => obj.id === selectedObjectId ? { ...obj, transform: { ...obj.transform, rotation: Math.round(angle) } } : obj));
     }
   };
@@ -927,7 +932,9 @@ export default function CustomizationPage() {
                         <div className="bg-panel rounded-xl border border-border px-3 py-2 flex items-center justify-between">
                           <span className="text-[11px] text-muted uppercase tracking-wider">Rotation</span>
                           <input type="number" value={Math.round(selectedObj.transform.rotation)} onChange={(e) => {
-                            const val = parseInt(e.target.value) || 0;
+                            let val = parseInt(e.target.value) || 0;
+                            // Normalize to 0–360 so out-of-range values (e.g. 487) can't be stored.
+                            val = ((val % 360) + 360) % 360;
                             setObjects(objects.map((o) => o.id === selectedObjectId ? { ...o, transform: { ...o.transform, rotation: val } } : o));
                           }} onBlur={() => pushHistory(objects)} className="w-20 bg-surface border border-border rounded px-1.5 py-0.5 text-right font-mono text-xs text-ink focus:outline-none focus:border-accent" />
                         </div>

@@ -40,6 +40,8 @@ To stop:
 docker compose down
 ```
 
+> **File ownership (no sudo needed):** on Linux/macOS, prefer `./bootstrap.sh` (instead of `docker compose up`) — it starts the backend with your own uid/gid (`PUID`/`PGID`). Every file the backend writes into `backend/data` is then owned by *your* account, so you can delete/copy it without `sudo` — essential on office laptops that have no sudo. See **Known deployment issues → `backend/data` is "undeletable"** below.
+
 ### Step 3: Verify the setup
 
 1. Open http://localhost:5174 in your browser.
@@ -101,6 +103,7 @@ Most variables have safe built-in defaults. You only need to change them if you 
 | `LOG_LEVEL` | `info` | Only if you want more/less server logging |
 | `LOG_RETENTION_DAYS` | `14` | Number of days to keep rotated `monitoring.log` archives before purging them |
 | `LOG_MAX_SIZE_MB` | `100` | Rotate the active `monitoring.log` once it grows past this size (MB) |
+| `PUID` / `PGID` | `1000` | Linux/macOS only — run the backend as your own uid/gid so `backend/data` files are owned by you (no sudo needed to delete them). Set automatically by `./bootstrap.sh` |
 | `MAX_FILE_SIZE` | `104857600` (100 MB) | Only if you need a different max file size for the `/api/upload` endpoint |
 | `MAX_FILES_PER_UPLOAD` | `5000` | Only if you need to raise/lower the max files per request for `/api/upload` |
 | `UPLOAD_TIMEOUT_MS` | `1800000` (30 min) | Only if you need a longer/shorter timeout for `/api/upload` |
@@ -317,13 +320,26 @@ The UI **warns you** (instead of silently accepting) when you pick a path that i
 
 **Symptoms:** on Linux you cannot `rm`/modify files or folders under `backend/data`, and pulling generated images out of that folder "doesn't work". You might suspect the app intentionally locks those folders and only lets you change them through the UI.
 
-**That's not the case.** Nothing in the code restricts file access there. The cause is **ownership, not design**: the backend runs in Docker as a non-root `node` user (UID **1000**), and `backend/entrypoint.sh` runs `chown -R node:node /app/data` on startup. Every file in `./backend/data` therefore belongs to **UID 1000** on your host. If your host login has a different UID, Linux blocks you from deleting/modifying those files without elevated privileges — and the app itself has **no** download button for exported files (it just writes them to a folder), which is why "manual download" (copying them out of the folder) is what you're trying to do.
+**That's not the case.** Nothing in the code restricts file access there. The cause is **ownership, not design**: the backend runs in Docker as a fixed UID (previously `node`, UID 1000), so every file it writes into the bind-mounted `./backend/data` is owned by that UID on the host. If your laptop account has a different UID, Linux blocks you from deleting/modifying those files without elevated privileges — no sudo on office laptops means they look "undeletable".
 
-**Fix on the Linux host:**
+**Recommended fix (no sudo needed) — run the backend as your own UID/GID.** This project now supports `PUID`/`PGID` so the container creates files owned by *your* account. On Linux/macOS the simplest way is:
+
 ```bash
-# Give your own user ownership of the data folder so you can browse/modify/delete it:
-sudo chown -R "$USER":"$USER" backend/data
-# or, for one-off access, prefix commands with sudo, e.g.:
-sudo ls -la backend/data
+./bootstrap.sh
 ```
-After running `sudo chown`, copy/delete files normally. This affects only file ownership; the app keeps working as before.
+
+which automatically starts Docker with `PUID=$(id -u)` / `PGID=$(id -g)`. Or do it manually:
+
+```bash
+PUID=$(id -u) PGID=$(id -g) docker compose up -d --build
+```
+
+From then on, every new file in `backend/data` belongs to you and can be deleted/copied normally — no `sudo` required.
+
+**One-time fallback for files that were already created under an old UID:** on a system that has sudo, you can re-own them once (this also works after switching to `PUID`/`PGID`, since the entrypoint re-chowns `/app/data` on every start):
+
+```bash
+sudo chown -R "$USER":"$USER" backend/data
+```
+
+After either approach, copy/delete files normally. Ownership does not change how the app works — it only controls who can manage the files.

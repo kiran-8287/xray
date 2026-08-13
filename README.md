@@ -20,6 +20,8 @@ docker compose up --build
 # Stop with:  docker compose down
 ```
 
+> **On Linux/macOS, prefer `./bootstrap.sh` over `docker compose up`.** It runs the backend as your own uid/gid so every file in `backend/data` is owned by your account and can be deleted without `sudo` (important on office laptops). See **SETUP.md → Troubleshooting → Known deployment issues** for details.
+
 Then open **http://localhost:5174**.
 
 ### Windows fallback

@@ -3,6 +3,12 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    environment:
+      # Run the backend as YOUR host uid/gid so files written into the bind-mounted
+      # /app/data are owned by you and can be deleted WITHOUT sudo. Set these to
+      # $(id -u) / $(id -g) on Linux/macOS; bootstrap.sh does that automatically.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
     ports:
       - "8080:8080"
     volumes:
