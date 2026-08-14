@@ -423,10 +423,11 @@ export default function CustomizationPage() {
   };
 
   const handleAddObject = async (item: Item) => {
-    if (objects.some((obj) => obj.id === item.id)) {
-      showToast('error', `${item.name || item.id} is already on the canvas. Each combination must contain unique objects.`);
-      return;
-    }
+    // Allow the same library item to be placed multiple times (repetitions are
+    // useful for generating diversity, e.g. a bag with 2 earphones vs 1 earphone
+    // + 1 book). Each placement gets a unique instance id so React keys and
+    // selection stay correct; `itemId` always points back to the library item.
+    const instanceId = `${item.id}__${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
     // Attach the segmentation mask (if not already present) so this object is
     // placed with the tight mask footprint (-> axis-aligned box).
@@ -448,7 +449,8 @@ export default function CustomizationPage() {
     if (!pos) pos = { x: 50 + Math.random() * (CANVAS_W - 100), y: 50 + Math.random() * (CANVAS_H - 100), rotation: Math.random() * 360 };
 
     const newObject: SceneObject = {
-      id: item.id,
+      id: instanceId,
+      itemId: item.id,
       name: item.name || item.id,
       library: getStencilKind(item.category),
       subcategory: item.subcategory,
@@ -615,7 +617,9 @@ export default function CustomizationPage() {
       } : null;
 
       const threats = objects.filter(o => o.library === "threat").map(obj => ({
-        id: obj.id,
+        // Use the original library item id (itemId) so the backend can resolve
+        // pixel data / masks even when the same item is placed multiple times.
+        id: obj.itemId || obj.id,
         subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
         filepath: obj.filepath,
         center: { x: obj.transform.x, y: obj.transform.y },
@@ -627,7 +631,9 @@ export default function CustomizationPage() {
       }));
 
       const nonThreats = objects.filter(o => o.library !== "bag" && o.library !== "threat").map(obj => ({
-        id: obj.id,
+        // Use the original library item id (itemId) so the backend can resolve
+        // pixel data / masks even when the same item is placed multiple times.
+        id: obj.itemId || obj.id,
         subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
         filepath: obj.filepath,
         center: { x: obj.transform.x, y: obj.transform.y },

@@ -128,6 +128,19 @@ function writableErrorText(result, insideContainer) {
   return `Could not write a test file into the export folder (${code}). Pick a different, writable folder.`;
 }
 
+// In Docker, a path outside the bind-mounted /app/data lives on the container's
+// ephemeral overlay filesystem: writes succeed but files never appear on the host
+// and are lost when the container is recreated. Returns an error message if the
+// path is unusable, or null if it is safe to use.
+async function containerPathError(resolvedPath) {
+  if (!(await isContainerized())) return null;
+  const mountedRoot = path.resolve(CONTAINER_DATA_MOUNT);
+  if (!resolvedPath.startsWith(mountedRoot)) {
+    return `This folder (${resolvedPath}) is inside the container but is NOT mapped to your host machine, so files saved here would only exist inside the container and would be lost when the container is recreated. Choose a path under ${mountedRoot}/… (which maps to your host's backend/data folder), or add a bind-mount for this folder in docker-compose.yml.`;
+  }
+  return null;
+}
+
 const httpRequestDuration = new client.Histogram({
     name: 'http_request_duration_seconds',
     help: 'Duration of HTTP requests in seconds',
@@ -1158,20 +1171,26 @@ app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
       return res.status(400).json({ ok: false, error: writableErrorText(probe, insideContainer) });
     }
 
-    // In Docker, warn when the chosen path is outside the only host-visible mount.
-    // The folder will be created and written inside the container, but the files
-    // will never appear on the host and will be lost when the container is recreated.
-    let warning = null;
+    // In Docker, REJECT the chosen path when it is outside the only host-visible
+    // mount. The folder would be created and written inside the container's
+    // ephemeral overlay filesystem — the files would never appear on the host and
+    // would be silently lost when the container is recreated. A warning alone is
+    // not enough: the frontend reports "saved" and the user believes their exports
+    // are on disk when they are actually in a throwaway container layer.
     if (await isContainerized()) {
       const mountedRoot = path.resolve(CONTAINER_DATA_MOUNT);
       if (!resolvedPath.startsWith(mountedRoot)) {
-        warning = `This folder is inside the container but is NOT mapped to your host machine, so files saved here will only exist inside the container and will be lost when the container is recreated. Prefer a path under ${mountedRoot}/…, or add a bind-mount for this folder in docker-compose.yml.`;
+        console.error(`[user-config/exports-path] Rejected path outside container data mount: ${resolvedPath}`);
+        return res.status(400).json({
+          ok: false,
+          error: `This folder (${resolvedPath}) is inside the container but is NOT mapped to your host machine, so files saved here would only exist inside the container and would be lost when the container is recreated. Choose a path under ${mountedRoot}/… (which maps to your host's backend/data folder), or add a bind-mount for this folder in docker-compose.yml.`,
+        });
       }
     }
 
     const userConfig = await setExportsPath(requestedScope, resolvedPath);
     const key = requestedScope === 'load' ? 'loadExportsPath' : requestedScope === 'collage' ? 'collageExportsPath' : 'savedExportsPath';
-    res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key], warning });
+    res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key] });
   } catch (err) {
     console.error('[user-config/exports-path] Error:', err);
     res.status(500).json({ ok: false, error: String(err) });
@@ -1764,6 +1783,17 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
         const exportsLowRoot = path.join(exportsRoot, 'low');
         const exportsAnnotationsRoot = path.join(exportsRoot, 'annotations');
 
+        // In Docker this destination may live on the container's ephemeral layer
+        // (outside the host-visible /app/data bind mount) — refuse to proceed so
+        // we don't "successfully export" files that the user can never access.
+        const containerErr = await containerPathError(exportsRoot);
+        if (containerErr) {
+          console.error(`[saved-layouts/export] Rejected container-only export path: ${exportsRoot}`);
+          if (!res.headersSent) {
+            return res.status(400).json({ ok: false, error: `The export folder is not usable: ${containerErr}` });
+          }
+        }
+
         await fs.mkdir(exportsHighRoot, { recursive: true });
         await fs.mkdir(exportsLowRoot, { recursive: true });
         await fs.mkdir(exportsAnnotationsRoot, { recursive: true });
@@ -1800,25 +1830,13 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             exportProgressStore.set(jobId, { done: 0, total: targetLayouts.length });
         }
 
-        // Determine the starting partition number by scanning existing annotation files.
-        // This prevents overwriting previous exports (e.g., annotations_1.json, annotations_2.json).
+        // Always start the batch annotation at annotations_1.json so a re-run of
+        // Save All / Save Selected OVERWRITES the previous group annotation —
+        // this keeps a single canonical annotations_1.json per export folder
+        // and matches user expectations ("rewrite the old one"). If a single
+        // export set exceeds ANNOTATION_PARTITION_CAP, the overflow spills into
+        // annotations_2.json, annotations_3.json, ...
         let annotationPartitionNum = 1;
-        try {
-            const existingFiles = await fs.readdir(exportsAnnotationsRoot);
-            const existingPartitionNums = existingFiles
-                .filter(name => /^annotations_\d+\.json$/.test(name))
-                .map(name => {
-                    const match = name.match(/^annotations_(\d+)\.json$/);
-                    return match ? parseInt(match[1], 10) : null;
-                })
-                .filter((num) => num !== null);
-
-            if (existingPartitionNums.length > 0) {
-                annotationPartitionNum = Math.max(...existingPartitionNums) + 1;
-            }
-        } catch (err) {
-            console.warn('[export] Failed to scan existing annotation partitions:', err);
-        }
 
         // Generate segmentation masks for ALL threats across the whole export set in
         // ONE batched, deduped call BEFORE the loop (instead of once per layout), so
@@ -1945,12 +1963,11 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                         lowEnergyImage: lowEnergyFilename,
                         objects: layout.layout_json?.objects || null
                     };
-                    // Per-layout annotation file — skipped for bulk modes to avoid
-                    // creating thousands of individual JSONs. We only write
-                    // batched annotation partitions in those cases.
-                    const isBulkMode =
-                        saveMode === 'all' ||
-                        (saveMode === 'selected' && targetLayouts.length > BATCH_THRESHOLD);
+                    // Per-layout annotation file — only used for single-layout
+                    // (saveMode='individual') exports. Save All and Save Selected
+                    // always accumulate into a SINGLE group annotation
+                    // (annotations_1.json, …) so the whole batch is one file.
+                    const isBulkMode = saveMode === 'all' || saveMode === 'selected';
                     const shouldCreateIndividualFile = !isBulkMode;
                     const shouldCreateBatchAnnotations = isBulkMode;
 
@@ -2238,6 +2255,9 @@ app.get('/api/saved-layouts/:id', async (req, res) => {
 app.delete('/api/saved-layouts/:id', requireAuth, async (req, res) => {
     try {
         await deleteSavedLayout(req.params.id);
+        // Also remove the collage images (high + low) belonging ONLY to this
+        // layout, if they exist. Other layouts' images are never touched.
+        await deleteCollageImagesForLayout(req.params.id);
         res.json({ ok: true });
     } catch (err) {
         console.error(err);
@@ -2245,7 +2265,9 @@ app.delete('/api/saved-layouts/:id', requireAuth, async (req, res) => {
     }
 });
 
-// Batch delete saved layouts (more efficient than multiple individual requests)
+// Batch delete saved layouts (more efficient than multiple individual requests).
+// Also removes the collage image files (high + low) belonging ONLY to the
+// deleted layouts — other layouts' images are never touched.
 app.post('/api/saved-layouts/batch-delete', requireAuth, async (req, res) => {
     try {
         const { ids } = req.body;
@@ -2266,6 +2288,8 @@ app.post('/api/saved-layouts/batch-delete', requireAuth, async (req, res) => {
         for (const id of ids) {
             try {
                 await deleteSavedLayout(id);
+                // Remove ONLY this layout's collage images (high + low) if they exist.
+                await deleteCollageImagesForLayout(id);
                 results.push({ id, success: true });
                 successCount++;
             } catch (err) {
@@ -2636,6 +2660,121 @@ app.put("/api/items/:id", requireAuth, async (req, res) => {
     res.status(500).json({ ok: false, error: String(err) });
   }
 });
+
+// Delete the collage / export image files (high + low) and annotation files
+// for a saved layout id, if they exist. Only the files belonging to the deleted
+// layout are removed — never the whole directory. Checks:
+//   - default collage_images root
+//   - user-configured collage export path (getExportsPath('collage'))
+//   - default saved exports root
+//   - user-configured saved export path (getExportsPath('saved'))
+// and matches:
+//   - direct collage filename ({id}.png)
+//   - saved-layout export filenames (SB_{id}_high.png / SB_{id}_low.png)
+//   - individual annotation file (SB_{id}.json)
+//   - batch annotation entries (annotations_*.json arrays filtered by layoutId)
+async function deleteCollageImagesForLayout(layoutId) {
+  if (!layoutId || typeof layoutId !== 'string') return;
+  const safeId = String(layoutId).replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 100);
+  if (!safeId) return;
+
+  const roots = [];
+
+  // Default collage image roots (backend/data/collage_images/high|low).
+  try {
+    roots.push(path.join(collageHighRoot));
+    roots.push(path.join(collageLowRoot));
+  } catch { /* ignore */ }
+
+  // User-configured collage export root (custom path chosen in the UI).
+  try {
+    const collageRoot = await getExportsPath('collage');
+    roots.push(path.join(collageRoot, 'high'));
+    roots.push(path.join(collageRoot, 'low'));
+  } catch { /* ignore */ }
+
+  // Saved layout export roots (backend/data/exports/high|low or user-configured saved path).
+  let savedAnnotationsRoot = null;
+  try {
+    const savedRoot = await getExportsPath('saved');
+    roots.push(path.join(savedRoot, 'high'));
+    roots.push(path.join(savedRoot, 'low'));
+    savedAnnotationsRoot = path.join(savedRoot, 'annotations');
+  } catch { /* ignore */ }
+
+  const seen = new Set();
+  for (const root of roots) {
+    if (seen.has(root)) continue;
+    seen.add(root);
+
+    // Direct collage render: {id}.png
+    const directPath = path.join(root, `${safeId}.png`);
+    try {
+      await fs.unlink(directPath);
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        console.warn(`[delete-layout] Failed to remove image ${directPath}: ${err.message}`);
+      }
+    }
+
+    // Saved-layout export: SB_{id}_high.png and SB_{id}_low.png
+    const baseName = `SB_${safeId}`;
+    const highPath = path.join(root, `${baseName}_high.png`);
+    try {
+      await fs.unlink(highPath);
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        console.warn(`[delete-layout] Failed to remove image ${highPath}: ${err.message}`);
+      }
+    }
+
+    const lowPath = path.join(root, `${baseName}_low.png`);
+    try {
+      await fs.unlink(lowPath);
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        console.warn(`[delete-layout] Failed to remove image ${lowPath}: ${err.message}`);
+      }
+    }
+  }
+
+  // Delete individual annotation file and purge entries from batch annotation files.
+  if (savedAnnotationsRoot) {
+    // Individual annotation: SB_{id}.json
+    const individualAnnotationPath = path.join(savedAnnotationsRoot, `${safeId}.json`);
+    try {
+      await fs.unlink(individualAnnotationPath);
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        console.warn(`[delete-layout] Failed to remove annotation ${individualAnnotationPath}: ${err.message}`);
+      }
+    }
+
+    // Batch annotations: annotations_*.json — remove entries for this layoutId.
+    try {
+      const files = await fs.readdir(savedAnnotationsRoot);
+      const batchFiles = files.filter(name => /^annotations_\d+\.json$/.test(name));
+      for (const file of batchFiles) {
+        const fullPath = path.join(savedAnnotationsRoot, file);
+        try {
+          const raw = await fs.readFile(fullPath, 'utf8');
+          const arr = JSON.parse(raw);
+          if (!Array.isArray(arr)) continue;
+          const next = arr.filter((entry: any) => entry && entry.layoutId !== layoutId);
+          if (next.length === 0) {
+            await fs.unlink(fullPath);
+          } else {
+            await fs.writeFile(fullPath, JSON.stringify(next, null, 2));
+          }
+        } catch (err) {
+          console.warn(`[delete-layout] Failed to update batch annotation ${fullPath}: ${err.message}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[delete-layout] Failed to scan annotations root ${savedAnnotationsRoot}: ${err.message}`);
+    }
+  }
+}
 
 // Delete an individual item
 app.delete("/api/items/:id", requireAuth, async (req, res) => {
@@ -3456,10 +3595,18 @@ app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
         }
 
         const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, "highenergy");
-        await fs.writeFile(path.join(highEnergyDir, filename), highPngBuffer);
-
+        const highPath = path.join(highEnergyDir, filename);
         const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, "lowenergy");
-        await fs.writeFile(path.join(lowEnergyDir, filename), lowPngBuffer);
+        const lowPath = path.join(lowEnergyDir, filename);
+
+        try {
+          await fs.writeFile(highPath, highPngBuffer);
+          await fs.writeFile(lowPath, lowPngBuffer);
+        } catch (err) {
+          try { await fs.unlink(highPath); } catch { /* ignore cleanup errors */ }
+          try { await fs.unlink(lowPath); } catch { /* ignore cleanup errors */ }
+          throw err;
+        }
 
         let isAbsolutePath = false;
         let customCollageRootForUrl;

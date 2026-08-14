@@ -697,11 +697,14 @@ export default function SavedPage() {
     setDeleting(true);
     try {
       const ids = Array.from(selectedForExport);
-      
+      const apiKey = localStorage.getItem('apiKey');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['X-API-Key'] = apiKey;
+
       // Use batch delete endpoint to avoid timeout issues
       const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/batch-delete`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ ids }),
       }, 120000); // 2 minute timeout for batch delete
 
@@ -1131,8 +1134,13 @@ export default function SavedPage() {
     
     setDeleting(true);
     try {
+      const apiKey = localStorage.getItem('apiKey');
+      const headers: Record<string, string> = {};
+      if (apiKey) headers['X-API-Key'] = apiKey;
+
       const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/${layoutId}`, {
         method: 'DELETE',
+        headers,
       });
       
       if (!res.ok) {

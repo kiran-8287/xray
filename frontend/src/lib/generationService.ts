@@ -300,37 +300,43 @@ async function saveComboAnnotationBatch(page: CombinatorialResult[]): Promise<Se
   return savedIds;
 }
 
+// Shared concurrency limiter for collage image renders.
+const renderSemaphore = { current: 0, queue: [] as (() => void)[] };
+
 // Concurrency-limited image rendering
 async function renderOneComboImage(combo: CombinatorialResult): Promise<boolean> {
-  const semaphore = { current: 0, queue: [] as (() => void)[] };
-
   const acquire = () => new Promise<void>((resolve) => {
-    if (semaphore.current < MAX_CONCURRENT_RENDERS) {
-      semaphore.current++;
+    if (renderSemaphore.current < MAX_CONCURRENT_RENDERS) {
+      renderSemaphore.current++;
       resolve();
     } else {
-      semaphore.queue.push(resolve);
+      renderSemaphore.queue.push(resolve);
     }
   });
 
   const release = () => {
-    semaphore.current--;
-    if (semaphore.queue.length > 0 && semaphore.current < MAX_CONCURRENT_RENDERS) {
-      const next = semaphore.queue.shift()!;
-      semaphore.current++;
+    renderSemaphore.current--;
+    if (renderSemaphore.queue.length > 0 && renderSemaphore.current < MAX_CONCURRENT_RENDERS) {
+      const next = renderSemaphore.queue.shift()!;
+      renderSemaphore.current++;
       next();
     }
   };
 
   try {
     await acquire();
-    await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/api/render-and-save-collage-both`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ objects: combo.objects, name: combo.id }),
     }, LONG_REQUEST_TIMEOUT_MS, 1);
+    if (!res.ok) {
+      console.error(`[generationService] Render failed for ${combo.id}: HTTP ${res.status}`);
+      return false;
+    }
     return true;
-  } catch {
+  } catch (err) {
+    console.error(`[generationService] Render error for ${combo.id}:`, err);
     return false;
   } finally {
     release();

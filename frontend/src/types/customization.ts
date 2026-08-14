@@ -1,5 +1,10 @@
 export type SceneObject = {
   id: string;
+  /** Original library item id. When the same item is placed multiple times,
+   *  each instance gets a unique `id` (e.g. `${itemId}__<n>`), and `itemId`
+   *  always points back to the original library item so pixel data / masks
+   *  can still be resolved. */
+  itemId?: string;
   name: string;
   library: string;
   originalPixelValue: number;
