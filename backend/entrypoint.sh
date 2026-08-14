@@ -46,32 +46,7 @@ if command -v stat >/dev/null 2>&1; then
     fi
 fi
 
-# Ensure the base leaf folders exist (safe: these are created by the container,
-# they never pre-exist on the host with a real owner).
-mkdir -p /app/data/storage
-mkdir -p /app/data/load_layouts
-mkdir -p /app/data/exports
-mkdir -p /app/data/collage_images
-mkdir -p /app/data/library_images
-mkdir -p /app/data/pixel_data
-mkdir -p /app/data/temp
-mkdir -p /app/data/temp/raw-uploads
-
 if [ "$(id -u)" = "0" ]; then
-    # Running as root (image default): fix ownership ONLY on the directories we
-    # just created above. This never touches /app/data or any existing host data,
-    # so it cannot hand a user's files to the wrong account.
-    chown "${PUID}:${PGID}" \
-      /app/data/storage \
-      /app/data/load_layouts \
-      /app/data/exports \
-      /app/data/collage_images \
-      /app/data/library_images \
-      /app/data/pixel_data \
-      /app/data/temp \
-      /app/data/temp/raw-uploads \
-      2>/dev/null || true
-
     # The numeric uid may not have a real home directory, so give the process a
     # writable HOME / npm cache dir.
     export HOME=/tmp

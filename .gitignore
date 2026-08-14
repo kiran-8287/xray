@@ -105,5 +105,14 @@ backend/data/
 !backend/data/
 !backend/data/.gitkeep
 
+# Keep default data subdirectories in the repository
+!backend/data/collage_images/.gitkeep
+!backend/data/exports/.gitkeep
+!backend/data/library_images/.gitkeep
+!backend/data/load_layouts/.gitkeep
+!backend/data/pixel_data/.gitkeep
+!backend/data/storage/.gitkeep
+!backend/data/temp/.gitkeep
+
 ss
 docs
