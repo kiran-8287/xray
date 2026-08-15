@@ -3,6 +3,7 @@ import { FolderOpen, Grid3X3, X, ChevronDown, Search, Check, CheckCircle2, Loade
 import { getLibrarySubcategories } from "../config/categories";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
+import { escapeAttribute, sanitizeTag } from "../lib/sanitize";
 import ExportLocationSelector from "../components/common/ExportLocationSelector";
 
 interface SavedLayout {
@@ -1744,18 +1745,19 @@ export default function SavedPage() {
                                        <div className="mt-2 pt-2 border-t border-border">
                                          <div className="text-[10px] text-muted mb-1 font-medium">Tags:</div>
                                          <div className="flex flex-wrap gap-1">
-                                           {obj.tags.map((tagSlug: string) => {
-                                             const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                                             return (
-                                               <span
-                                                 key={tagSlug}
-                                                 className="inline-flex items-center px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-medium"
-                                                 title={tagName}
-                                               >
-                                                 {tagName}
-                                               </span>
-                                             );
-                                           })}
+                                            {obj.tags.map((tagSlug: string) => {
+                                              const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                              const sanitizedTag = sanitizeTag(tagName);
+                                              return (
+                                                <span
+                                                  key={tagSlug}
+                                                  className="inline-flex items-center px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-medium"
+                                                  title={escapeAttribute(sanitizedTag)}
+                                                >
+                                                  {sanitizedTag}
+                                                </span>
+                                              );
+                                            })}
                                          </div>
                                        </div>
                                      )}

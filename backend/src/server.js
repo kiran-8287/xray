@@ -46,7 +46,7 @@ import { PipelineTimer, PIPELINE_STAGES, generateOperationId } from "./lib/instr
 import { initializeSystemConfig, getWorkerCount, checkMemoryAvailability } from "./lib/systemInfo.js";
 import { Semaphore, chunked, withSemaphore } from "./lib/concurrency.js";
 import { enqueue as enqueueDiskWrite, getDiskWriteQueueStatus, drain as drainDiskQueue } from './lib/diskWriteQueue.js';
-import { publicApiRateLimiter } from './lib/rateLimiter.js';
+import { publicApiRateLimiter, strictRateLimiter } from './lib/rateLimiter.js';
 import { getExportsPath, setExportsPath, hasConfiguredExportsPath } from './lib/userConfig.js';
 import {
   analyzeImport,
@@ -54,6 +54,14 @@ import {
   scanPixelDir,
   scanJsonDir,
 } from './lib/importService.js';
+import {
+  validateClientOutputPath,
+  validateCombinationsArray,
+  isPathWithinAllowedRoots,
+} from './lib/pathValidation.js';
+import { validateFileMagicNumber, validateFileSize as checkFileSize } from './lib/fileValidation.js';
+import { validateLayoutJson, validatePlainObject, validateObjectArray } from './lib/jsonValidation.js';
+import { auditLog } from './lib/auditLog.js';
 
 const app = express();
 app.use(cors());
@@ -728,7 +736,7 @@ function classifyFileType(filename) {
 }
 
 // Endpoint to process raw files (.dump.pgm, .tip) and extract .npz pixel data with worker pool
-app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), async (req, res) => {
+app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, rawUpload.array("rawFiles"), async (req, res) => {
     res.setHeader("Content-Type", "application/x-ndjson");
     res.setHeader("Transfer-Encoding", "chunked");
     res.status(200).flushHeaders();
@@ -761,6 +769,17 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
             if (!fileType) {
                 logger.debug({ operationId, filename: file.originalname }, 'Skipped file: unrecognized extension');
                 skippedFiles.push({ filename: file.originalname, reason: "Unrecognized file extension (expected .dump.pgm, .tip, or .npz)" });
+                try { await fs.unlink(file.path); } catch {}
+                continue;
+            }
+
+            // Validate file magic number matches expected type
+            const ext = path.extname(file.originalname).toLowerCase();
+            const magicCheck = await validateFileMagicNumber(file.path, ext);
+            if (!magicCheck.ok) {
+                logger.debug({ operationId, filename: file.originalname, reason: magicCheck.error }, 'Skipped file: magic number mismatch');
+                skippedFiles.push({ filename: file.originalname, reason: `Invalid file content: ${magicCheck.error}` });
+                try { await fs.unlink(file.path); } catch {}
                 continue;
             }
 
@@ -1504,39 +1523,24 @@ app.get('/api/saved-layouts/filtered', publicApiRateLimiter.middleware(), async 
     }
 });
 
-app.post('/api/saved-layouts', requireAuth, async (req, res) => {
+app.post('/api/saved-layouts', auditLog('create_saved_layout'), requireAuth, async (req, res) => {
     const { id, name, filepath, layout_json } = req.body;
     if (!name || !layout_json) return res.status(400).json({ ok: false, error: 'Missing name or layout_json' });
     
     // Validate layout_json structure
-    try {
-        if (!layout_json.objects || typeof layout_json.objects !== 'object') {
-            return res.status(400).json({ ok: false, error: 'Invalid layout_json: missing or invalid objects field' });
-        }
-        
-        const obj = layout_json.objects;
-        if (!obj.bag && !obj.threats && !obj['non-threats']) {
-            return res.status(400).json({ ok: false, error: 'Invalid layout_json: objects must contain at least one of bag, threats, or non-threats' });
-        }
-        
-        if (obj.threats && !Array.isArray(obj.threats)) {
-            return res.status(400).json({ ok: false, error: 'Invalid layout_json: threats must be an array' });
-        }
-        
-        if (obj['non-threats'] && !Array.isArray(obj['non-threats'])) {
-            return res.status(400).json({ ok: false, error: 'Invalid layout_json: non-threats must be an array' });
-        }
-    } catch (err) {
-        return res.status(400).json({ ok: false, error: `Invalid layout_json structure: ${err.message}` });
+    const layoutValidation = validateLayoutJson(layout_json);
+    if (!layoutValidation.ok) {
+        return res.status(400).json({ ok: false, error: layoutValidation.error });
     }
+    const sanitizedLayoutJson = layoutValidation.sanitized;
     
     try {
         // Attach segmentation masks (outer boundary polygon points) to each threat
         // so they are persisted with the saved annotation. Skip silently if a
         // threat has no resolvable pixel data.
-        await attachThreatSegmentationMasks([layout_json.objects]);
+        await attachThreatSegmentationMasks([sanitizedLayoutJson.objects]);
 
-        const layout = await createSavedLayout({ id, name, filepath, layout_json });
+        const layout = await createSavedLayout({ id, name, filepath, layout_json: sanitizedLayoutJson });
         res.json({ ok: true, layout });
     } catch (err) {
         console.error(err);
@@ -1544,7 +1548,7 @@ app.post('/api/saved-layouts', requireAuth, async (req, res) => {
     }
 });
 
-app.post('/api/saved-layouts/batch', requireAuth, async (req, res) => {
+app.post('/api/saved-layouts/batch', auditLog('batch_create_saved_layouts'), requireAuth, async (req, res) => {
     const { layouts } = req.body;
     if (!Array.isArray(layouts)) {
         return res.status(400).json({ ok: false, error: 'layouts must be an array' });
@@ -1563,28 +1567,15 @@ app.post('/api/saved-layouts/batch', requireAuth, async (req, res) => {
         if (!name || !layout_json) {
             return res.status(400).json({ ok: false, error: `Entry at index ${i} is missing name or layout_json` });
         }
-        try {
-            if (!layout_json.objects || typeof layout_json.objects !== 'object') {
-                return res.status(400).json({ ok: false, error: `Entry ${i}: invalid layout_json.objects` });
-            }
-            const obj = layout_json.objects;
-            if (!obj.bag && !obj.threats && !obj['non-threats']) {
-                return res.status(400).json({ ok: false, error: `Entry ${i}: objects must contain bag, threats, or non-threats` });
-            }
-            if (obj.threats && !Array.isArray(obj.threats)) {
-                return res.status(400).json({ ok: false, error: `Entry ${i}: threats must be an array` });
-            }
-            if (obj['non-threats'] && !Array.isArray(obj['non-threats'])) {
-                return res.status(400).json({ ok: false, error: `Entry ${i}: non-threats must be an array` });
-            }
-        } catch (err) {
-            return res.status(400).json({ ok: false, error: `Entry ${i}: layout_json validation failed: ${err.message}` });
+        const layoutValidation = validateLayoutJson(layout_json);
+        if (!layoutValidation.ok) {
+            return res.status(400).json({ ok: false, error: `Entry ${i}: ${layoutValidation.error}` });
         }
         normalized.push({
             id: raw.id,
             name,
             filepath: raw.filepath ?? null,
-            layout_json,
+            layout_json: layoutValidation.sanitized,
         });
     }
     try {
@@ -1606,7 +1597,7 @@ app.post('/api/saved-layouts/batch', requireAuth, async (req, res) => {
 // POST /api/saved-layouts/batch-bulk
 // Enqueue a batch of generated layouts for sequential disk write with pacing.
 // Responds immediately with queue status (non-blocking).
-app.post('/api/saved-layouts/batch-bulk', requireAuth, async (req, res) => {
+app.post('/api/saved-layouts/batch-bulk', auditLog('batch_bulk_save_layouts'), requireAuth, async (req, res) => {
     try {
         const { layouts } = req.body;
         if (!Array.isArray(layouts) || layouts.length === 0) {
@@ -1614,19 +1605,22 @@ app.post('/api/saved-layouts/batch-bulk', requireAuth, async (req, res) => {
         }
 
         // Validate each layout has minimum required fields
-        for (const layout of layouts) {
+        for (let i = 0; i < layouts.length; i++) {
+            const layout = layouts[i];
             if (!layout.name || !layout.layout_json) {
-                return res.status(400).json({ ok: false, error: 'Each layout must have name and layout_json' });
+                return res.status(400).json({ ok: false, error: `Entry at index ${i} is missing name or layout_json` });
             }
-            if (!layout.layout_json.objects) {
-                return res.status(400).json({ ok: false, error: 'Each layout_json must have an objects field' });
+            const layoutValidation = validateLayoutJson(layout.layout_json);
+            if (!layoutValidation.ok) {
+                return res.status(400).json({ ok: false, error: `Entry at index ${i}: ${layoutValidation.error}` });
             }
+            layouts[i] = { ...layout, layout_json: layoutValidation.sanitized };
             // Stamp an ID and timestamp if missing
-            if (!layout.id) {
-                layout.id = `auto_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+            if (!layouts[i].id) {
+                layouts[i].id = `auto_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
             }
-            if (!layout.created_at) {
-                layout.created_at = new Date().toISOString();
+            if (!layouts[i].created_at) {
+                layouts[i].created_at = new Date().toISOString();
             }
         }
 
@@ -1739,7 +1733,7 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
 // This route must be registered before /api/saved-layouts/:id so /export is not swallowed.
 // Supports optional ?jobId= query param so the client can cancel a running bulk
 // export (Save All / Save Selected) via POST /api/saved-layouts/export/cancel.
-app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
+app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     const jobId = typeof req.query.jobId === 'string' && req.query.jobId.trim()
         ? req.query.jobId.trim()
         : null;
@@ -2093,7 +2087,7 @@ app.post('/api/saved-layouts/export/cancel', requireAuth, async (req, res) => {
 });
 
 // Export annotation combinations as high+low resolution images
-app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
+app.post('/api/load/export-combinations', strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     // Use the client-provided jobId so the frontend can poll progress and cancel.
     const jobId = typeof req.query.jobId === 'string' && req.query.jobId.trim()
         ? req.query.jobId.trim()
@@ -2105,6 +2099,11 @@ app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
         
         if (!Array.isArray(combinations) || combinations.length === 0) {
             return res.status(400).json({ ok: false, error: 'No combinations provided' });
+        }
+
+        const combinationValidation = validateCombinationsArray(combinations, 10000);
+        if (!combinationValidation.ok) {
+            return res.status(400).json({ ok: false, error: combinationValidation.error });
         }
 
         exportProgressStore.set(jobId, { done: 0, total: combinations.length });
@@ -2252,7 +2251,7 @@ app.get('/api/saved-layouts/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/saved-layouts/:id', requireAuth, async (req, res) => {
+app.delete('/api/saved-layouts/:id', auditLog('delete_saved_layout'), requireAuth, async (req, res) => {
     try {
         await deleteSavedLayout(req.params.id);
         // Also remove the collage images (high + low) belonging ONLY to this
@@ -2268,7 +2267,7 @@ app.delete('/api/saved-layouts/:id', requireAuth, async (req, res) => {
 // Batch delete saved layouts (more efficient than multiple individual requests).
 // Also removes the collage image files (high + low) belonging ONLY to the
 // deleted layouts — other layouts' images are never touched.
-app.post('/api/saved-layouts/batch-delete', requireAuth, async (req, res) => {
+app.post('/api/saved-layouts/batch-delete', auditLog('batch_delete_saved_layouts'), requireAuth, async (req, res) => {
     try {
         const { ids } = req.body;
         
@@ -2322,7 +2321,7 @@ app.get('/api/custom-subcategories', publicApiRateLimiter.middleware(), async (r
     }
 });
 
-app.post('/api/custom-subcategories', requireAuth, async (req, res) => {
+app.post('/api/custom-subcategories', auditLog('add_custom_subcategory'), requireAuth, async (req, res) => {
     try {
         const { category, name } = req.body;
         if (!category || !name) {
@@ -2341,7 +2340,7 @@ app.post('/api/custom-subcategories', requireAuth, async (req, res) => {
     }
 });
 
-app.delete('/api/custom-subcategories/:category/:slug', requireAuth, async (req, res) => {
+app.delete('/api/custom-subcategories/:category/:slug', auditLog('remove_custom_subcategory'), requireAuth, async (req, res) => {
     try {
         const { category, slug } = req.params;
         await removeCustomSubcategory(category, slug);
@@ -2364,7 +2363,7 @@ const uploadWithLimits = multer({
   }
 });
 
-app.post("/api/upload", requireAuth, uploadWithLimits.array("images", config.maxFilesPerUpload), async (req, res) => {
+app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithLimits.array("images", config.maxFilesPerUpload), async (req, res) => {
   req.setTimeout(config.uploadTimeoutMs, () => {
     if (!res.headersSent) {
       res.status(408).json({ ok: false, error: "Upload timeout. Please try again with a smaller batch." });
@@ -2395,9 +2394,37 @@ app.post("/api/upload", requireAuth, uploadWithLimits.array("images", config.max
                 console.warn('Warning: failed to parse upload metadata', err);
             }
         }
+
+        // Validate file sizes and magic numbers
+        const fileValidationErrors = [];
+        const validFiles = [];
+        for (const file of files) {
+            const sizeCheck = checkFileSize(file.size, config.maxFileSize);
+            if (!sizeCheck.ok) {
+                fileValidationErrors.push({ filename: file.originalname, message: sizeCheck.error });
+                try {
+                    await fs.unlink(file.path);
+                } catch {}
+                continue;
+            }
+
+            const ext = path.extname(file.originalname).toLowerCase();
+            const magicCheck = await validateFileMagicNumber(file.path, ext);
+            if (!magicCheck.ok) {
+                fileValidationErrors.push({ filename: file.originalname, message: magicCheck.error });
+                try {
+                    await fs.unlink(file.path);
+                } catch {}
+                continue;
+            }
+
+            validFiles.push(file);
+        }
         
         timer.endStage(PIPELINE_STAGES.VALIDATION, { 
-            metadataItems: metadataArray.length 
+            metadataItems: metadataArray.length,
+            validFiles: validFiles.length,
+            invalidFiles: fileValidationErrors.length
         });
 
         // Stage 3: File Processing (per-file)
@@ -2408,7 +2435,7 @@ app.post("/api/upload", requireAuth, uploadWithLimits.array("images", config.max
         const processedIds = new Set();
         const fileProcessingStart = process.hrtime.bigint();
 
-        for (const file of files) {
+        for (const file of validFiles) {
             const fileStart = process.hrtime.bigint();
             const itemId = path.basename(file.originalname, path.extname(file.originalname));
             
@@ -2615,8 +2642,9 @@ app.post("/api/upload", requireAuth, uploadWithLimits.array("images", config.max
         
         res.json({ 
             ok: true, 
-            message: errors.length > 0 ? "Some files processed, some had errors" : "Files uploaded successfully!", 
+            message: errors.length > 0 || fileValidationErrors.length > 0 ? "Some files processed, some had errors" : "Files uploaded successfully!", 
             itemsProcessed: processed.length,
+            fileValidationErrors,
             errors
         });
         
@@ -2760,7 +2788,7 @@ async function deleteCollageImagesForLayout(layoutId) {
           const raw = await fs.readFile(fullPath, 'utf8');
           const arr = JSON.parse(raw);
           if (!Array.isArray(arr)) continue;
-          const next = arr.filter((entry: any) => entry && entry.layoutId !== layoutId);
+          const next = arr.filter(entry => entry && entry.layoutId !== layoutId);
           if (next.length === 0) {
             await fs.unlink(fullPath);
           } else {
@@ -2777,7 +2805,7 @@ async function deleteCollageImagesForLayout(layoutId) {
 }
 
 // Delete an individual item
-app.delete("/api/items/:id", requireAuth, async (req, res) => {
+app.delete("/api/items/:id", auditLog('delete_item'), requireAuth, async (req, res) => {
     try {
         const item = await getItemById(req.params.id);
         if (item) {
@@ -2802,7 +2830,7 @@ app.delete("/api/items/:id", requireAuth, async (req, res) => {
 });
 
 // Bulk delete items (single request, efficient O(partitions) instead of O(N) endpoints)
-app.post("/api/items/bulk-delete", requireAuth, async (req, res) => {
+app.post("/api/items/bulk-delete", auditLog('bulk_delete_items'), requireAuth, async (req, res) => {
     try {
         const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.slice(0, 50000) : [];
         if (ids.length === 0) {
@@ -3246,7 +3274,7 @@ app.get("/api/items/segmentation-masks", publicApiRateLimiter.middleware(), asyn
 });
 
 // Update bag valid region (only supports points and simplifiedPoints)
-app.put("/api/items/:id/valid-region", requireAuth, async (req, res) => {
+app.put("/api/items/:id/valid-region", auditLog('update_valid_region'), requireAuth, async (req, res) => {
     try {
         const { points, simplifiedPoints } = req.body;
         const dataToStore = {
@@ -3262,7 +3290,7 @@ app.put("/api/items/:id/valid-region", requireAuth, async (req, res) => {
 });
 
 // Delete bag valid region (set to null)
-app.delete("/api/items/:id/valid-region", requireAuth, async (req, res) => {
+app.delete("/api/items/:id/valid-region", auditLog('delete_valid_region'), requireAuth, async (req, res) => {
     try {
         await updateBag(req.params.id, { valid_region_points: null });
         res.json({ ok: true });
@@ -3493,7 +3521,7 @@ async function enrichObjectsWithPixelData(objects) {
 }
 
 // Render and save a collage combination as a PNG image
-app.post("/api/render-and-save-collage", requireAuth, async (req, res) => {
+app.post("/api/render-and-save-collage", strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     try {
         const { objects, name, energyType = "highenergy" } = req.body;
         if (!objects || !Array.isArray(objects) || objects.length === 0) {
@@ -3535,7 +3563,7 @@ app.post("/api/render-and-save-collage", requireAuth, async (req, res) => {
 });
 
 // Render and save BOTH high-energy and low-energy collage images at once
-app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
+app.post("/api/render-and-save-collage-both", strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     try {
         const { objects, name, outputPath } = req.body;
         if (!objects || !Array.isArray(objects) || objects.length === 0) {
@@ -3551,26 +3579,13 @@ app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
         let highEnergyDir, lowEnergyDir;
         
         if (outputPath && typeof outputPath === 'string') {
-            // Sanitize output path to prevent traversal
-            const sanitizedPath = outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '');
-            
-            // Prevent directory traversal
-            if (sanitizedPath.includes('..')) {
-                return res.status(400).json({ ok: false, error: "Invalid output path. Directory traversal is not allowed." });
+            const collageRoot = await getExportsPath('collage');
+            const result = validateClientOutputPath(outputPath, collageRoot, collageRoot);
+            if (!result.safe) {
+                return res.status(400).json({ ok: false, error: result.error });
             }
-            
-            const resolvedProjectRoot = path.resolve(__dirname, '..');
-            
-            if (!path.isAbsolute(sanitizedPath)) {
-                const customCollageRoot = path.resolve(resolvedProjectRoot, 'data', sanitizedPath, 'collage_images');
-                highEnergyDir = path.resolve(customCollageRoot, 'high');
-                lowEnergyDir = path.resolve(customCollageRoot, 'low');
-            } else {
-                const customCollageRoot = path.resolve(sanitizedPath, 'collage_images');
-                highEnergyDir = path.resolve(customCollageRoot, 'high');
-                lowEnergyDir = path.resolve(customCollageRoot, 'low');
-            }
-            
+            highEnergyDir = path.join(result.resolvedRoot, 'high');
+            lowEnergyDir = path.join(result.resolvedRoot, 'low');
             await fs.mkdir(highEnergyDir, { recursive: true });
             await fs.mkdir(lowEnergyDir, { recursive: true });
         } else {
@@ -3638,7 +3653,7 @@ app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
 
 // Regenerate collage images from layout JSON (for portability - no need to carry image files)
 // Returns base64-encoded PNG images that can be used directly in the frontend
-app.post("/api/regenerate-collage-images", requireAuth, async (req, res) => {
+app.post("/api/regenerate-collage-images", strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     try {
         const { layout_json, layoutId, saveToDisk = false, outputPath } = req.body;
 
@@ -3755,23 +3770,12 @@ app.post("/api/regenerate-collage-images", requireAuth, async (req, res) => {
             let highEnergyDir, lowEnergyDir;
 
             if (outputPath && typeof outputPath === 'string') {
-                const sanitizedPath = outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '');
-
-                if (sanitizedPath.includes('..')) {
-                    return res.status(400).json({ ok: false, error: "Invalid output path" });
+                const result = validateClientOutputPath(outputPath, collageImagesRoot, collageImagesRoot);
+                if (!result.safe) {
+                    return res.status(400).json({ ok: false, error: result.error });
                 }
-
-                const resolvedProjectRoot = path.resolve(__dirname, '..');
-
-                if (!path.isAbsolute(sanitizedPath)) {
-                    const customCollageRoot = path.resolve(resolvedProjectRoot, 'data', sanitizedPath, 'collage_images');
-                    highEnergyDir = path.resolve(customCollageRoot, 'high');
-                    lowEnergyDir = path.resolve(customCollageRoot, 'low');
-                } else {
-                    const customCollageRoot = path.resolve(sanitizedPath, 'collage_images');
-                    highEnergyDir = path.resolve(customCollageRoot, 'high');
-                    lowEnergyDir = path.resolve(customCollageRoot, 'low');
-                }
+                highEnergyDir = path.join(result.resolvedRoot, 'high');
+                lowEnergyDir = path.join(result.resolvedRoot, 'low');
 
                 await fs.mkdir(highEnergyDir, { recursive: true });
                 await fs.mkdir(lowEnergyDir, { recursive: true });
@@ -3870,7 +3874,7 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
 });
 
 // Render a preview image from a saved layout using real pixel data (I1*I2/65535)
-app.post('/api/render-preview', requireAuth, async (req, res) => {
+app.post('/api/render-preview', strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     try {
         const { objects } = req.body;
         if (!objects) return res.status(400).json({ ok: false, error: 'Missing objects' });

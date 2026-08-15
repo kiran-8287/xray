@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
+import { escapeAttribute, sanitizeId } from "../lib/sanitize";
 import ConfirmModal from "../components/common/ConfirmModal";
 import ExportLocationSelector, { ExportLocationSelectorHandle } from "../components/common/ExportLocationSelector";
 import { setLoadUnsaved } from "../lib/navigationGuard";
@@ -696,7 +697,7 @@ return (
                   </div>
                   {showMissingOnly && (
                     <div className="max-h-60 overflow-auto rounded-lg border border-amber-200 bg-white p-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
-                      {analysis.missingObjectIds.map((id, i) => (<div key={i} className="text-xs font-mono text-amber-900 py-0.5 truncate" title={id}>{id}</div>))}
+                      {analysis.missingObjectIds.map((id, i) => (<div key={i} className="text-xs font-mono text-amber-900 py-0.5 truncate" title={escapeAttribute(sanitizeId(id))}>{sanitizeId(id)}</div>))}
                     </div>
                   )}
                 </div>
@@ -771,7 +772,7 @@ return (
                   <div className="p-4">
                     <div className="flex items-center justify-between gap-3 mb-2">
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-accent-sky font-mono truncate" title={combo.layoutId}>{combo.layoutId}</p>
+                        <p className="text-sm font-semibold text-accent-sky font-mono truncate" title={escapeAttribute(sanitizeId(combo.layoutId))}>{sanitizeId(combo.layoutId)}</p>
                       </div>
                     </div>
                     <div className="space-y-1">
@@ -782,9 +783,9 @@ return (
                         const otherIds = (Array.isArray(objs["non-threats"]) ? objs["non-threats"] : []).map((o: any) => o.id || o.name).filter(Boolean);
                         return (
                           <>
-                            {bagId && <p className="text-[10px] font-mono text-muted truncate" title={String(bagId)}>Bag: {String(bagId)}</p>}
-                            {threatIds.length > 0 && <p className="text-[10px] font-mono text-rose-600 truncate" title={threatIds.join(", ")}>Threat: {threatIds.join(", ")}</p>}
-                            {otherIds.length > 0 && <p className="text-[10px] font-mono text-muted truncate" title={otherIds.join(", ")}>Others: {otherIds.join(", ")}</p>}
+                            {bagId && <p className="text-[10px] font-mono text-muted truncate" title={escapeAttribute(sanitizeId(String(bagId)))}>Bag: {sanitizeId(String(bagId))}</p>}
+                            {threatIds.length > 0 && <p className="text-[10px] font-mono text-rose-600 truncate" title={escapeAttribute(threatIds.map(sanitizeId).join(", "))}>Threat: {threatIds.map(sanitizeId).join(", ")}</p>}
+                            {otherIds.length > 0 && <p className="text-[10px] font-mono text-muted truncate" title={escapeAttribute(otherIds.map(sanitizeId).join(", "))}>Others: {otherIds.map(sanitizeId).join(", ")}</p>}
                           </>
                         );
                       })()}
@@ -831,7 +832,7 @@ return (
             </div>
             <div className="flex flex-col md:flex-row flex-1 min-h-0">
               <div className="flex-1 p-6 flex items-center justify-center bg-surface min-h-0">
-                <img src={showHighRes.url} alt={showHighRes.combo.layoutName} className="max-w-full max-h-full object-contain" />
+                 <img src={showHighRes.url} alt={escapeAttribute(sanitizeId(showHighRes.combo.layoutName))} className="max-w-full max-h-full object-contain" />
               </div>
               <div className="w-full md:w-80 p-6 border-t md:border-t-0 md:border-l border-border flex flex-col gap-4 overflow-y-auto">
                 <div>
@@ -839,7 +840,7 @@ return (
                   <div className="space-y-2">
                     <div className="rounded-xl border border-border bg-white p-2.5">
                       <p className="text-[10px] text-muted mb-0.5">Name</p>
-                      <p className="text-xs font-medium text-ink truncate" title={showHighRes.combo.layoutName}>{showHighRes.combo.layoutName}</p>
+                       <p className="text-xs font-medium text-ink truncate" title={escapeAttribute(sanitizeId(showHighRes.combo.layoutName))}>{sanitizeId(showHighRes.combo.layoutName)}</p>
                     </div>
                     <div className="rounded-xl border border-border bg-white p-2.5">
                       <p className="text-[10px] text-muted mb-0.5">ID</p>
@@ -859,8 +860,8 @@ return (
                     <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Missing Objects</h4>
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
                       <div className="space-y-1">
-                        {showHighRes.combo.missingObjectIds.map((id, i) => (
-                          <p key={i} className="text-xs font-mono text-amber-900 truncate" title={id}>{id}</p>
+                         {showHighRes.combo.missingObjectIds.map((id, i) => (
+                           <p key={i} className="text-xs font-mono text-amber-900 truncate" title={escapeAttribute(sanitizeId(id))}>{sanitizeId(id)}</p>
                         ))}
                       </div>
                     </div>
@@ -885,19 +886,19 @@ return (
                           {bag && (
                             <div className="rounded-xl border border-border bg-white p-2.5">
                               <p className="text-[10px] text-muted mb-1">Bag</p>
-                              <p className="text-xs font-medium text-ink truncate" title={bag.id || bag.name}>{bag.id || bag.name}</p>
+                               <p className="text-xs font-medium text-ink truncate" title={escapeAttribute(sanitizeId(bag.id || bag.name))}>{sanitizeId(bag.id || bag.name)}</p>
                             </div>
                           )}
                           {threats.map((t: any, idx: number) => (
                             <div key={idx} className="rounded-xl border border-rose-200 bg-rose-50 p-2.5">
                               <p className="text-[10px] text-rose-600 mb-1">Threat</p>
-                              <p className="text-xs font-medium text-ink truncate" title={t.id || t.name}>{t.id || t.name}</p>
+                               <p className="text-xs font-medium text-ink truncate" title={escapeAttribute(sanitizeId(t.id || t.name))}>{sanitizeId(t.id || t.name)}</p>
                             </div>
                           ))}
                           {others.map((o: any, idx: number) => (
                             <div key={idx} className="rounded-xl border border-border bg-white p-2.5">
                               <p className="text-[10px] text-muted mb-1">Other</p>
-                              <p className="text-xs font-medium text-ink truncate" title={o.id || o.name}>{o.id || o.name}</p>
+                               <p className="text-xs font-medium text-ink truncate" title={escapeAttribute(sanitizeId(o.id || o.name))}>{sanitizeId(o.id || o.name)}</p>
                             </div>
                           ))}
                         </>
