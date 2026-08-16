@@ -12,19 +12,22 @@ For full documentation, see **[USER_GUIDE.pdf](./USER_GUIDE.pdf)** in the reposi
 
 ## Installation
 
-The fastest way to run the application is with Docker Compose.
+The fastest way to run the application is with the bootstrap script. It starts Docker with the correct uid/gid so every file in `backend/data` is owned by **your** account — no `sudo` required, even on office laptops where UID `1000` is often the admin account.
 
 ```bash
 # 1. Clone and enter the repo
 git clone <your-repository-url>
 cd xray
 
-# 2. Start the application
-docker compose up --build
+# 2. Make the bootstrap script executable (Linux/macOS)
+chmod +x bootstrap.sh
+
+# 3. Start the application
+./bootstrap.sh
 # Stop with:  docker compose down
 ```
 
-> **On Linux/macOS, prefer `./bootstrap.sh` over `docker compose up`.** It runs the backend as your own uid/gid so every file in `backend/data` is owned by your account and can be deleted without `sudo` (important on office laptops). See **SETUP.md → Troubleshooting → Known deployment issues** for details.
+> **Important:** Do **not** run `docker compose up --build` directly. The bootstrap script exports `PUID=$(id -u)` and `PGID=$(id -g)` before starting Docker, which ensures the backend container writes files as your user. If you skip it, the container falls back to UID `1000` (often the admin on office machines), and you will not be able to modify `backend/data` without `sudo`.
 
 Then open **http://localhost:5174**.
 
@@ -108,7 +111,7 @@ Then edit `.env` in the project root. Common settings:
 - **`No module named 'scipy'`:** the Python packages aren't installed — run `pip install -r backend/requirements.txt`.
 - **Docker fails on Windows:** use `bootstrap.bat` or the Node.js option.
 - **Backend won't start:** check that port 8080 is free and `.env` exists in the root and `backend/`.
-- **Backend crashes with `EACCES: permission denied, mkdir '/app/data/storage'`:** see **[Known Issues](#known-issues)** below.
+- **`EACCES: permission denied, mkdir '/app/data/storage'`:** you likely started the container without `./bootstrap.sh`, so the backend is running as UID `1000` (often the admin). Stop the container, then start it with `./bootstrap.sh` so the backend runs as your uid/gid. The entrypoint will also auto-correct the leaf folder ownership on next start.
 - **Where are the logs?** every API request is logged to `backend/data/storage/monitoring.log` — see **Logging & monitoring** in **[SETUP.md](SETUP.md)**.
 
 ### Known Issues
