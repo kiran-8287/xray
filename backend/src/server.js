@@ -1733,14 +1733,10 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
 // This route must be registered before /api/saved-layouts/:id so /export is not swallowed.
 // Supports optional ?jobId= query param so the client can cancel a running bulk
 // export (Save All / Save Selected) via POST /api/saved-layouts/export/cancel.
-app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAuth, async (req, res) => {
+async function handleSavedLayoutsExport(req, res) {
     const jobId = typeof req.query.jobId === 'string' && req.query.jobId.trim()
         ? req.query.jobId.trim()
         : null;
-    // saveMode: 'individual' = save images + per-layout JSON only (no batch annotations.json)
-    //           'selected' (default) = save images + per-layout JSON; if > BATCH_THRESHOLD,
-    //                                  also accumulate into batch annotations.json partitions
-    //           'all' = always save images + per-layout JSON + batch annotations.json partitions
     const saveMode = typeof req.query.saveMode === 'string' && req.query.saveMode.trim()
         ? req.query.saveMode.trim().toLowerCase()
         : 'selected';
@@ -1750,7 +1746,7 @@ app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAut
     const scope = typeof req.query.scope === 'string' && ['load', 'saved', 'collage'].includes(req.query.scope.trim().toLowerCase())
         ? req.query.scope.trim().toLowerCase()
         : 'saved';
-    const BATCH_THRESHOLD = 50; // Save Selected uses batch strategy when count exceeds this
+    const BATCH_THRESHOLD = 50;
     const useBatchAnnotations = saveMode === 'all';
     let cancelled = false;
 
@@ -1770,37 +1766,31 @@ app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAut
             cancelled = exportCancellations.has(jobId);
         }
 
-        // Get user-configured exports path for this scope (or fall back to default)
         const userExportsRoot = await getExportsPath(scope);
         const exportsRoot = path.resolve(userExportsRoot);
         const exportsHighRoot = path.join(exportsRoot, 'high');
         const exportsLowRoot = path.join(exportsRoot, 'low');
         const exportsAnnotationsRoot = path.join(exportsRoot, 'annotations');
 
-        // In Docker this destination may live on the container's ephemeral layer
-        // (outside the host-visible /app/data bind mount) — refuse to proceed so
-        // we don't "successfully export" files that the user can never access.
         const containerErr = await containerPathError(exportsRoot);
         if (containerErr) {
-          console.error(`[saved-layouts/export] Rejected container-only export path: ${exportsRoot}`);
-          if (!res.headersSent) {
-            return res.status(400).json({ ok: false, error: `The export folder is not usable: ${containerErr}` });
-          }
+            console.error(`[saved-layouts/export] Rejected container-only export path: ${exportsRoot}`);
+            if (!res.headersSent) {
+                return res.status(400).json({ ok: false, error: `The export folder is not usable: ${containerErr}` });
+            }
         }
 
         await fs.mkdir(exportsHighRoot, { recursive: true });
         await fs.mkdir(exportsLowRoot, { recursive: true });
         await fs.mkdir(exportsAnnotationsRoot, { recursive: true });
 
-        // Fail fast if the chosen export folder is read-only / not writable instead
-        // of rendering everything and then reporting every layout as failed.
         const wrProbe = await probeWritableDir(exportsRoot);
         if (!wrProbe.ok) {
-          console.error('[saved-layouts/export] Destination not writable:', wrProbe.message);
-          const insideContainer = await isContainerized();
-          if (!res.headersSent) {
-            return res.status(400).json({ ok: false, error: `The export folder is not writable: ${writableErrorText(wrProbe, insideContainer)}` });
-          }
+            console.error('[saved-layouts/export] Destination not writable:', wrProbe.message);
+            const insideContainer = await isContainerized();
+            if (!res.headersSent) {
+                return res.status(400).json({ ok: false, error: `The export folder is not writable: ${writableErrorText(wrProbe, insideContainer)}` });
+            }
         }
 
         const exported = [];
@@ -1818,23 +1808,34 @@ app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAut
             });
         }
 
-        // Publish live progress for Save All / Save Selected so the frontend can
-        // render a progress bar while layouts are being rendered/written.
         if (jobId) {
             exportProgressStore.set(jobId, { done: 0, total: targetLayouts.length });
         }
 
-        // Always start the batch annotation at annotations_1.json so a re-run of
-        // Save All / Save Selected OVERWRITES the previous group annotation —
-        // this keeps a single canonical annotations_1.json per export folder
-        // and matches user expectations ("rewrite the old one"). If a single
-        // export set exceeds ANNOTATION_PARTITION_CAP, the overflow spills into
-        // annotations_2.json, annotations_3.json, ...
+        // Save All always rewrites the canonical full export in annotations_1.json.
+        // Save Selected must NOT overwrite that; instead it starts at the next free
+        // partition number so the subset becomes annotations_2.json, ... and the
+        // prior full export is preserved.
         let annotationPartitionNum = 1;
+        if (saveMode === 'selected') {
+            try {
+                const existingFiles = await fs.readdir(exportsAnnotationsRoot);
+                const existingPartitionNums = existingFiles
+                    .filter(name => /^annotations_\d+\.json$/.test(name))
+                    .map(name => {
+                        const match = name.match(/^annotations_(\d+)\.json$/);
+                        return match ? parseInt(match[1], 10) : null;
+                    })
+                    .filter((num) => num !== null);
 
-        // Generate segmentation masks for ALL threats across the whole export set in
-        // ONE batched, deduped call BEFORE the loop (instead of once per layout), so
-        // a large Save All does not spawn a python child for every single layout.
+                if (existingPartitionNums.length > 0) {
+                    annotationPartitionNum = Math.max(...existingPartitionNums) + 1;
+                }
+            } catch (err) {
+                console.warn('[export] Failed to scan existing annotation partitions:', err);
+            }
+        }
+
         try {
             await attachThreatSegmentationMasks(targetLayouts.map((l) => l.layout_json?.objects).filter(Boolean));
         } catch (err) {
@@ -1846,12 +1847,10 @@ app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAut
 
         for (let idx = 0; idx < targetLayouts.length; idx++) {
             const layout = targetLayouts[idx];
-            // Stop at the next layout boundary if the client requested cancellation.
             if (jobId && exportCancellations.has(jobId)) {
                 cancelled = true;
                 break;
             }
-            // Publish per-layout progress so the frontend progress bar advances live.
             if (jobId) {
                 exportProgressStore.set(jobId, { done: idx, total: targetLayouts.length });
             }
@@ -1929,7 +1928,7 @@ app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAut
                                 obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
                             }
                         }
-                        
+
                         const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, 'highenergy');
                         const highExportPath = path.join(exportsHighRoot, `${baseName}_high.png`);
                         await fs.writeFile(highExportPath, highPngBuffer);
@@ -1946,8 +1945,6 @@ app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAut
                         lowEnergyFilename = `${baseName}_low.png`;
                     }
 
-                    // Build the annotation record for this layout (the full object data
-                    // from the saved layout, plus references to the rendered images).
                     const annotation = {
                         layoutId: layout.id,
                         layoutName: layout.name,
@@ -1957,10 +1954,6 @@ app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAut
                         lowEnergyImage: lowEnergyFilename,
                         objects: layout.layout_json?.objects || null
                     };
-                    // Per-layout annotation file — only used for single-layout
-                    // (saveMode='individual') exports. Save All and Save Selected
-                    // always accumulate into a SINGLE group annotation
-                    // (annotations_1.json, …) so the whole batch is one file.
                     const isBulkMode = saveMode === 'all' || saveMode === 'selected';
                     const shouldCreateIndividualFile = !isBulkMode;
                     const shouldCreateBatchAnnotations = isBulkMode;
@@ -2002,13 +1995,11 @@ app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAut
                     error: err.message
                 });
             }
-            // Mark this layout as completed so the progress bar reflects what is done.
             if (jobId) {
                 exportProgressStore.set(jobId, { done: idx + 1, total: targetLayouts.length });
             }
         }
 
-        // Flush remaining annotations in the partition buffer
         if (currentAnnotationPartition.length > 0) {
             try {
                 const partPath = path.join(exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
@@ -2046,13 +2037,19 @@ app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAut
             res.end();
         }
     } finally {
-        // Always release the cancellation flag so a fresh Save All / Save Selected
-        // with the same jobId (or any future job) is not accidentally short-circuited.
         if (jobId) {
             exportCancellations.delete(jobId);
             exportProgressStore.delete(jobId);
         }
     }
+}
+
+app.get('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAuth, async (req, res) => {
+    await handleSavedLayoutsExport(req, res);
+});
+
+app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAuth, async (req, res) => {
+    await handleSavedLayoutsExport(req, res);
 });
 
 // Live progress for a running saved-layouts export job (Save All / Save Selected),

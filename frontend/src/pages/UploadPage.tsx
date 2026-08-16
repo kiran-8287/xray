@@ -5,7 +5,6 @@ import UploadFileQueue from "../components/upload/UploadFileQueue";
 import { useUploadContext } from "../context/UploadContext";
 import { API_BASE_URL } from "../config/api";
 import { LIBRARIES_UI } from "../config/categories";
-import ConfirmModal from "../components/common/ConfirmModal";
 import { initializeConcurrencyPools, adjustConcurrencyForLoad } from "../lib/concurrencyController";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
 import { setUploadUnsaved } from "../lib/navigationGuard";

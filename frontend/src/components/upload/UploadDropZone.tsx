@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Upload as UploadIcon, AlertTriangle, X } from "lucide-react";
+import { Upload as UploadIcon } from "lucide-react";
 
 interface UploadDropZoneProps {
   onFilesSelected: (files: File[]) => void;
@@ -7,8 +7,6 @@ interface UploadDropZoneProps {
 
 export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [pendingAction, setPendingAction] = useState<"files" | "folder" | null>(null);
 
   const isSupportedFile = (name: string): boolean => {
     const lower = name.toLowerCase();
@@ -112,8 +110,6 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
 
   const triggerFilePicker = () => {
     document.getElementById("fileInput")?.click();
-    setShowConfirm(false);
-    setPendingAction(null);
   };
 
   const readDirectoryHandle = async (dirHandle: FileSystemDirectoryHandle): Promise<File[]> => {
@@ -137,38 +133,27 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
   };
 
   const triggerFolderPicker = async () => {
-    setShowConfirm(false);
-    setPendingAction(null);
-
     const win = window as Window & typeof globalThis & { showDirectoryPicker?: (options?: { mode?: string; startIn?: string }) => Promise<FileSystemDirectoryHandle> };
-    if (!win.showDirectoryPicker) {
-      return;
-    }
-
-    try {
-      const dirHandle = await win.showDirectoryPicker({ mode: "read", startIn: "desktop" });
-      const files = await readDirectoryHandle(dirHandle);
-      if (files.length > 0) {
-        onFilesSelected(files);
+    if (win.showDirectoryPicker) {
+      try {
+        const dirHandle = await win.showDirectoryPicker({ mode: "read", startIn: "desktop" });
+        const files = await readDirectoryHandle(dirHandle);
+        if (files.length > 0) {
+          onFilesSelected(files);
+        }
+        return;
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          return;
+        }
+        console.error("showDirectoryPicker failed, falling back to input:", err);
       }
-    } catch (err: any) {
-      if (err?.name !== "AbortError") {
-        console.error("Folder selection failed:", err);
-      }
     }
-  };
 
-  const handleConfirmAction = () => {
-    if (pendingAction === "files") {
-      triggerFilePicker();
-    } else if (pendingAction === "folder") {
-      triggerFolderPicker();
+    const folderInput = document.getElementById("folderInput");
+    if (folderInput) {
+      folderInput.click();
     }
-  };
-
-  const handleCancelAction = () => {
-    setShowConfirm(false);
-    setPendingAction(null);
   };
 
   return (
@@ -190,6 +175,15 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
         className="hidden"
         onChange={handleFileChange}
       />
+      <input
+        id="folderInput"
+        type="file"
+        // @ts-ignore webkitdirectory
+        webkitdirectory="true"
+        multiple
+        className="hidden"
+        onChange={handleFileChange}
+      />
       <div className="w-12 h-12 mx-auto mb-4 bg-accent/10 rounded-xl flex items-center justify-center text-accent/70 group-hover:text-accent group-hover:bg-accent/15 transition-colors">
         <UploadIcon className="w-6 h-6" />
       </div>
@@ -199,62 +193,19 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
         <button
           type="button"
-          onClick={() => { setPendingAction("files"); setShowConfirm(true); }}
+          onClick={triggerFilePicker}
           className="inline-flex items-center justify-center rounded-full border border-border px-5 py-3 text-sm font-semibold text-ink bg-white/90 hover:bg-accent/5 transition"
         >
           Upload files
         </button>
         <button
           type="button"
-          onClick={() => { setPendingAction("folder"); setShowConfirm(true); }}
+          onClick={triggerFolderPicker}
           className="inline-flex items-center justify-center rounded-full border border-border px-5 py-3 text-sm font-semibold text-ink bg-white/90 hover:bg-accent/5 transition"
         >
           Upload folder
         </button>
       </div>
-
-      {showConfirm && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleCancelAction} />
-          <div className="relative z-[100000] w-full max-w-md bg-white rounded-2xl shadow-2xl border border-border p-6">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-amber-900/40 border border-amber-700/50 flex items-center justify-center shrink-0">
-                <AlertTriangle size={18} className="text-amber-400" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-lg font-semibold text-ink font-heading">
-                  {pendingAction === "folder" ? "Upload folder" : "Upload files"}
-                </h3>
-                <p className="text-sm text-muted mt-1 leading-relaxed">
-                  {pendingAction === "folder"
-                    ? "You are about to select a folder to upload. Only supported file types (.dump.pgm, .tip, .npz) will be processed. Do you want to continue?"
-                    : "You are about to select files to upload. Only supported file types (.dump.pgm, .tip, .npz) will be processed. Do you want to continue?"}
-                </p>
-              </div>
-              <button
-                onClick={handleCancelAction}
-                className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface transition-colors shrink-0"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="flex gap-2 justify-end pt-4">
-              <button
-                onClick={handleCancelAction}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-surface border border-border text-ink hover:bg-gray-100 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmAction}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent/90 transition-colors"
-              >
-                Continue
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

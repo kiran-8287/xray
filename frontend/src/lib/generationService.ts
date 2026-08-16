@@ -33,6 +33,7 @@ import {
   getAllCombos,
   getAllFailures,
   clearAll as storageClearAll,
+  setProgress as storageSetProgress,
 } from "./storageService";
 import { calculateDistributionQuotas, shouldUseSplitGeneration } from "./splitGeneration";
 import { buildLayoutPayload } from "./layoutBuilder";
