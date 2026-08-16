@@ -2,11 +2,9 @@ import React, { useRef, useEffect } from "react";
 import { RotateCw, GripVertical } from "lucide-react";
 import type { SceneObject } from "../../types/customization";
 import { getTransformedValidRegion, getObjectAxisAlignedBox } from "../../lib/customizationHelpers";
-import { drawXRayComposite, imgCache } from "../../lib/xrayRenderer";
+import { drawXRayComposite, imgCache, clearCaches } from "../../lib/xrayRenderer";
 import { API_BASE_URL } from "../../config/api";
-
-const CANVAS_W = 800;
-const CANVAS_H = 600;
+import { CANVAS_WIDTHIDTH, CANVAS_HEIGHTEIGHT } from "../../lib/constants";
 
 const IMAGE_BASE_URL = `${API_BASE_URL}/data/library_images/`;
 
@@ -51,7 +49,6 @@ export default function CanvasArea({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    // Set canvas size to bag dimensions if available
     if (bagImageDimensions) {
       canvas.width = bagImageDimensions.width;
       canvas.height = bagImageDimensions.height;
@@ -59,6 +56,9 @@ export default function CanvasArea({
     (async () => {
       await drawXRayComposite(canvas!, objects, onImagesLoadedRef.current);
     })();
+    return () => {
+      clearCaches();
+    };
   }, [objects, bagImageDimensions]);
 
   onImagesLoadedRef.current = () => {
@@ -80,8 +80,8 @@ export default function CanvasArea({
         ref={canvasDivRef}
         className="bg-white border border-border rounded-2xl shadow-panel relative select-none overflow-hidden transition-transform duration-75"
         style={{
-          width: bagImageDimensions ? bagImageDimensions.width : CANVAS_W,
-          height: bagImageDimensions ? bagImageDimensions.height : CANVAS_H,
+          width: bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH,
+          height: bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT,
           transform: `scale(${zoom})`,
           transformOrigin: "center",
         }}
@@ -89,18 +89,18 @@ export default function CanvasArea({
         {showGrid && (
           <svg className="absolute top-0 left-0 w-full h-full pointer-events-none">
             {/* Minor grid lines every 20px */}
-            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.width : CANVAS_W) / 20 + 1 }).map((_, i) => (
-              <line key={`v-${i}`} x1={i * 20} y1={0} x2={i * 20} y2={bagImageDimensions ? bagImageDimensions.height : CANVAS_H} stroke="rgba(37, 99, 235, 0.15)" strokeWidth={0.5} />
+            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH) / 20 + 1 }).map((_, i) => (
+              <line key={`v-${i}`} x1={i * 20} y1={0} x2={i * 20} y2={bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT} stroke="rgba(37, 99, 235, 0.15)" strokeWidth={0.5} />
             ))}
-            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.height : CANVAS_H) / 20 + 1 }).map((_, i) => (
-              <line key={`h-${i}`} x1={0} y1={i * 20} x2={bagImageDimensions ? bagImageDimensions.width : CANVAS_W} y2={i * 20} stroke="rgba(37, 99, 235, 0.15)" strokeWidth={0.5} />
+            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT) / 20 + 1 }).map((_, i) => (
+              <line key={`h-${i}`} x1={0} y1={i * 20} x2={bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH} y2={i * 20} stroke="rgba(37, 99, 235, 0.15)" strokeWidth={0.5} />
             ))}
             {/* Major grid lines every 100px */}
-            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.width : CANVAS_W) / 100 + 1 }).map((_, i) => (
-              <line key={`mv-${i}`} x1={i * 100} y1={0} x2={i * 100} y2={bagImageDimensions ? bagImageDimensions.height : CANVAS_H} stroke="rgba(37, 99, 235, 0.5)" strokeWidth={1} />
+            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH) / 100 + 1 }).map((_, i) => (
+              <line key={`mv-${i}`} x1={i * 100} y1={0} x2={i * 100} y2={bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT} stroke="rgba(37, 99, 235, 0.5)" strokeWidth={1} />
             ))}
-            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.height : CANVAS_H) / 100 + 1 }).map((_, i) => (
-              <line key={`mh-${i}`} x1={0} y1={i * 100} x2={bagImageDimensions ? bagImageDimensions.width : CANVAS_W} y2={i * 100} stroke="rgba(37, 99, 235, 0.5)" strokeWidth={1} />
+            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT) / 100 + 1 }).map((_, i) => (
+              <line key={`mh-${i}`} x1={0} y1={i * 100} x2={bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH} y2={i * 100} stroke="rgba(37, 99, 235, 0.5)" strokeWidth={1} />
             ))}
           </svg>
         )}
@@ -114,8 +114,8 @@ export default function CanvasArea({
 
         <canvas
           ref={canvasRef}
-          width={bagImageDimensions ? bagImageDimensions.width : CANVAS_W}
-          height={bagImageDimensions ? bagImageDimensions.height : CANVAS_H}
+          width={bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH}
+          height={bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT}
           className="absolute top-0 left-0 w-full h-full pointer-events-none"
           style={{ zIndex: 1 }}
         />
@@ -188,6 +188,7 @@ export default function CanvasArea({
                         className="w-7 h-7 rounded-full border-2 border-accent bg-panel shadow-md text-accent hover:bg-accent hover:text-white cursor-grab active:cursor-grabbing transition-all flex items-center justify-center"
                         onMouseDown={(e) => handleRotationMouseDown(e, obj)}
                         title="Drag to rotate"
+                        aria-label="Rotate object"
                       >
                         <RotateCw size={12} />
                       </button>

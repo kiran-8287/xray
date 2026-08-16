@@ -90,7 +90,7 @@ const ALLOWED_EXTENSIONS = {
   '.npz': ['zip'],
   '.pgm': ['pgm'],
   '.dump.pgm': ['pgm'],
-  '.tip': ['tip'],
+  '.tip': ['pgm', 'tip'],
   '.dump': ['pgm', 'tip'],
 };
 

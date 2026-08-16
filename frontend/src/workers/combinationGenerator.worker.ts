@@ -2,6 +2,7 @@
 // Offloads heavy computation from main thread
 
 import { generateCombinations } from "../lib/combinationGenerator";
+import { debugLog } from "../lib/debugLog";
 
 export interface CombinationWorkerRequest {
   type: "generate";
@@ -23,10 +24,22 @@ export interface CombinationWorkerResponse {
   error?: string;
 }
 
-self.onmessage = (event: MessageEvent<CombinationWorkerRequest>) => {
+function validateCombinationWorkerRequest(data: unknown): CombinationWorkerRequest | null {
+  if (!data || typeof data !== "object") return null;
+  const obj = data as Record<string, unknown>;
+  if (obj.type !== "generate") return null;
+  if (typeof obj.kValue !== "number" || obj.kValue <= 0) return null;
+  if (!Array.isArray(obj.selectedBags) || !Array.isArray(obj.selectedThreats) || !Array.isArray(obj.selectedOthers)) return null;
+  if (!obj.existingIds || typeof obj.existingIds !== "object") return null;
+  const payload = obj as CombinationWorkerRequest;
+  return payload;
+}
+
+self.onmessage = (event: MessageEvent<unknown>) => {
   const data = event.data;
 
-  if (data.type !== "generate") {
+  const request = validateCombinationWorkerRequest(data);
+  if (!request) {
     self.postMessage({
       type: "error",
       error: "Invalid request type",

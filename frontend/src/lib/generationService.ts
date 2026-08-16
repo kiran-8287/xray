@@ -12,7 +12,7 @@
  * automatically save pages of 100, evict, load next 100 from buffer, repeat.
  */
 
-import type { CombinatorialResult, FailureLog } from "../types/customization";
+import type { CombinatorialResult, FailureLog, SceneObject } from "../types/customization";
 import type { Item } from "../types/library";
 import type {
   AutoSaveMode,
@@ -30,41 +30,32 @@ import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "./fetchWithTimeout";
 import {
   addCombos,
   addFailures,
-  setProgress as storageSetProgress,
   getAllCombos,
   getAllFailures,
-  getProgress as storageGetProgress,
   clearAll as storageClearAll,
 } from "./storageService";
 import { calculateDistributionQuotas, shouldUseSplitGeneration } from "./splitGeneration";
+import { buildLayoutPayload } from "./layoutBuilder";
+import {
+  ITEMS_PER_PAGE,
+  MAX_CONCURRENT_RENDERS,
+  NOTIFY_THROTTLE_MS,
+  CHUNK_SIZE,
+  STAGED_BUFFER_SIZE,
+  BUFFER_REFILL_THRESHOLD,
+  MAX_BUFFER_SIZE,
+  MAX_BUFFER_GROWTH,
+  AUTO_SAVE_INITIAL_DELAY_MS,
+  AUTO_SAVE_PAGE_DELAY_MS,
+  DEFAULT_SPLIT_BATCH_SIZE,
+  SPLIT_GENERATION_ENABLED,
+  MAX_ZERO_CHUNKS,
+} from "./constants";
+import { debugLog } from "./debugLog";
+import { reportError } from "./errorReporter";
+import { ERROR_MESSAGES } from "./errorMessages";
 
 type Subscriber = (state: GenerationState) => void;
-
-const ITEMS_PER_PAGE = 100;
-const MAX_CONCURRENT_RENDERS = 2;
-const NOTIFY_THROTTLE_MS = 100;
-
-// Chunked generation constants
-const CHUNK_SIZE = 5000;
-// Display + staging model ("show only 100 at a time"):
-// - The collage grid renders ONLY ITEMS_PER_PAGE (100) combinations.
-// - The next STAGED_BUFFER_SIZE (200) combos are kept staged in generatedBuffer so
-//   they load instantly right after the current page is saved ("next 100 out of the
-//   stored 200"), then checkAndRefillBuffer() tops the buffer back up toward
-//   STAGED_BUFFER_SIZE ("add another 100 next to the buffer").
-const STAGED_BUFFER_SIZE = 200;
-const BUFFER_REFILL_THRESHOLD = STAGED_BUFFER_SIZE;
-const MAX_BUFFER_SIZE = 300; // hard ceiling on in-memory combos (100 shown + 200 staged)
-const MAX_BUFFER_GROWTH = 1000;
-
-// Auto-save timing constants
-const AUTO_SAVE_INITIAL_DELAY_MS = 5000;
-const AUTO_SAVE_PAGE_DELAY_MS = 5000;
-
-// Split generation constants
-const DEFAULT_SPLIT_BATCH_SIZE = 25_000; // Split large k into batches of this size
-const SPLIT_GENERATION_ENABLED = true; // Feature flag
-
 
 let worker: Worker | null = null;
 let autoSaveEnabled = false;
@@ -94,7 +85,6 @@ let totalGeneratedCount = 0; // Total combinations generated so far
 let isGeneratingChunk = false; // Whether we're currently generating a chunk
 let currentGenerationParams: GenerationParams | null = null; // Store params for chunk requests
 // Bug #3 fix: circuit breaker — stop retrying after this many consecutive empty chunks
-const MAX_ZERO_CHUNKS = 3;
 let consecutiveZeroChunks = 0;
 // Track the total count when the current chunk was requested, so we can
 // accurately measure how many results the chunk produced (totalGeneratedCount
@@ -134,7 +124,7 @@ function notifySubscribers() {
           try {
             cb(state);
           } catch (err) {
-            console.error("[GenerationService] subscriber error:", err);
+            debugLog.error("[GenerationService] subscriber error:", err);
           }
         }
       }, NOTIFY_THROTTLE_MS - timeSinceLastNotify);
@@ -147,7 +137,7 @@ function notifySubscribers() {
     try {
       cb(state);
     } catch (err) {
-      console.error("[GenerationService] subscriber error:", err);
+            debugLog.error("[GenerationService] subscriber error:", err);
     }
   }
 }
@@ -185,87 +175,12 @@ function refillDisplayWindow() {
   }
 }
 
-function comboToLayout(combo: CombinatorialResult): any {
-  const bagObject = combo.objects?.find((o: any) => o.library === "bag");
-  let validRegionPolygon: any[] = [];
-
-  if (bagObject?.polygonOutline) {
-    try {
-      validRegionPolygon = getTransformedPolygon(
-        { x: bagObject.transform.x, y: bagObject.transform.y },
-        { width: bagObject.transform.width, height: bagObject.transform.height },
-        bagObject.transform.rotation,
-        bagObject.polygonOutline
-      );
-    } catch { /* ignore */ }
-  }
-
-  const threatNames = combo.threats?.map(t => t.name) || [];
-  const otherNames = combo.others?.map(o => o.name) || [];
-  const allNames = [...threatNames, ...otherNames];
-  const name = combo.id;
-
-  const bagObj = bagObject ? {
-    id: bagObject.id,
-    subcategory: bagObject.subcategory?.toLowerCase().replace(/\s+/g, '-'),
-    filepath: bagObject.filepath,
-    center: { x: bagObject.transform.x, y: bagObject.transform.y },
-    size: { width: bagObject.transform.width, height: bagObject.transform.height },
-    originalPixelValue: bagObject.originalPixelValue,
-    currentPixelValue: bagObject.currentPixelValue,
-    polygonOutline: bagObject.polygonOutline,
-    validRegionPolygon,
-    layer: bagObject.layer,
-    tags: bagObject.tags || [],
-  } : null;
-
-  const threats = (combo.objects || [])
-    .filter((o: any) => o.library === "threat")
-    .map((obj: any) => ({
-      id: obj.id,
-      subcategory: obj.subcategory?.toLowerCase().replace(/\s+/g, '-'),
-      filepath: obj.filepath,
-      center: { x: obj.transform.x, y: obj.transform.y },
-      size: { width: obj.transform.width, height: obj.transform.height },
-      rotation: obj.transform.rotation,
-      originalPixelValue: obj.originalPixelValue,
-      currentPixelValue: obj.currentPixelValue,
-      layer: obj.layer,
-    }));
-
-  const nonThreats = (combo.objects || [])
-    .filter((o: any) => o.library !== "bag" && o.library !== "threat")
-    .map((obj: any) => ({
-      id: obj.id,
-      subcategory: obj.subcategory?.toLowerCase().replace(/\s+/g, '-'),
-      filepath: obj.filepath,
-      center: { x: obj.transform.x, y: obj.transform.y },
-      size: { width: obj.transform.width, height: obj.transform.height },
-      rotation: obj.transform.rotation,
-      originalPixelValue: obj.originalPixelValue,
-      currentPixelValue: obj.currentPixelValue,
-      layer: obj.layer,
-    }));
-
-  return {
-    id: combo.id,
-    name,
-    filepath: null,
-    layout_json: {
-      threat_count: threats.length,
-      non_threat_count: nonThreats.length,
-      objects: { bag: bagObj, threats, "non-threats": nonThreats },
-      createdAt: new Date().toISOString(),
-    },
-  };
-}
-
 async function saveOneComboAnnotationOnly(combo: CombinatorialResult): Promise<boolean> {
   try {
     const res = await fetchWithTimeout(`${API_BASE_URL}/api/saved-layouts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(comboToLayout(combo)),
+      body: JSON.stringify(buildLayoutPayload(combo)),
     }, LONG_REQUEST_TIMEOUT_MS, 1);
     return res.ok;
   } catch {
@@ -277,7 +192,7 @@ async function saveComboAnnotationBatch(page: CombinatorialResult[]): Promise<Se
   const savedIds = new Set<string>();
   if (page.length === 0) return savedIds;
   try {
-    const payloads = page.map(comboToLayout);
+    const payloads = page.map(buildLayoutPayload);
     const res = await fetchWithTimeout(`${API_BASE_URL}/api/saved-layouts/batch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -331,12 +246,12 @@ async function renderOneComboImage(combo: CombinatorialResult): Promise<boolean>
       body: JSON.stringify({ objects: combo.objects, name: combo.id }),
     }, LONG_REQUEST_TIMEOUT_MS, 1);
     if (!res.ok) {
-      console.error(`[generationService] Render failed for ${combo.id}: HTTP ${res.status}`);
+      debugLog.error(`[generationService] Render failed for ${combo.id}: HTTP ${res.status}`);
       return false;
     }
     return true;
   } catch (err) {
-    console.error(`[generationService] Render error for ${combo.id}:`, err);
+    debugLog.error(`[generationService] Render error for ${combo.id}:`, err);
     return false;
   } finally {
     release();
@@ -431,7 +346,7 @@ async function runAutoSaveLoop() {
     const timeSinceStart = Date.now() - autoSaveStartTime;
     if (timeSinceStart < AUTO_SAVE_INITIAL_DELAY_MS) {
       const remainingDelay = AUTO_SAVE_INITIAL_DELAY_MS - timeSinceStart;
-      console.log(`[AutoSave] Waiting ${remainingDelay}ms before starting auto-save...`);
+      debugLog.info(`[AutoSave] Waiting ${remainingDelay}ms before starting auto-save...`);
       await interruptibleSleep(remainingDelay, loopWakeController);
       if (!autoSaveEnabled) return;
     }
@@ -446,7 +361,7 @@ async function runAutoSaveLoop() {
       const timeSinceLastSave = Date.now() - lastAutoSaveTime;
       if (lastAutoSaveTime > 0 && timeSinceLastSave < AUTO_SAVE_PAGE_DELAY_MS) {
         const remainingDelay = AUTO_SAVE_PAGE_DELAY_MS - timeSinceLastSave;
-        console.log(`[AutoSave] Waiting ${remainingDelay}ms before next save...`);
+        debugLog.info(`[AutoSave] Waiting ${remainingDelay}ms before next save...`);
         await interruptibleSleep(remainingDelay, loopWakeController);
         if (!autoSaveEnabled) break;
       }
@@ -554,7 +469,7 @@ async function generateSingleBatch(
 
     // Called once pages are saved and buffer space frees up.
     const pauseUntilSaved = () => {
-      console.log(`[SplitGeneration] ${batchLabel} buffer full (${generatedBuffer.length}/>=${MAX_BUFFER_GROWTH}), pausing until pages are saved...`);
+      debugLog.info(`[SplitGeneration] ${batchLabel} buffer full (${generatedBuffer.length}/>=${MAX_BUFFER_GROWTH}), pausing until pages are saved...`);
       chunkInFlight = false;
       if (timeout) clearTimeout(timeout); // no in-flight work while paused
       splitBatchResumeFn = () => {
@@ -680,7 +595,7 @@ function checkAndRefillBuffer() {
   
   // If buffer is below threshold and we haven't generated all combos, request more
   if (generatedBuffer.length < BUFFER_REFILL_THRESHOLD && totalGeneratedCount < totalTarget) {
-    console.log(`[GenerationService] Buffer low (${generatedBuffer.length}/${BUFFER_REFILL_THRESHOLD}), requesting next chunk...`);
+    debugLog.info(`[GenerationService] Buffer low (${generatedBuffer.length}/${BUFFER_REFILL_THRESHOLD}), requesting next chunk...`);
     requestNextChunk();
   }
 }
@@ -723,12 +638,12 @@ function requestNextChunk() {
     // Already at/near the target — nothing left to generate. Finish cleanly
     // instead of silently stalling.
     isGeneratingChunk = false;
-    console.log("[GenerationService] No more combos to request — finishing generation.");
+    debugLog.info("[GenerationService] No more combos to request — finishing generation.");
     finishGeneration({ generated: Math.min(totalGeneratedCount, totalTarget), total: totalTarget });
     return;
   }
   
-  console.log(`[GenerationService] Requesting chunk of ${chunkSize} combos (total so far: ${totalGeneratedCount}/${totalTarget})`);
+  debugLog.info(`[GenerationService] Requesting chunk of ${chunkSize} combos (total so far: ${totalGeneratedCount}/${totalTarget})`);
   
   // Reconstruct distributions from params
   const effectiveThreatDist: Record<number, number> = {};
@@ -771,12 +686,12 @@ export const GenerationService = {
     try {
       await attachSegmentationMasks([...params.selectedThreats, ...params.selectedOthers]);
     } catch (err) {
-      console.warn("[GenerationService] Could not attach segmentation masks:", err);
+      debugLog.warn("[GenerationService] Could not attach segmentation masks:", err);
     }
     
     // Check if we should use split generation for large k values
     if (shouldUseSplitGeneration(params.kValue, splitParams)) {
-      console.log(`[GenerationService] Using split generation for k=${params.kValue.toLocaleString()}`);
+      debugLog.info(`[GenerationService] Using split generation for k=${params.kValue.toLocaleString()}`);
       return await this.startSplitGeneration(splitParams);
     }
     
@@ -816,28 +731,28 @@ export const GenerationService = {
     await storageClearAll();
 
     try {
-      console.log("[GenerationService] Creating worker...");
+      debugLog.info("[GenerationService] Creating worker...");
       const newWorker = new Worker(
         new URL("../workers/incrementalGenerator.worker.ts", import.meta.url),
         { type: "module" }
       );
       worker = newWorker;
-      console.log("[GenerationService] Worker created successfully");
+      debugLog.info("[GenerationService] Worker created successfully");
 
       newWorker.onmessage = (event) => {
         const response = event.data;
-        console.log("[GenerationService] Received message:", response.type, response);
+        debugLog.info("[GenerationService] Received message:", response.type);
 
         if (response.type === "progress") {
           // Update progress without adding to buffer
           if (response.progress) {
-            console.log("[GenerationService] Progress update:", response.progress);
+            debugLog.info("[GenerationService] Progress update:", response.progress);
             state.progress = response.progress;
             notifySubscribers();
           }
         } else if (response.type === "batch") {
           const batch = response.batch || [];
-          console.log("[GenerationService] Batch received:", batch.length, "combos, buffer size:", generatedBuffer.length);
+          debugLog.info("[GenerationService] Batch received:", batch.length, "combos, buffer size:", generatedBuffer.length);
           state.progress = response.progress;
           if (response.failures) {
             state.failures.push(...response.failures);
@@ -871,7 +786,7 @@ export const GenerationService = {
             wakeLoopNow();
           }
         } else if (response.type === "chunkComplete") {
-          console.log("[GenerationService] Chunk complete:", response.progress, "isComplete:", response.isComplete);
+          debugLog.info("[GenerationService] Chunk complete:", response.progress, "isComplete:", response.isComplete);
           isGeneratingChunk = false;
           
           if (response.failures) {
@@ -890,12 +805,12 @@ export const GenerationService = {
 
           if (progressDelta <= 0) {
             consecutiveZeroChunks++;
-            console.warn(
+            debugLog.warn(
               `[GenerationService] Chunk produced 0 results (${consecutiveZeroChunks}/${MAX_ZERO_CHUNKS}). ` +
               (consecutiveZeroChunks >= MAX_ZERO_CHUNKS ? 'Stopping generation.' : 'Will retry...')
             );
             if (consecutiveZeroChunks >= MAX_ZERO_CHUNKS) {
-              console.error('[GenerationService] Too many consecutive empty chunks — aborting generation.');
+              debugLog.error('[GenerationService] Too many consecutive empty chunks — aborting generation.');
               finishGeneration(response.progress || state.progress);
               return;
             }
@@ -912,26 +827,26 @@ export const GenerationService = {
           const bufferHasRoom = generatedBuffer.length < MAX_BUFFER_GROWTH;
           
           if (!response.isComplete && !reachedTarget && bufferHasRoom) {
-            console.log("[GenerationService] Requesting next chunk...");
+            debugLog.info("[GenerationService] Requesting next chunk...");
             requestNextChunk();
           } else {
             // Either the worker says it's complete, we've hit the target,
             // or the buffer is full (manual mode — resume via saveCurrentPage).
             if (reachedTarget || response.isComplete) {
-              console.log("[GenerationService] All chunks complete", { totalGeneratedCount, isComplete: response.isComplete });
+              debugLog.info("[GenerationService] All chunks complete", { totalGeneratedCount, isComplete: response.isComplete });
               const finalProgress: { generated: number; total: number } = {
                 generated: Math.min(totalGeneratedCount, params.kValue),
                 total: params.kValue,
               };
               finishGeneration(finalProgress);
             } else if (generatedBuffer.length >= MAX_BUFFER_SIZE) {
-              console.log(`[GenerationService] Buffer full (${generatedBuffer.length}/${MAX_BUFFER_GROWTH}), pausing generation. Save pages to free up space.`);
+              debugLog.info(`[GenerationService] Buffer full (${generatedBuffer.length}/${MAX_BUFFER_GROWTH}), pausing generation. Save pages to free up space.`);
               // Buffer is full - pause and wait for user to save pages
               // checkAndRefillBuffer() will be called after saveCurrentPage()
             }
           }
         } else if (response.type === "complete") {
-          console.log("[GenerationService] Generation complete:", response.progress);
+          debugLog.info("[GenerationService] Generation complete:", response.progress);
           state.isGenerating = false;
           state.hasGeneratedResults = state.combinations.length > 0 || generatedBuffer.length > 0;
           state.failures.push(...(response.failures || []));
@@ -940,7 +855,7 @@ export const GenerationService = {
           persistToStorage();
           worker = null;
         } else if (response.type === "error") {
-          console.error("[GenerationService] worker error:", response.error);
+          debugLog.error("[GenerationService] worker error:", response.error);
           state.isGenerating = false;
           isGeneratingChunk = false;
           state.progress = null;
@@ -950,7 +865,7 @@ export const GenerationService = {
       };
 
       newWorker.onerror = (error) => {
-        console.error("[GenerationService] Worker onerror:", error);
+        debugLog.error("[GenerationService] Worker onerror:", error);
         state.isGenerating = false;
         state.progress = null;
         notifySubscribers();
@@ -973,7 +888,7 @@ export const GenerationService = {
       isGeneratingChunk = true;
       chunkStartGeneratedCount = 0;
 
-      console.log("[GenerationService] Sending message to worker...");
+      debugLog.info("[GenerationService] Sending message to worker...");
       newWorker.postMessage({
         type: "generate",
         selectedBags: params.selectedBags,
@@ -986,9 +901,9 @@ export const GenerationService = {
         existingIds: params.existingIds || [],
         batchSize: params.batchSize ?? 200,
       });
-      console.log("[GenerationService] Message sent to worker");
+      debugLog.info("[GenerationService] Message sent to worker");
     } catch (err) {
-      console.error("[GenerationService] failed to start worker:", err);
+      debugLog.error("[GenerationService] failed to start worker:", err);
       state.isGenerating = false;
       state.progress = null;
       notifySubscribers();
@@ -1004,7 +919,7 @@ export const GenerationService = {
     try {
       await attachSegmentationMasks([...params.selectedThreats, ...params.selectedOthers]);
     } catch (err) {
-      console.warn("[GenerationService] Could not attach segmentation masks:", err);
+      debugLog.warn("[GenerationService] Could not attach segmentation masks:", err);
     }
     
     // Reset abort flag for this generation run
@@ -1017,7 +932,7 @@ export const GenerationService = {
       splitBatchSize
     );
 
-    console.log(`[SplitGeneration] Starting:`, {
+    debugLog.info(`[SplitGeneration] Starting:`, {
       totalK: params.kValue.toLocaleString(),
       numBatches: quotas.numBatches,
     });
@@ -1051,7 +966,7 @@ export const GenerationService = {
     // Start auto-save loop if enabled (saves pages, allowing the user to see
     // the next pages advance automatically as each page is saved to backend)
     if (autoSaveEnabled) {
-      console.log("[SplitGeneration] Starting auto-save loop...");
+      debugLog.info("[SplitGeneration] Starting auto-save loop...");
       runAutoSaveLoop();
     }
 
@@ -1061,7 +976,7 @@ export const GenerationService = {
     for (let i = 0; i < quotas.batches.length; i++) {
       // Check if generation was aborted (e.g., user navigated away)
       if (generationAborted) {
-        console.log(`[SplitGeneration] Aborted before batch ${i + 1}/${quotas.numBatches}`);
+        debugLog.info(`[SplitGeneration] Aborted before batch ${i + 1}/${quotas.numBatches}`);
         break;
       }
       
@@ -1133,7 +1048,7 @@ export const GenerationService = {
         state.progress = { generated: totalGeneratedCount, total: params.kValue };
         refillDisplayWindow();
 
-        console.log(`[SplitGeneration] ${batchLabel} complete:`, {
+        debugLog.info(`[SplitGeneration] ${batchLabel} complete:`, {
           batchGenerated: batchResult.results.length.toLocaleString(),
           totalGenerated: totalGeneratedCount.toLocaleString(),
           displayItems: state.combinations.length,
@@ -1141,7 +1056,7 @@ export const GenerationService = {
           percentage: ((totalGeneratedCount / params.kValue) * 100).toFixed(1) + '%'
         });
       } catch (err) {
-        console.error(`${batchLabel} failed:`, err);
+        debugLog.error(`${batchLabel} failed:`, err);
         allFailures.push({
           bagName: "Split Generation",
           bagId: "N/A",
@@ -1150,7 +1065,7 @@ export const GenerationService = {
           reason: `${batchLabel} failed: ${err instanceof Error ? err.message : "Unknown error"}`,
           expected: batch.batchK,
           actual: 0,
-        } as any);
+        });
         state.failures = allFailures;
         notifySubscribers();
       }
@@ -1163,7 +1078,7 @@ export const GenerationService = {
     state.progress = { generated: totalGeneratedCount, total: params.kValue };
     state.isGenerating = false;
 
-    console.log(`[SplitGeneration] Complete:`, {
+    debugLog.info(`[SplitGeneration] Complete:`, {
       totalGenerated: totalGeneratedCount.toLocaleString(),
       totalFailures: allFailures.length,
       expected: params.kValue.toLocaleString(),
@@ -1222,7 +1137,7 @@ export const GenerationService = {
     try {
       callback(state);
     } catch (err) {
-      console.error("[GenerationService] initial subscriber callback error:", err);
+      debugLog.error("[GenerationService] initial subscriber callback error:", err);
     }
     return () => {
       subscribers.delete(callback);
@@ -1390,7 +1305,7 @@ export const GenerationService = {
     notifySubscribers();
   },
 
-  updateCombination(combinationId: string, updatedObjects: any[]) {
+  updateCombination(combinationId: string, updatedObjects: SceneObject[]) {
     if (state.isGenerating) return;
 
     const idx1 = state.combinations.findIndex(c => c.id === combinationId);
@@ -1435,7 +1350,7 @@ export const GenerationService = {
           notifySubscribers();
         }
       } catch (err) {
-        console.warn("[GenerationService] restore from storage failed:", err);
+        debugLog.warn("[GenerationService] restore from storage failed:", err);
       }
     })();
   },

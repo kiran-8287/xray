@@ -13,6 +13,7 @@ import {
 import { getRectCorners } from "../lib/geometry";
 import { loadMultipleImageDimensions } from "../lib/imageSizeLoader";
 import { computeObjectStats, type ObjectPixelStats } from "../lib/xrayRenderer";
+import { CANVAS_WIDTHIDTH, CANVAS_HEIGHTEIGHT } from "../lib/constants";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 import { normalizeCategoryName, getCategoryConfig, normalizeCategorizedItems } from "../config/categories";
@@ -51,9 +52,6 @@ function getObjectSubcategory(obj: SceneObject, categorizedList: any): string | 
   const matched = allItems.find((item) => item.filepath === obj.filepath || item.name === obj.name);
   return matched?.subcategory;
 }
-
-const CANVAS_W = 800;
-const CANVAS_H = 600;
 
 const toastStyles = `
   @keyframes slide-down {
@@ -346,7 +344,7 @@ export default function CustomizationPage() {
       const h = naturalDims?.height && naturalDims.height > 0 ? naturalDims.height : getItemDisplaySize(item).height;
       let pos = null as { x: number; y: number; rotation?: number } | null;
       if (bagObject) pos = getRandomPositionInContainer(w, h, bagObject, itemOutline);
-      if (!pos) pos = { x: 50 + Math.random() * (CANVAS_W - 100), y: 50 + Math.random() * (CANVAS_H - 100), rotation: Math.random() * 360 };
+      if (!pos) pos = { x: 50 + Math.random() * (CANVAS_WIDTH - 100), y: 50 + Math.random() * (CANVAS_HEIGHT - 100), rotation: Math.random() * 360 };
       newObjects.push({
         id: `random-object-${i}`,
         name: item.name || item.id,
@@ -374,7 +372,7 @@ export default function CustomizationPage() {
       const h = naturalDims?.height && naturalDims.height > 0 ? naturalDims.height : getItemDisplaySize(threatItem).height;
       let pos = null as { x: number; y: number; rotation?: number } | null;
       if (bagObject) pos = getRandomPositionInContainer(w, h, bagObject, threatOutline);
-      if (!pos) pos = { x: 50 + Math.random() * (CANVAS_W - 100), y: 50 + Math.random() * (CANVAS_H - 100), rotation: Math.random() * 360 };
+      if (!pos) pos = { x: 50 + Math.random() * (CANVAS_WIDTH - 100), y: 50 + Math.random() * (CANVAS_HEIGHT - 100), rotation: Math.random() * 360 };
       newObjects.push({
         id: `initial-threat-${i}`,
         name: threatItem.name || threatItem.id,
@@ -446,7 +444,7 @@ export default function CustomizationPage() {
     const bagObject = objects.find((obj) => obj.library === "bag");
     let pos = null as { x: number; y: number; rotation?: number } | null;
     if (bagObject && item.category !== "bags") pos = getRandomPositionInContainer(width, height, bagObject, itemOutline);
-    if (!pos) pos = { x: 50 + Math.random() * (CANVAS_W - 100), y: 50 + Math.random() * (CANVAS_H - 100), rotation: Math.random() * 360 };
+    if (!pos) pos = { x: 50 + Math.random() * (CANVAS_WIDTH - 100), y: 50 + Math.random() * (CANVAS_HEIGHT - 100), rotation: Math.random() * 360 };
 
     const newObject: SceneObject = {
       id: instanceId,
@@ -554,7 +552,7 @@ export default function CustomizationPage() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const imageData = ctx.getImageData(0, 0, 800, 600);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const stats = computeObjectStats(objects, imageData);
     setPixelStats(new Map(stats));
   };

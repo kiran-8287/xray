@@ -9,6 +9,12 @@ import { GenerationService } from "../lib/generationService";
 import { attachSegmentationMasks } from "../lib/segmentationMasks";
 import { addCombos, addFailures, getAllCombos, getAllFailures, clearAll as storageClearAll } from "../lib/storageService";
 import { getCategoryConfig, normalizeCategoryName, normalizeCategorizedItems, LIBRARIES_UI, getLibrarySubcategories, clearCustomSubcategoriesCache } from "../config/categories";
+
+function assertCombinatorialResult(combo: unknown): asserts combo is import("../types/customization").CombinatorialResult {
+  if (!combo || typeof combo !== "object") {
+    throw new Error("Invalid combo object");
+  }
+}
 import AddSubcategoryModal from "../components/common/AddSubcategoryModal";
 import Pagination from "../components/library/Pagination";
 
@@ -154,7 +160,8 @@ export default function LibraryPage() {
         ]);
 
         if (idbCombos.length > 0) {
-          setCombinations(idbCombos as any);
+          const typedCombos = idbCombos.filter(assertCombinatorialResult);
+          setCombinations(typedCombos);
         }
         if (idbFailures.length > 0) {
           setFailures(idbFailures);
@@ -669,7 +676,7 @@ export default function LibraryPage() {
     }
   };
 
-  const handleValidRegionSave = async (points: any[]) => {
+  const handleValidRegionSave = async (points: { x: number; y: number }[]) => {
     if (!editingRegionItem) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/items/${encodeURIComponent(editingRegionItem.id)}/valid-region`, {

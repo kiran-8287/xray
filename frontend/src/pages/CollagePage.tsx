@@ -14,6 +14,7 @@ import ConfirmModal from "../components/common/ConfirmModal";
 import ExportLocationSelector from "../components/common/ExportLocationSelector";
 
 import type { GenerationProgress, GenerationState, AutoSaveStatus, AutoSaveMode } from "../types/generation";
+import { buildLayoutPayload } from "../lib/layoutBuilder";
 
 const ITEMS_PER_PAGE = GenerationService.ITEMS_PER_PAGE;
 const MAX_CONCURRENT_RENDERS = 2; // Limit concurrent image rendering to prevent backend overload
@@ -27,71 +28,6 @@ const toastStyles = `
 `;
 
 type CollageToast = { id: string; type: "info"; message: string };
-
-function buildLayoutPayload(comb: CombinatorialResult) {
-  const threatNames = comb.threats?.map(t => t.name) ?? [];
-  const otherNames = comb.others.map((o) => o.name);
-  const allObjects = [...threatNames, ...otherNames];
-  const annotation = comb.id;
-  const bagObject = comb.objects.find((o: any) => o.library === "bag");
-  let validRegionPolygon: any[] = [];
-  if (bagObject?.polygonOutline) {
-    try {
-      validRegionPolygon = getTransformedPolygon(
-        { x: bagObject.transform.x, y: bagObject.transform.y },
-        { width: bagObject.transform.width, height: bagObject.transform.height },
-        bagObject.transform.rotation,
-        bagObject.polygonOutline
-      );
-    } catch (_) {}
-  }
-  const bagObj = bagObject ? {
-    id: bagObject.id,
-    subcategory: bagObject.subcategory ? bagObject.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
-    filepath: bagObject.filepath,
-    center: { x: bagObject.transform.x, y: bagObject.transform.y },
-    size: { width: bagObject.transform.width, height: bagObject.transform.height },
-    originalPixelValue: bagObject.originalPixelValue,
-    currentPixelValue: bagObject.currentPixelValue,
-    polygonOutline: bagObject.polygonOutline,
-    validRegionPolygon,
-    layer: bagObject.layer,
-    tags: bagObject.tags || [],
-  } : null;
-  const threats = comb.objects.filter((o: any) => o.library === "threat").map((obj: any) => ({
-    id: obj.id,
-    subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
-    filepath: obj.filepath,
-    center: { x: obj.transform.x, y: obj.transform.y },
-    size: { width: obj.transform.width, height: obj.transform.height },
-    rotation: obj.transform.rotation,
-      originalPixelValue: obj.originalPixelValue,
-      currentPixelValue: obj.currentPixelValue,
-      layer: obj.layer,
-    }));
-  const nonThreats = comb.objects.filter((o: any) => o.library !== "bag" && o.library !== "threat").map((obj: any) => ({
-    id: obj.id,
-    subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
-    filepath: obj.filepath,
-    center: { x: obj.transform.x, y: obj.transform.y },
-    size: { width: obj.transform.width, height: obj.transform.height },
-    rotation: obj.transform.rotation,
-    originalPixelValue: obj.originalPixelValue,
-    currentPixelValue: obj.currentPixelValue,
-    layer: obj.layer,
-  }));
-  return {
-    id: comb.id,
-    name: annotation,
-    filepath: null,
-    layout_json: {
-      threat_count: threats.length,
-      non_threat_count: nonThreats.length,
-      objects: { bag: bagObj, threats, "non-threats": nonThreats },
-      createdAt: new Date().toISOString(),
-    },
-  };
-}
 
 export default function CollagePage() {
   const navigate = useNavigate();
@@ -187,14 +123,41 @@ export default function CollagePage() {
         return;
       }
 
-    const restoredCombos: any[] = [];
-    const restoredFailures: any[] = [];
-    const restoredBags: any[] = [];
-    const restoredThreats: any[] = [];
-    const restoredOthers: any[] = [];
+    const restoredCombos: unknown[] = [];
+    const restoredFailures: unknown[] = [];
+    const restoredBags: unknown[] = [];
+    const restoredThreats: unknown[] = [];
+    const restoredOthers: unknown[] = [];
     let restoreError: string | null = null;
 
-    const readJSON = (raw: string | null) => { if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } };
+    const readJSON = (raw: string | null): unknown | null => {
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    };
+
+    function isRecord(value: unknown): value is Record<string, unknown> {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+
+    function hasBagId(combo: unknown): combo is { bag: { id: string } } {
+      return isRecord(combo) && isRecord(combo.bag) && typeof combo.bag.id === "string";
+    }
+
+    function hasThreatsArray(combo: unknown): combo is { threats: { id: string }[] } {
+      return isRecord(combo) && Array.isArray(combo.threats);
+    }
+
+    function hasOthersArray(combo: unknown): combo is { others: { id: string }[] } {
+      return isRecord(combo) && Array.isArray(combo.others);
+    }
+
+    function hasId(value: unknown): value is { id: string } {
+      return isRecord(value) && typeof value.id === "string";
+    }
 
     try {
       // Try IndexedDB first (handles large datasets)
@@ -231,15 +194,15 @@ export default function CollagePage() {
       restoredBags.length === 0 && restoredThreats.length === 0 && restoredOthers.length === 0
     ) return;
 
-    const applyRestore = (fb: any[] | null, ft: any[] | null, fo: any[] | null) => {
+    const applyRestore = (fb: unknown[] | null, ft: unknown[] | null, fo: unknown[] | null) => {
       const bags = fb || restoredBags;
       const threats = ft || restoredThreats;
       const others = fo || restoredOthers;
       if (restoredCombos.length > 0) {
-        GenerationService.setCombinations(restoredCombos, restoredFailures);
+        GenerationService.setCombinations(restoredCombos as CombinatorialResult[], restoredFailures as FailureLog[]);
       }
-      setFailures(restoredFailures);
-      setSelectedBags(bags); setSelectedThreats(threats); setSelectedOthers(others);
+      setFailures(restoredFailures as FailureLog[]);
+      setSelectedBags(bags as Item[]); setSelectedThreats(threats as Item[]); setSelectedOthers(others as Item[]);
       if (restoreError) console.warn("[CollagePage] " + restoreError);
       // Note: combos and failures are now persisted to IndexedDB by generationService/storageService
       try {
@@ -251,12 +214,24 @@ export default function CollagePage() {
       }
     };
 
-    const comboItemIds = new Set();
-    restoredCombos.forEach(c => {
-      comboItemIds.add(c.bag.id);
-      if (c.threats && c.threats.length > 0) c.threats.forEach((t: any) => comboItemIds.add(t.id));
-      c.others.forEach((o: any) => comboItemIds.add(o.id));
-    });
+    const comboItemIds = new Set<string>();
+    for (const c of restoredCombos) {
+      if (hasBagId(c)) comboItemIds.add(c.bag.id);
+      if (hasThreatsArray(c) && c.threats.length > 0) {
+        for (const t of c.threats) {
+          if (hasId(t)) comboItemIds.add(t.id);
+        }
+      }
+      if (hasOthersArray(c)) {
+        for (const o of c.others) {
+          if (hasId(o)) comboItemIds.add(o.id);
+        }
+      }
+    }
+
+    function hasIdAndCategory(value: unknown): value is { id: string; category?: string } {
+      return isRecord(value) && typeof value.id === "string";
+    }
 
     if (restoredCombos.length > 0 && comboItemIds.size > 0 &&
         restoredBags.length === 0 && restoredThreats.length === 0 && restoredOthers.length === 0) {
@@ -266,15 +241,19 @@ export default function CollagePage() {
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
           const cat = data.categorized || data;
-          const matchedBags: any[] = [], matchedThreats: any[] = [], matchedOthers: any[] = [];
-          for (const subcats of Object.values(cat as Record<string, any>)) {
-            for (const items of Object.values(subcats as Record<string, any>)) {
-              for (const item of items as any[]) {
-                if (!comboItemIds.has(item.id)) continue;
-                const cl = (item.category || "").toLowerCase();
-                if (cl.includes("bag")) matchedBags.push(item);
-                else if (cl.includes("threat")) matchedThreats.push(item);
-                else matchedOthers.push(item);
+          const matchedBags: unknown[] = [], matchedThreats: unknown[] = [], matchedOthers: unknown[] = [];
+          if (isRecord(cat)) {
+            for (const subcats of Object.values(cat)) {
+              if (!isRecord(subcats)) continue;
+              for (const items of Object.values(subcats)) {
+                if (!Array.isArray(items)) continue;
+                for (const item of items) {
+                  if (!hasIdAndCategory(item) || !comboItemIds.has(item.id)) continue;
+                  const cl = (item.category || "").toLowerCase();
+                  if (cl.includes("bag")) matchedBags.push(item);
+                  else if (cl.includes("threat")) matchedThreats.push(item);
+                  else matchedOthers.push(item);
+                }
               }
             }
           }
@@ -300,7 +279,13 @@ export default function CollagePage() {
       return;
     }
 
-    const { selectedBags: bags, selectedThreats: threats, selectedOthers: others, combinations: preCombinations, failures: preFailures } = locationState as any;
+    const { selectedBags: bags, selectedThreats: threats, selectedOthers: others, combinations: preCombinations, failures: preFailures } = locationState as {
+      selectedBags?: Item[];
+      selectedThreats?: Item[];
+      selectedOthers?: Item[];
+      combinations?: CombinatorialResult[];
+      failures?: FailureLog[];
+    };
 
     setSelectedBags(bags);
     setSelectedThreats(threats || []);
@@ -465,8 +450,8 @@ export default function CollagePage() {
       setSaveLocationOption("custom");
       setCustomOutputPath("");
       showToast("info", "Folder selected. Click Continue to save the collage images there.");
-    } catch (err: any) {
-      if (err?.name !== "AbortError") {
+    } catch (err) {
+      if (err instanceof Error && err.name !== "AbortError") {
         console.error("Error choosing directory:", err);
         showToast("info", "Folder selection was cancelled or unavailable.");
       }
@@ -692,69 +677,11 @@ export default function CollagePage() {
         }
         const batch = combinations.slice(0, ITEMS_PER_PAGE);
         for (const comb of batch) {
-          const threatNames = comb.threats && comb.threats.length > 0 ? comb.threats.map(t => t.name) : [];
-          const otherNames = comb.others.map(o => o.name);
-          const allObjects = [...threatNames, ...otherNames];
-          const annotation = comb.id;
-          const bagObject = comb.objects.find((o: any) => o.library === "bag");
-          let validRegionPolygon: any[] = [];
-          if (bagObject?.polygonOutline) {
-            try {
-              validRegionPolygon = getTransformedPolygon(
-                { x: bagObject.transform.x, y: bagObject.transform.y },
-                { width: bagObject.transform.width, height: bagObject.transform.height },
-                bagObject.transform.rotation,
-                bagObject.polygonOutline
-              );
-            } catch (e) {
-              console.error("Error getting valid region:", e);
-            }
-          }
-          const bagObj = bagObject ? {
-            id: bagObject.id,
-            subcategory: bagObject.subcategory ? bagObject.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
-            filepath: bagObject.filepath,
-            center: { x: bagObject.transform.x, y: bagObject.transform.y },
-            size: { width: bagObject.transform.width, height: bagObject.transform.height },
-    originalPixelValue: bagObject.originalPixelValue,
-    currentPixelValue: bagObject.currentPixelValue,
-    polygonOutline: bagObject.polygonOutline,
-            validRegionPolygon,
-            layer: bagObject.layer,
-            tags: bagObject.tags || [],
-          } : null;
-          const threats = comb.objects.filter((o: any) => o.library === "threat").map((obj: any) => ({
-            id: obj.id,
-            subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
-            filepath: obj.filepath,
-            center: { x: obj.transform.x, y: obj.transform.y },
-            size: { width: obj.transform.width, height: obj.transform.height },
-            rotation: obj.transform.rotation,
-      originalPixelValue: obj.originalPixelValue,
-      currentPixelValue: obj.currentPixelValue,
-      layer: obj.layer,
-          }));
-          const nonThreats = comb.objects.filter((o: any) => o.library !== "bag" && o.library !== "threat").map((obj: any) => ({
-            id: obj.id,
-            subcategory: obj.subcategory ? obj.subcategory.toLowerCase().replace(/\s+/g, '-') : undefined,
-            filepath: obj.filepath,
-            center: { x: obj.transform.x, y: obj.transform.y },
-            size: { width: obj.transform.width, height: obj.transform.height },
-            rotation: obj.transform.rotation,
-      originalPixelValue: obj.originalPixelValue,
-      currentPixelValue: obj.currentPixelValue,
-      layer: obj.layer,
-          }));
-          const layout_json = {
-            threat_count: threats.length,
-            non_threat_count: nonThreats.length,
-            objects: { bag: bagObj, threats, "non-threats": nonThreats },
-            createdAt: new Date().toISOString(),
-          };
+          const layoutPayload = buildLayoutPayload(comb);
           const response = await fetchWithTimeout(`${API_BASE_URL}/api/saved-layouts`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: comb.id, name: annotation, filepath: null, layout_json }),
+            body: JSON.stringify(layoutPayload),
           }, LONG_REQUEST_TIMEOUT_MS, 1);
           if (response.ok) {
             savedCount++;

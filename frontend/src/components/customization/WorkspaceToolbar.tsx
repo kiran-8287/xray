@@ -48,6 +48,7 @@ export default function WorkspaceToolbar({
         onClick={handleBack}
         className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface transition-all border-none bg-transparent cursor-pointer"
         title="Back to Collage"
+        aria-label="Back to Collage"
       >
         <ChevronLeft size={16} />
       </button>
@@ -58,6 +59,7 @@ export default function WorkspaceToolbar({
         disabled={undoDisabled}
         className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface transition-all disabled:opacity-30 border-none bg-transparent cursor-pointer"
         title="Undo"
+        aria-label="Undo"
       >
         <Undo2 size={16} />
       </button>
@@ -66,6 +68,7 @@ export default function WorkspaceToolbar({
         disabled={redoDisabled}
         className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-surface transition-all disabled:opacity-30 border-none bg-transparent cursor-pointer"
         title="Redo"
+        aria-label="Redo"
       >
         <Redo2 size={16} />
       </button>
@@ -81,6 +84,7 @@ export default function WorkspaceToolbar({
             : "border-transparent text-muted hover:text-ink hover:bg-surface"
         }`}
         title={showValidRegion ? "Hide Valid Region" : "Show Valid Region"}
+        aria-label={showValidRegion ? "Hide Valid Region" : "Show Valid Region"}
       >
         <Layers size={16} />
       </button>
@@ -94,6 +98,7 @@ export default function WorkspaceToolbar({
             : "border-transparent text-muted hover:text-ink hover:bg-surface"
         }`}
         title={showGrid ? "Hide Grid" : "Show Grid"}
+        aria-label={showGrid ? "Hide Grid" : "Show Grid"}
       >
         <Grid size={16} />
       </button>
@@ -103,6 +108,7 @@ export default function WorkspaceToolbar({
         onClick={handleRandomize}
         className="p-1.5 rounded-lg text-muted hover:text-accent hover:bg-accent/10 transition-colors border border-transparent hover:border-accent/30 cursor-pointer"
         title="Randomize object positions"
+        aria-label="Randomize object positions"
       >
         <Shuffle size={16} />
       </button>
@@ -127,6 +133,7 @@ export default function WorkspaceToolbar({
             onClick={handleDeleteSelected}
             className="p-1.5 rounded-lg text-muted hover:bg-rose-50 hover:text-rose-600 transition-all cursor-pointer"
             title="Delete Selected"
+            aria-label="Delete Selected"
           >
             <Trash2 size={16} />
           </button>
