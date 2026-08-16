@@ -1184,7 +1184,8 @@ export default function CollagePage() {
                 <button
                   key={comb.id}
                   onClick={() => handleOpenPreviewModal(comb)}
-                  className="bg-panel rounded-2xl border border-border p-4 shadow-card cursor-pointer overflow-hidden group text-left w-full"
+                  disabled={isSavingPage || bulkSaveState.status === "saving"}
+                  className="bg-panel rounded-2xl border border-border p-4 shadow-card cursor-pointer overflow-hidden group text-left w-full disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <SyntheticPreview
                     objects={comb.objects}
@@ -1280,7 +1281,8 @@ export default function CollagePage() {
                     handleCloseModal();
                     handleOpenCombination(selectedCombination);
                   }}
-                  className="w-full px-5 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm bg-blue-600 text-white shadow-btn hover:shadow-btn-hover transition-all cursor-pointer"
+                  disabled={isSavingPage || bulkSaveState.status === "saving"}
+                  className="w-full px-5 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm bg-blue-600 text-white shadow-btn hover:shadow-btn-hover transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-btn"
                 >
                   <Edit3 size={16} />
                   Customize
