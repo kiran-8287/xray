@@ -488,9 +488,7 @@ export default function UploadPage() {
       const lowerName = f.name.toLowerCase();
       if (
         lowerName.endsWith(".dump.pgm") ||
-        lowerName.endsWith(".pgm") ||
         lowerName.endsWith(".tip") ||
-        lowerName.endsWith(".dump") ||
         lowerName.endsWith(".npz")
       ) {
         validFiles.push(f);
@@ -500,7 +498,7 @@ export default function UploadPage() {
     }
 
     if (invalidFiles.length > 0) {
-      const errorMessage = `Invalid file type(s): ${invalidFiles.slice(0, 5).join(", ")}${invalidFiles.length > 5 ? ` and ${invalidFiles.length - 5} more` : ""}. Supported extensions: .dump.pgm, .pgm, .tip, .dump, .npz.`;
+      const errorMessage = `Invalid file type(s): ${invalidFiles.slice(0, 5).join(", ")}${invalidFiles.length > 5 ? ` and ${invalidFiles.length - 5} more` : ""}. Supported extensions: .dump.pgm, .tip, .npz.`;
       setValidationMessage(errorMessage);
       setTimeout(() => setValidationMessage(null), 5000);
     }

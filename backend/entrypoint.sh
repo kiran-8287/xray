@@ -47,6 +47,44 @@ if command -v stat >/dev/null 2>&1; then
 fi
 
 if [ "$(id -u)" = "0" ]; then
+    # When PUID/PGID are at their defaults (1000) but the bind mount is owned by
+    # a different UID (common on office laptops where UID 1000 is the admin
+    # account), auto-correct to the actual mount owner. This ensures the backend
+    # never silently assigns files to the wrong account, and it requires no
+    # host-side sudo.
+    if [ "${PUID}" = "1000" ] || [ "${PGID}" = "1000" ]; then
+        if command -v stat >/dev/null 2>&1; then
+            MOUNT_UID=$(stat -c '%u' /app/data 2>/dev/null || echo '')
+            MOUNT_GID=$(stat -c '%g' /app/data 2>/dev/null || echo '')
+            if [ -n "$MOUNT_UID" ] && [ "$MOUNT_UID" != "$PUID" ]; then
+                PUID="$MOUNT_UID"
+                PGID="$MOUNT_GID"
+            fi
+        fi
+    fi
+
+    # Ensure backend leaf folders exist and are owned by the active container
+    # user (PUID:PGID). This is safe because /app/data itself and any host
+    # data outside these documented backend-managed leaf folders are untouched.
+    mkdir -p \
+      /app/data/storage \
+      /app/data/load_layouts \
+      /app/data/exports \
+      /app/data/collage_images \
+      /app/data/library_images \
+      /app/data/pixel_data \
+      /app/data/temp
+
+    chown -R "${PUID}:${PGID}" \
+      /app/data/storage \
+      /app/data/load_layouts \
+      /app/data/exports \
+      /app/data/collage_images \
+      /app/data/library_images \
+      /app/data/pixel_data \
+      /app/data/temp \
+      2>/dev/null || true
+
     # The numeric uid may not have a real home directory, so give the process a
     # writable HOME / npm cache dir.
     export HOME=/tmp

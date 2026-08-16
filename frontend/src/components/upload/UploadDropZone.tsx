@@ -10,17 +10,9 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
   const [showConfirm, setShowConfirm] = useState(false);
   const [pendingAction, setPendingAction] = useState<"files" | "folder" | null>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      let files = Array.from(e.target.files);
-      // If it's a folder upload, filter out unsupported files since we can't rely on the OS `accept` attribute
-      if (e.target.id === "folderInput") {
-        files = files.filter(f => isSupportedFile(f.name));
-      }
-      if (files.length > 0) {
-        onFilesSelected(files);
-      }
-    }
+  const isSupportedFile = (name: string): boolean => {
+    const lower = name.toLowerCase();
+    return lower.endsWith(".dump.pgm") || lower.endsWith(".tip") || lower.endsWith(".npz");
   };
 
   const readEntries = (reader: any): Promise<any[]> =>
@@ -42,20 +34,6 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       readBatch();
     });
 
-  const isSupportedFile = (name: string): boolean => {
-    const lower = name.toLowerCase();
-    return (
-      lower.endsWith(".dump.pgm") ||
-      lower.endsWith(".pgm") ||
-      lower.endsWith(".tip") ||
-      lower.endsWith(".dump") ||
-      lower.endsWith(".npz") ||
-      lower.endsWith(".png") ||
-      lower.endsWith(".jpg") ||
-      lower.endsWith(".jpeg")
-    );
-  };
-
   const traverseEntry = async (entry: any): Promise<File[]> => {
     if (!entry) {
       return [];
@@ -64,7 +42,6 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
     if (entry.isFile) {
       return new Promise((resolve, reject) => {
         entry.file((file: File) => {
-          // Only include supported file types when traversing folders
           if (isSupportedFile(file.name)) {
             resolve([file]);
           } else {
@@ -124,16 +101,61 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
     setIsDragOver(false);
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files).filter(f => isSupportedFile(f.name));
+      if (files.length > 0) {
+        onFilesSelected(files);
+      }
+    }
+  };
+
   const triggerFilePicker = () => {
     document.getElementById("fileInput")?.click();
     setShowConfirm(false);
     setPendingAction(null);
   };
 
-  const triggerFolderPicker = () => {
-    document.getElementById("folderInput")?.click();
+  const readDirectoryHandle = async (dirHandle: FileSystemDirectoryHandle): Promise<File[]> => {
+    const files: File[] = [];
+    for await (const entry of dirHandle.values()) {
+      if (entry.kind === "file") {
+        try {
+          const file = await entry.getFile();
+          if (isSupportedFile(file.name)) {
+            files.push(file);
+          }
+        } catch {
+          // skip unreadable files
+        }
+      } else if (entry.kind === "directory") {
+        const nested = await readDirectoryHandle(entry);
+        files.push(...nested);
+      }
+    }
+    return files;
+  };
+
+  const triggerFolderPicker = async () => {
     setShowConfirm(false);
     setPendingAction(null);
+
+    const win = window as Window & typeof globalThis & { showDirectoryPicker?: (options?: { mode?: string; startIn?: string }) => Promise<FileSystemDirectoryHandle> };
+    if (!win.showDirectoryPicker) {
+      return;
+    }
+
+    try {
+      const dirHandle = await win.showDirectoryPicker({ mode: "read", startIn: "desktop" });
+      const files = await readDirectoryHandle(dirHandle);
+      if (files.length > 0) {
+        onFilesSelected(files);
+      }
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        console.error("Folder selection failed:", err);
+      }
+    }
   };
 
   const handleConfirmAction = () => {
@@ -163,17 +185,8 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
       <input
         id="fileInput"
         type="file"
-        accept=".pgm,.tip,.dump,.npz,.png,.jpg,.jpeg"
+        accept=".dump.pgm,.tip,.npz"
         multiple
-        className="hidden"
-        onChange={handleFileChange}
-      />
-      <input
-        id="folderInput"
-        type="file"
-        multiple
-        // @ts-ignore webkitdirectory
-        webkitdirectory="true"
         className="hidden"
         onChange={handleFileChange}
       />
@@ -214,8 +227,8 @@ export default function UploadDropZone({ onFilesSelected }: UploadDropZoneProps)
                 </h3>
                 <p className="text-sm text-muted mt-1 leading-relaxed">
                   {pendingAction === "folder"
-                    ? "You are about to select a folder to upload. Only supported file types (.pgm, .tip, .dump, .npz, .png, .jpg, .jpeg) will be processed. Do you want to continue?"
-                    : "You are about to select files to upload. Only supported file types (.pgm, .tip, .dump, .npz, .png, .jpg, .jpeg) will be processed. Do you want to continue?"}
+                    ? "You are about to select a folder to upload. Only supported file types (.dump.pgm, .tip, .npz) will be processed. Do you want to continue?"
+                    : "You are about to select files to upload. Only supported file types (.dump.pgm, .tip, .npz) will be processed. Do you want to continue?"}
                 </p>
               </div>
               <button
