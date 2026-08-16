@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Upload, Loader2, CheckCircle2, AlertTriangle, AlertCircle, X, Play, RefreshCw, Download, Save, Image as ImageIcon, Check,
 } from "lucide-react";
+import ImageWithPlaceholder from "../components/common/ImageWithPlaceholder";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
 import { escapeAttribute, sanitizeId } from "../lib/sanitize";
@@ -54,6 +55,13 @@ export default function LoadPage() {
   const previewUrlsRef = useRef<Record<string, string>>({});
   const renderingPreviewsRef = useRef<Set<string>>(new Set());
   const generateAbortRef = useRef<AbortController | null>(null);
+
+  // Lazy sequential preview loading: only request backend renders for cards
+  // that have scrolled into (or near) the viewport, 20 items at a time.
+  const BATCH_SIZE = 20;
+  const previewRequestedRef = useRef<Set<string>>(new Set());
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const isLoadingBatchRef = useRef(false);
 
   // Refs to support buffering the next page (page-by-page workflow)
   const lastGeneratedPageRef = useRef<number | null>(null);
@@ -383,9 +391,6 @@ export default function LoadPage() {
     return validCombinations.slice(start, start + PAGE_SIZE);
   }, [validCombinations, page, pagination]);
 
-  /** Generate previews for new page when it changes */
-  useEffect(() => { if ((phase === "results" || phase === "generating") && currentPageCombos.length > 0) { generatePreviews(currentPageCombos, page); } }, [phase, page, currentPageCombos]);
-
   /** Move from "generating" to "results" once first batch of previews are requested */
   useEffect(() => {
     if (phase === "generating" && validCombinations.length > 0) {
@@ -403,7 +408,6 @@ export default function LoadPage() {
     const nextStart = page * PAGE_SIZE;
     const nextCombos = validCombinations.slice(nextStart, nextStart + PAGE_SIZE);
     if (nextCombos.length === 0) { prefetchNextPageRef.current = ""; return; }
-    // The current page's preview batch must have started AND finished first.
     if (lastGeneratedPageRef.current !== page) return;
     const stillBusy = currentPageCombos.some((c) => renderingPreviews.has(c.layoutId));
     if (stillBusy || exporting) return;
@@ -412,6 +416,59 @@ export default function LoadPage() {
     prefetchNextPageRef.current = key;
     generatePreviews(nextCombos, page + 1);
   }, [phase, page, pagination, validCombinations, currentPageCombos, renderingPreviews, exporting]);
+
+  /** Lazy sequential batch loading: trigger the first batch of 20 immediately on
+   *  page entry (so visible cards get their previews without waiting for a scroll),
+   *  then use IntersectionObserver on a sentinel for subsequent batches of 20.
+   *  This replaces the old behavior of firing all 100 requests at once. */
+  useEffect(() => {
+    if (phase !== "results" || currentPageCombos.length === 0) return;
+
+    const timer = setTimeout(() => {
+      const unrequested = currentPageCombos.filter(
+        (c) => !previewRequestedRef.current.has(c.layoutId) && !previewUrlsRef.current[c.layoutId]
+      );
+      if (unrequested.length === 0) return;
+      const batch = unrequested.slice(0, BATCH_SIZE);
+      batch.forEach((c) => previewRequestedRef.current.add(c.layoutId));
+      generatePreviews(batch);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [phase, currentPageCombos, generatePreviews]);
+
+  /** Subsequent batches: IntersectionObserver on a sentinel element at the bottom
+   *  of the grid. Fires when user scrolls within 200px of the bottom, requesting
+   *  the next BATCH_SIZE unrequested items. */
+  useEffect(() => {
+    if (phase !== "results" || currentPageCombos.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0].isIntersecting || isLoadingBatchRef.current) return;
+        isLoadingBatchRef.current = true;
+
+        const unrequested = currentPageCombos.filter(
+          (c) => !previewRequestedRef.current.has(c.layoutId) && !previewUrlsRef.current[c.layoutId]
+        );
+        if (unrequested.length === 0) { isLoadingBatchRef.current = false; return; }
+
+        const batch = unrequested.slice(0, BATCH_SIZE);
+        batch.forEach((c) => previewRequestedRef.current.add(c.layoutId));
+
+        generatePreviews(batch).finally(() => { isLoadingBatchRef.current = false; });
+      },
+      { rootMargin: "200px", threshold: 0 }
+    );
+
+    const el = sentinelRef.current;
+    if (el) observer.observe(el);
+
+    return () => {
+      observer.disconnect();
+      isLoadingBatchRef.current = false;
+    };
+  }, [phase, currentPageCombos, generatePreviews]);
  
 
 /** Export combinations to exports folder (high + low resolution images). */
@@ -552,7 +609,15 @@ export default function LoadPage() {
     });
   };
 
-  const goToPage = (p: number) => { if (!pagination) return; const clamped = Math.min(Math.max(1, p), pagination.totalPages); setPage(clamped); };
+  const goToPage = (p: number) => {
+    if (!pagination) return;
+    const clamped = Math.min(Math.max(1, p), pagination.totalPages);
+    if (clamped !== page) {
+      previewRequestedRef.current = new Set();
+      isLoadingBatchRef.current = false;
+    }
+    setPage(clamped);
+  };
 
   const handleReset = () => {
     setPhase("upload"); setAnalysis(null); setValidCombinations([]); setPage(1);
@@ -764,9 +829,10 @@ return (
               {currentPageCombos.map((combo) => (
                 <div key={combo.layoutId} className={`bg-panel rounded-2xl border border-border shadow-card overflow-hidden transition-all cursor-pointer group text-left w-full ${selectedForExport.has(combo.layoutId) ? "ring-2 ring-accent/20 border-accent" : "hover:border-accent/50"}`}>
                   <div className="relative aspect-[4/3] bg-surface" onClick={() => { if (previewUrls[combo.layoutId]) { setShowHighRes({ combo, url: previewUrls[combo.layoutId] }); } }}>
-                    {previewUrls[combo.layoutId] ? (<img src={previewUrls[combo.layoutId]} alt={combo.layoutName} className="w-full h-full object-contain" />)
-                      : renderingPreviews.has(combo.layoutId) ? (<div className="flex items-center justify-center h-full"><Loader2 size={24} className="animate-spin text-muted" /></div>)
-                      : (<div className="flex items-center justify-center h-full"><ImageIcon size={32} className="text-muted/40" /></div>)}
+                    {previewUrls[combo.layoutId]
+                      ? <ImageWithPlaceholder src={previewUrls[combo.layoutId]} alt={combo.layoutName} className="w-full h-full object-contain" />
+                      : <div className="flex items-center justify-center h-full"><ImageIcon size={32} className="text-muted/40" /></div>
+                    }
                     {selectedForExport.has(combo.layoutId) && (<div className="absolute top-2 left-2 w-6 h-6 rounded-full bg-accent flex items-center justify-center"><Check size={14} className="text-white" /></div>)}
                   </div>
                   <div className="p-4">
@@ -802,6 +868,9 @@ return (
                 </div>
               ))}
             </div>
+
+            {/* Sentinel for lazy sequential batch loading — fires when user scrolls near bottom */}
+            <div ref={sentinelRef} className="h-4" />
 
             {pagination && pagination.totalPages > 1 && (
               <div className="mt-6 flex items-center justify-between gap-3">
