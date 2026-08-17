@@ -7,21 +7,11 @@ frontend/dist/
 *.tsbuildinfo
 __pycache__/
 
-# Generated data
-backend/data/storage/*.json
-backend/data/library_images/
-backend/data/exports/
-backend/data/collage_images/
-backend/data/pixel_data/
-backend/data/temp/
-backend/data/*.tmp
-
-# Exported/batch data files
-backend/data/items_*.json
-backend/data/items_backup.json
-
-# User-specific data (should not be shared)
-backend/data/storage/customSubcategories.json
+# Generated data — the whole backend/data directory is ignored. The app writes
+# everything under it: storage JSON, exported PNG/annotation folders, logs, temp
+# files, user_config.json, and any user-created export folder (e.g.
+# backend/data/exports2). We never commit anything under data.
+backend/data/*
 
 # IDE
 .vscode/
@@ -36,14 +26,6 @@ Thumbs.db
 .env
 .env.local
 frontend/.env.development
-
-# Storage folder (all JSON data files)
-backend/data/storage/
-
-# Backup and temporary files
-backend/data/storage/*.bak
-backend/data/storage/.dedup_healed
-backend/data/monitoring.log
 
 # Test data files
 new_data/
@@ -93,26 +75,16 @@ pset*
 rep*test*
 create*main*test*
 
-# System configuration and runtime data
-backend/data/
-
 # Streamlit secrets (never commit)
 .streamlit/secrets.toml
 
-# Keep the data directory itself in the repository so a fresh clone has it
-# (owned by the cloning user) and Docker does NOT auto-create it as root,
-# which would otherwise show a red "locked / read-only" lock and block writes.
+# Keep the backend/data directory itself (and its root .gitkeep) present so a
+# fresh clone has the folder owned by the cloning user — this stops Docker from
+# auto-creating it as root, which would show a red "locked / read-only" lock and
+# block writes. The .gitkeep placeholders in each subfolder are already tracked,
+# so gitignore does not affect them and every folder is recreated on clone.
 !backend/data/
 !backend/data/.gitkeep
-
-# Keep default data subdirectories in the repository
-!backend/data/collage_images/.gitkeep
-!backend/data/exports/.gitkeep
-!backend/data/library_images/.gitkeep
-!backend/data/load_layouts/.gitkeep
-!backend/data/pixel_data/.gitkeep
-!backend/data/storage/.gitkeep
-!backend/data/temp/.gitkeep
 
 ss
 docs

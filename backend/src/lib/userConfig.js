@@ -103,6 +103,24 @@ async function setExportsPath(scope, exportsPath) {
 }
 
 /**
+ * Resolve the collage image root — the folder that directly contains the `high/`
+ * and `low/` subfolders where collage PNGs are written.
+ *
+ * - If the user configured a custom collage export path (e.g.
+ *   backend/data/exports2), images live inside a `collage_images/` subfolder
+ *   beneath it:  {collageExportsPath}/collage_images/{high,low}
+ * - Otherwise the built-in collage images root is used directly (it already IS a
+ *   `collage_images` folder):  config.collageImagesRoot/{high,low}
+ */
+async function getCollageImageRoot() {
+  const userConfig = await loadUserConfig();
+  if (userConfig.collageExportsPath) {
+    return path.resolve(userConfig.collageExportsPath, 'collage_images');
+  }
+  return config.collageImagesRoot;
+}
+
+/**
  * Check if the user has configured a folder for a scope.
  */
 async function hasConfiguredExportsPath(scope = 'saved') {
@@ -116,6 +134,7 @@ export {
   loadUserConfig,
   saveUserConfig,
   getExportsPath,
+  getCollageImageRoot,
   setExportsPath,
   hasConfiguredExportsPath,
 };
