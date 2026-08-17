@@ -3,6 +3,7 @@ import ValidRegionEditor from "./ValidRegionEditor";
 import { Trash2, Edit3, CheckSquare, Sparkles, Loader2, X, Plus, Minus } from "lucide-react";
 import { LIBRARIES, getLibrarySubcategories, normalizeCategoryName, clearCustomSubcategoriesCache, refreshCustomSubcategories, findDuplicateSubcategory } from "../../config/categories";
 import { API_BASE_URL } from "../../config/api";
+import { escapeAttribute, sanitizeTag } from "../../lib/sanitize";
 import AddSubcategoryModal from "../common/AddSubcategoryModal";
 import ConfirmModal from "../common/ConfirmModal";
 import { concurrencyController } from "../../lib/concurrencyController";
@@ -1483,13 +1484,14 @@ export default function UploadFileQueue({ files, staged, setStaged, setFiles, up
                             <div className="flex flex-wrap gap-0.5 mt-1">
                               {s.tags.slice(0, 3).map((tagSlug: string) => {
                                 const tagName = tagSlug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                const sanitizedTag = sanitizeTag(tagName);
                                 return (
                                   <span
                                     key={tagSlug}
                                     className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-medium"
-                                    title={tagName}
+                                    title={escapeAttribute(sanitizedTag)}
                                   >
-                                    {tagName}
+                                    {sanitizedTag}
                                     <button
                                       type="button"
                                       onClick={(e) => {

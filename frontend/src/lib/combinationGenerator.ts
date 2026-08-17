@@ -8,13 +8,21 @@ import {
 } from "./customizationHelpers";
 import { generateSynthesizedId } from "./synthesizedIdGenerator";
 import type { Point } from "../types/geometry";
+import {
+  CANVAS_WIDTH,
+  CANVAS_HEIGHT,
+  DEFAULT_BATCH_SIZE,
+  YIELD_INTERVAL,
+  VALID_REGION_CACHE_MAX_SIZE,
+  PLACEMENT_TOLERANCE,
+  LOG_INTERVAL_MS,
+  MAX_PLACEMENT_ATTEMPTS,
+  PROGRESS_INTERVAL_MS,
+  MAX_CANDIDATE_POOL,
+} from "./constants";
+import { debugLog } from "./debugLog";
 
-const CANVAS_W = 800;
-const CANVAS_H = 600;
-const DEFAULT_BATCH_SIZE = 200;  // Emit every 200 combos (2 pages) for responsive UI
-const YIELD_INTERVAL = 10;       // Yield to event loop every 10 combos
 const validRegionCache = new Map<string, Point[]>();
-const CACHE_MAX_SIZE = 100;
 let _idBasePrefix = '';
 let _idSequence = 1;
 
@@ -53,8 +61,8 @@ function parseOutline(item: Item): { x: number; y: number }[] | undefined {
 
 function createBagSceneObject(bag: Item): SceneObject {
   const outline = parseOutline(bag);
-  const bagWidth = bag.width || bag.height || Math.min(CANVAS_W, CANVAS_H);
-  const bagHeight = bag.height || bag.width || Math.min(CANVAS_W, CANVAS_H);
+  const bagWidth = bag.width || bag.height || Math.min(CANVAS_WIDTH, CANVAS_HEIGHT);
+  const bagHeight = bag.height || bag.width || Math.min(CANVAS_WIDTH, CANVAS_HEIGHT);
   return {
     id: bag.id, name: bag.name, library: "bag", subcategory: bag.subcategory,
     originalPixelValue: bag.pixel_value, currentPixelValue: bag.pixel_value,
@@ -136,7 +144,7 @@ function getCachedValidRegion(bagObj: SceneObject): Point[] {
   const cacheKey = `${bagObj.id}_${bagObj.transform.width}_${bagObj.transform.height}_${bagObj.transform.rotation}`;
   if (validRegionCache.has(cacheKey)) return validRegionCache.get(cacheKey)!;
   const region = getTransformedValidRegion(bagObj);
-  if (validRegionCache.size >= CACHE_MAX_SIZE) {
+  if (validRegionCache.size >= VALID_REGION_CACHE_MAX_SIZE) {
     const firstKey = validRegionCache.keys().next().value;
     if (firstKey) validRegionCache.delete(firstKey);
   }
@@ -223,8 +231,11 @@ function buildPositionRotationCandidates(bagObj: SceneObject, threat: Item, targ
     const j = Math.floor(Math.random() * (i + 1));
     [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
   }
-  const MAX_CANDIDATES = Math.max(1000, target * 200, 5000);
-  return candidates.length > MAX_CANDIDATES ? candidates.slice(0, MAX_CANDIDATES) : candidates;
+  if (candidates.length > MAX_CANDIDATE_POOL) {
+    debugLog.warn(`[CombinationGenerator] Candidate pool ${candidates.length} exceeds MAX_CANDIDATE_POOL ${MAX_CANDIDATE_POOL}, truncating.`);
+    return candidates.slice(0, MAX_CANDIDATE_POOL);
+  }
+  return candidates;
 }
 
 function generateSingleThreatPlacement(
@@ -552,7 +563,7 @@ export async function generateCombinations(
     if (threats.length > 0) {
       const targetByCount: Record<number, { min: number; target: number; max: number }> = {};
       const totalWeight = Object.values(threatDistribution).reduce((sum, w) => sum + w, 0);
-      const tolerance = 0.05;
+      const tolerance = PLACEMENT_TOLERANCE;
       for (const [count, weight] of Object.entries(threatDistribution)) {
         const countNum = parseInt(count);
         if (countNum <= threats.length && weight > 0) {
@@ -625,21 +636,20 @@ export async function generateCombinations(
     const maxAttemptsWithoutProgress = Math.max(k * 10, 50_000);
     let attemptsWithoutProgress = 0;
     let lastLogTime = Date.now();
-    const LOG_INTERVAL_MS = 2000;
-    console.log(`[CombinationGenerator] Entering main generation loop...`);
+    debugLog.info(`[CombinationGenerator] Entering main generation loop...`);
     while (results.length < k && totalRemaining > 0 && attemptsWithoutProgress < maxAttemptsWithoutProgress) {
       attemptsWithoutProgress++;
       const now = Date.now();
       if (now - lastLogTime >= LOG_INTERVAL_MS) {
         lastLogTime = now;
         const exhausted = bagEntries.filter(b => b.isExhausted).length;
-        console.log(`[CombinationGenerator] Status: ${results.length}/${k} generated, ${exhausted}/${bagEntries.length} bags exhausted, ${attemptsWithoutProgress} attempts without progress`);
+        debugLog.info(`[CombinationGenerator] Status: ${results.length}/${k} generated, ${exhausted}/${bagEntries.length} bags exhausted, ${attemptsWithoutProgress} attempts without progress`);
       }
       const entry = selectWeightedBag();
-      if (!entry) { console.log(`[CombinationGenerator] No bags available - all exhausted`); break; }
+      if (!entry) { debugLog.info(`[CombinationGenerator] No bags available - all exhausted`); break; }
       if (!entry.hasValidRegion) { entry.isExhausted = true; continue; }
       const activeCounts = Object.keys(remainingByCount).map(Number).filter(c => !exhaustedCount.has(c) && (remainingByCount[c] || 0) > 0);
-      if (activeCounts.length === 0) { console.log(`[CombinationGenerator] No active threat counts remaining`); break; }
+      if (activeCounts.length === 0) { debugLog.info(`[CombinationGenerator] No active threat counts remaining`); break; }
       let selectionTotalWeight = 0;
       const selectionWeights: { count: number; weight: number; cumulative: number }[] = [];
       for (const countNum of activeCounts) {
@@ -652,7 +662,6 @@ export async function generateCombinations(
       const selectionRandom = Math.random() * selectionTotalWeight;
       let selectedCount = activeCounts[0];
       for (const sw of selectionWeights) { if (selectionRandom <= sw.cumulative) { selectedCount = sw.count; break; } }
-      const MAX_PLACEMENT_ATTEMPTS = 20;
       let placementSucceeded = false;
       let finalPlacedThreats: { item: Item; x: number; y: number; rotation: number }[] = [];
       let finalThreatObjs: SceneObject[] = [];
@@ -697,7 +706,7 @@ export async function generateCombinations(
       if (!placementSucceeded) {
         consecutiveFailuresByCount[selectedCount] = (consecutiveFailuresByCount[selectedCount] || 0) + 1;
         if (consecutiveFailuresByCount[selectedCount] >= maxConsecutivePerCount && !exhaustedCount.has(selectedCount)) {
-          console.log(`[CombinationGenerator] Exhausting ${selectedCount}-threat count after ${consecutiveFailuresByCount[selectedCount]} failures`);
+          debugLog.info(`[CombinationGenerator] Exhausting ${selectedCount}-threat count after ${consecutiveFailuresByCount[selectedCount]} failures`);
           exhaustedCount.add(selectedCount);
           const failedRemaining = remainingByCount[selectedCount] || 0;
           delete remainingByCount[selectedCount];
@@ -746,7 +755,7 @@ export async function generateCombinations(
       attemptsWithoutProgress = 0;
       consecutiveFailuresByCount[selectedCount] = 0;
       if (results.length % 50 === 0) {
-        console.log(`[CombinationGenerator] Progress: ${results.length}/${k} (${((results.length/k)*100).toFixed(1)}%)`);
+        debugLog.info(`[CombinationGenerator] Progress: ${results.length}/${k} (${((results.length/k)*100).toFixed(1)}%)`);
         await new Promise(resolve => setTimeout(resolve, 0));
       }
     }
@@ -760,7 +769,7 @@ export async function generateCombinations(
         results.push(combo);
         consecutiveFailures = 0;
         if (results.length % 50 === 0) {
-          console.log(`[CombinationGenerator] Progress: ${results.length}/${k} (${((results.length/k)*100).toFixed(1)}%)`);
+          debugLog.info(`[CombinationGenerator] Progress: ${results.length}/${k} (${((results.length/k)*100).toFixed(1)}%)`);
           await new Promise(resolve => setTimeout(resolve, 0));
         }
       } else { consecutiveFailures++; }
@@ -768,12 +777,12 @@ export async function generateCombinations(
   }
   const endTime = Date.now();
   const elapsed = endTime - startTime;
-  console.log(`[CombinationGenerator] Completed in ${elapsed}ms`, { requested: k, generated: results.length, failures: failures.length, avgTimePerCombo: results.length > 0 ? `${(elapsed / results.length).toFixed(2)}ms` : 'N/A' });
+  debugLog.info(`[CombinationGenerator] Completed in ${elapsed}ms`, { requested: k, generated: results.length, failures: failures.length, avgTimePerCombo: results.length > 0 ? `${(elapsed / results.length).toFixed(2)}ms` : 'N/A' });
   return { results, failures };
 }
 
 export function testGenerationSpeed() {
-  console.log("Testing generation speed with sample data...");
+  debugLog.info("Testing generation speed with sample data...");
   return { message: "Use generateCombinationsIncremental directly for testing" };
 }
 
@@ -849,7 +858,7 @@ export async function generateCombinationsIncremental(
     if (threats.length > 0) {
       const targetByCount: Record<number, { min: number; target: number; max: number }> = {};
       const totalWeight = Object.values(threatDistribution).reduce((sum, w) => sum + w, 0);
-      const tolerance = 0.05;
+      const tolerance = PLACEMENT_TOLERANCE;
       for (const [count, weight] of Object.entries(threatDistribution)) {
         const countNum = parseInt(count);
         if (countNum <= threats.length && weight > 0) {
@@ -923,7 +932,6 @@ export async function generateCombinationsIncremental(
     let attemptsWithoutProgress = 0;
     let lastBatchIndex = 0;
     let lastProgressTime = Date.now();
-    const PROGRESS_INTERVAL_MS = 2000;
     while (results.length < k && totalRemaining > 0 && attemptsWithoutProgress < maxAttemptsWithoutProgress) {
       attemptsWithoutProgress++;
       
@@ -1090,7 +1098,7 @@ export async function generateCombinationsIncremental(
   }
   const endTime = Date.now();
   const elapsed = endTime - startTime;
-  console.log(`[CombinationGenerator] Incremental completed in ${elapsed}ms`, { requested: k, generated: results.length, failures: failures.length, avgTimePerCombo: results.length > 0 ? `${(elapsed / results.length).toFixed(2)}ms` : 'N/A' });
+  debugLog.info(`[CombinationGenerator] Incremental completed in ${elapsed}ms`, { requested: k, generated: results.length, failures: failures.length, avgTimePerCombo: results.length > 0 ? `${(elapsed / results.length).toFixed(2)}ms` : 'N/A' });
   return { results, failures };
 }
 

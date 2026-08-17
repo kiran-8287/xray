@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import type { SceneObject } from "../../types/customization";
 import { API_BASE_URL } from "../../config/api";
+import { escapeAttribute, sanitizeId } from "../../lib/sanitize";
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
@@ -97,13 +98,13 @@ export default function SyntheticPreview({ objects, combinationId, bagId, threat
                   }}
                 >
                   {hasError ? (
-                    <div className="w-full h-full flex items-center justify-center bg-rose-50 border border-rose-200 rounded" title={`Failed to load: ${obj.name}`}>
+                    <div className="w-full h-full flex items-center justify-center bg-rose-50 border border-rose-200 rounded" title={escapeAttribute(`Failed to load: ${sanitizeId(obj.name)}`)}>
                       <AlertTriangle size={14} className="text-rose-500" />
                     </div>
                   ) : (
                     <img
                       src={url}
-                      alt={obj.name}
+                      alt={escapeAttribute(sanitizeId(obj.name))}
                       className="w-full h-full object-contain"
                       draggable={false}
                       onLoad={() => handleImageLoad(url)}
@@ -130,16 +131,16 @@ export default function SyntheticPreview({ objects, combinationId, bagId, threat
       <div className="px-4 pb-4 pt-2">
         <div className="flex items-center justify-between gap-3 mb-2">
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-accent-sky font-mono truncate" title={combinationId}>{combinationId}</p>
+            <p className="text-sm font-semibold text-accent-sky font-mono truncate" title={escapeAttribute(sanitizeId(combinationId))}>{sanitizeId(combinationId)}</p>
           </div>
         </div>
         <div className="space-y-1">
-          <p className="text-[10px] font-mono text-muted truncate" title={bagId}>Bag: {bagId}</p>
+          <p className="text-[10px] font-mono text-muted truncate" title={escapeAttribute(sanitizeId(bagId))}>Bag: {sanitizeId(bagId)}</p>
           {threatId && (
-            <p className="text-[10px] font-mono text-rose-600 truncate" title={threatId}>Threat: {threatId}</p>
+            <p className="text-[10px] font-mono text-rose-600 truncate" title={escapeAttribute(sanitizeId(threatId))}>Threat: {sanitizeId(threatId)}</p>
           )}
           {otherIds.length > 0 && (
-            <p className="text-[10px] font-mono text-muted truncate" title={otherIds.join(", ")}>Others: {otherIds.join(", ")}</p>
+            <p className="text-[10px] font-mono text-muted truncate" title={escapeAttribute(sanitizeId(otherIds.join(", ")))}>Others: {otherIds.map(sanitizeId).join(", ")}</p>
           )}
         </div>
       </div>

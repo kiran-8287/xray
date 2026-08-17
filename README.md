@@ -12,19 +12,22 @@ For full documentation, see **[USER_GUIDE.pdf](./USER_GUIDE.pdf)** in the reposi
 
 ## Installation
 
-The fastest way to run the application is with Docker Compose.
+The fastest way to run the application is with the bootstrap script. It starts Docker with the correct uid/gid so every file in `backend/data` is owned by **your** account — no `sudo` required, even on office laptops where UID `1000` is often the admin account.
 
 ```bash
 # 1. Clone and enter the repo
 git clone <your-repository-url>
 cd xray
 
-# 2. Start the application
-docker compose up --build
+# 2. Make the bootstrap script executable (Linux/macOS)
+chmod +x bootstrap.sh
+
+# 3. Start the application
+./bootstrap.sh
 # Stop with:  docker compose down
 ```
 
-> **On Linux/macOS, prefer `./bootstrap.sh` over `docker compose up`.** It runs the backend as your own uid/gid so every file in `backend/data` is owned by your account and can be deleted without `sudo` (important on office laptops). See **SETUP.md → Troubleshooting → Known deployment issues** for details.
+> **Important:** Do **not** run `docker compose up --build` directly. The bootstrap script exports `PUID=$(id -u)` and `PGID=$(id -g)` before starting Docker, which ensures the backend container writes files as your user. If you skip it, the container falls back to UID `1000` (often the admin on office machines), and you will not be able to modify `backend/data` without `sudo`.
 
 Then open **http://localhost:5174**.
 

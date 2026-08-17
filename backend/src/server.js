@@ -46,7 +46,7 @@ import { PipelineTimer, PIPELINE_STAGES, generateOperationId } from "./lib/instr
 import { initializeSystemConfig, getWorkerCount, checkMemoryAvailability } from "./lib/systemInfo.js";
 import { Semaphore, chunked, withSemaphore } from "./lib/concurrency.js";
 import { enqueue as enqueueDiskWrite, getDiskWriteQueueStatus, drain as drainDiskQueue } from './lib/diskWriteQueue.js';
-import { publicApiRateLimiter } from './lib/rateLimiter.js';
+import { publicApiRateLimiter, strictRateLimiter } from './lib/rateLimiter.js';
 import { getExportsPath, setExportsPath, hasConfiguredExportsPath } from './lib/userConfig.js';
 import {
   analyzeImport,
@@ -54,6 +54,14 @@ import {
   scanPixelDir,
   scanJsonDir,
 } from './lib/importService.js';
+import {
+  validateClientOutputPath,
+  validateCombinationsArray,
+  isPathWithinAllowedRoots,
+} from './lib/pathValidation.js';
+import { validateFileMagicNumber, validateFileSize as checkFileSize } from './lib/fileValidation.js';
+import { validateLayoutJson, validatePlainObject, validateObjectArray } from './lib/jsonValidation.js';
+import { auditLog } from './lib/auditLog.js';
 
 const app = express();
 app.use(cors());
@@ -126,6 +134,19 @@ function writableErrorText(result, insideContainer) {
     return `The export folder exists but is not writable by the server user (${code}). Choose a folder the server process can write to, or fix the folder's permissions.`;
   }
   return `Could not write a test file into the export folder (${code}). Pick a different, writable folder.`;
+}
+
+// In Docker, a path outside the bind-mounted /app/data lives on the container's
+// ephemeral overlay filesystem: writes succeed but files never appear on the host
+// and are lost when the container is recreated. Returns an error message if the
+// path is unusable, or null if it is safe to use.
+async function containerPathError(resolvedPath) {
+  if (!(await isContainerized())) return null;
+  const mountedRoot = path.resolve(CONTAINER_DATA_MOUNT);
+  if (!resolvedPath.startsWith(mountedRoot)) {
+    return `This folder (${resolvedPath}) is inside the container but is NOT mapped to your host machine, so files saved here would only exist inside the container and would be lost when the container is recreated. Choose a path under ${mountedRoot}/… (which maps to your host's backend/data folder), or add a bind-mount for this folder in docker-compose.yml.`;
+  }
+  return null;
 }
 
 const httpRequestDuration = new client.Histogram({
@@ -715,7 +736,7 @@ function classifyFileType(filename) {
 }
 
 // Endpoint to process raw files (.dump.pgm, .tip) and extract .npz pixel data with worker pool
-app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), async (req, res) => {
+app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, rawUpload.array("rawFiles"), async (req, res) => {
     res.setHeader("Content-Type", "application/x-ndjson");
     res.setHeader("Transfer-Encoding", "chunked");
     res.status(200).flushHeaders();
@@ -748,6 +769,17 @@ app.post("/api/process-raw-files", requireAuth, rawUpload.array("rawFiles"), asy
             if (!fileType) {
                 logger.debug({ operationId, filename: file.originalname }, 'Skipped file: unrecognized extension');
                 skippedFiles.push({ filename: file.originalname, reason: "Unrecognized file extension (expected .dump.pgm, .tip, or .npz)" });
+                try { await fs.unlink(file.path); } catch {}
+                continue;
+            }
+
+            // Validate file magic number matches expected type
+            const ext = path.extname(file.originalname).toLowerCase();
+            const magicCheck = await validateFileMagicNumber(file.path, ext);
+            if (!magicCheck.ok) {
+                logger.debug({ operationId, filename: file.originalname, reason: magicCheck.error }, 'Skipped file: magic number mismatch');
+                skippedFiles.push({ filename: file.originalname, reason: `Invalid file content: ${magicCheck.error}` });
+                try { await fs.unlink(file.path); } catch {}
                 continue;
             }
 
@@ -1166,20 +1198,26 @@ app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
       return res.status(400).json({ ok: false, error: writableErrorText(probe, insideContainer) });
     }
 
-    // In Docker, warn when the chosen path is outside the only host-visible mount.
-    // The folder will be created and written inside the container, but the files
-    // will never appear on the host and will be lost when the container is recreated.
-    let warning = null;
+    // In Docker, REJECT the chosen path when it is outside the only host-visible
+    // mount. The folder would be created and written inside the container's
+    // ephemeral overlay filesystem — the files would never appear on the host and
+    // would be silently lost when the container is recreated. A warning alone is
+    // not enough: the frontend reports "saved" and the user believes their exports
+    // are on disk when they are actually in a throwaway container layer.
     if (await isContainerized()) {
       const mountedRoot = path.resolve(CONTAINER_DATA_MOUNT);
       if (!resolvedPath.startsWith(mountedRoot)) {
-        warning = `This folder is inside the container but is NOT mapped to your host machine, so files saved here will only exist inside the container and will be lost when the container is recreated. Prefer a path under ${mountedRoot}/…, or add a bind-mount for this folder in docker-compose.yml.`;
+        console.error(`[user-config/exports-path] Rejected path outside container data mount: ${resolvedPath}`);
+        return res.status(400).json({
+          ok: false,
+          error: `This folder (${resolvedPath}) is inside the container but is NOT mapped to your host machine, so files saved here would only exist inside the container and would be lost when the container is recreated. Choose a path under ${mountedRoot}/… (which maps to your host's backend/data folder), or add a bind-mount for this folder in docker-compose.yml.`,
+        });
       }
     }
 
     const userConfig = await setExportsPath(requestedScope, resolvedPath);
     const key = requestedScope === 'load' ? 'loadExportsPath' : requestedScope === 'collage' ? 'collageExportsPath' : 'savedExportsPath';
-    res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key], warning });
+    res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key] });
   } catch (err) {
     console.error('[user-config/exports-path] Error:', err);
     res.status(500).json({ ok: false, error: String(err) });
@@ -1493,39 +1531,24 @@ app.get('/api/saved-layouts/filtered', publicApiRateLimiter.middleware(), async 
     }
 });
 
-app.post('/api/saved-layouts', requireAuth, async (req, res) => {
+app.post('/api/saved-layouts', auditLog('create_saved_layout'), requireAuth, async (req, res) => {
     const { id, name, filepath, layout_json } = req.body;
     if (!name || !layout_json) return res.status(400).json({ ok: false, error: 'Missing name or layout_json' });
     
     // Validate layout_json structure
-    try {
-        if (!layout_json.objects || typeof layout_json.objects !== 'object') {
-            return res.status(400).json({ ok: false, error: 'Invalid layout_json: missing or invalid objects field' });
-        }
-        
-        const obj = layout_json.objects;
-        if (!obj.bag && !obj.threats && !obj['non-threats']) {
-            return res.status(400).json({ ok: false, error: 'Invalid layout_json: objects must contain at least one of bag, threats, or non-threats' });
-        }
-        
-        if (obj.threats && !Array.isArray(obj.threats)) {
-            return res.status(400).json({ ok: false, error: 'Invalid layout_json: threats must be an array' });
-        }
-        
-        if (obj['non-threats'] && !Array.isArray(obj['non-threats'])) {
-            return res.status(400).json({ ok: false, error: 'Invalid layout_json: non-threats must be an array' });
-        }
-    } catch (err) {
-        return res.status(400).json({ ok: false, error: `Invalid layout_json structure: ${err.message}` });
+    const layoutValidation = validateLayoutJson(layout_json);
+    if (!layoutValidation.ok) {
+        return res.status(400).json({ ok: false, error: layoutValidation.error });
     }
+    const sanitizedLayoutJson = layoutValidation.sanitized;
     
     try {
         // Attach segmentation masks (outer boundary polygon points) to each threat
         // so they are persisted with the saved annotation. Skip silently if a
         // threat has no resolvable pixel data.
-        await attachThreatSegmentationMasks([layout_json.objects]);
+        await attachThreatSegmentationMasks([sanitizedLayoutJson.objects]);
 
-        const layout = await createSavedLayout({ id, name, filepath, layout_json });
+        const layout = await createSavedLayout({ id, name, filepath, layout_json: sanitizedLayoutJson });
         res.json({ ok: true, layout });
     } catch (err) {
         console.error(err);
@@ -1533,7 +1556,7 @@ app.post('/api/saved-layouts', requireAuth, async (req, res) => {
     }
 });
 
-app.post('/api/saved-layouts/batch', requireAuth, async (req, res) => {
+app.post('/api/saved-layouts/batch', auditLog('batch_create_saved_layouts'), requireAuth, async (req, res) => {
     const { layouts } = req.body;
     if (!Array.isArray(layouts)) {
         return res.status(400).json({ ok: false, error: 'layouts must be an array' });
@@ -1552,28 +1575,15 @@ app.post('/api/saved-layouts/batch', requireAuth, async (req, res) => {
         if (!name || !layout_json) {
             return res.status(400).json({ ok: false, error: `Entry at index ${i} is missing name or layout_json` });
         }
-        try {
-            if (!layout_json.objects || typeof layout_json.objects !== 'object') {
-                return res.status(400).json({ ok: false, error: `Entry ${i}: invalid layout_json.objects` });
-            }
-            const obj = layout_json.objects;
-            if (!obj.bag && !obj.threats && !obj['non-threats']) {
-                return res.status(400).json({ ok: false, error: `Entry ${i}: objects must contain bag, threats, or non-threats` });
-            }
-            if (obj.threats && !Array.isArray(obj.threats)) {
-                return res.status(400).json({ ok: false, error: `Entry ${i}: threats must be an array` });
-            }
-            if (obj['non-threats'] && !Array.isArray(obj['non-threats'])) {
-                return res.status(400).json({ ok: false, error: `Entry ${i}: non-threats must be an array` });
-            }
-        } catch (err) {
-            return res.status(400).json({ ok: false, error: `Entry ${i}: layout_json validation failed: ${err.message}` });
+        const layoutValidation = validateLayoutJson(layout_json);
+        if (!layoutValidation.ok) {
+            return res.status(400).json({ ok: false, error: `Entry ${i}: ${layoutValidation.error}` });
         }
         normalized.push({
             id: raw.id,
             name,
             filepath: raw.filepath ?? null,
-            layout_json,
+            layout_json: layoutValidation.sanitized,
         });
     }
     try {
@@ -1595,7 +1605,7 @@ app.post('/api/saved-layouts/batch', requireAuth, async (req, res) => {
 // POST /api/saved-layouts/batch-bulk
 // Enqueue a batch of generated layouts for sequential disk write with pacing.
 // Responds immediately with queue status (non-blocking).
-app.post('/api/saved-layouts/batch-bulk', requireAuth, async (req, res) => {
+app.post('/api/saved-layouts/batch-bulk', auditLog('batch_bulk_save_layouts'), requireAuth, async (req, res) => {
     try {
         const { layouts } = req.body;
         if (!Array.isArray(layouts) || layouts.length === 0) {
@@ -1603,19 +1613,22 @@ app.post('/api/saved-layouts/batch-bulk', requireAuth, async (req, res) => {
         }
 
         // Validate each layout has minimum required fields
-        for (const layout of layouts) {
+        for (let i = 0; i < layouts.length; i++) {
+            const layout = layouts[i];
             if (!layout.name || !layout.layout_json) {
-                return res.status(400).json({ ok: false, error: 'Each layout must have name and layout_json' });
+                return res.status(400).json({ ok: false, error: `Entry at index ${i} is missing name or layout_json` });
             }
-            if (!layout.layout_json.objects) {
-                return res.status(400).json({ ok: false, error: 'Each layout_json must have an objects field' });
+            const layoutValidation = validateLayoutJson(layout.layout_json);
+            if (!layoutValidation.ok) {
+                return res.status(400).json({ ok: false, error: `Entry at index ${i}: ${layoutValidation.error}` });
             }
+            layouts[i] = { ...layout, layout_json: layoutValidation.sanitized };
             // Stamp an ID and timestamp if missing
-            if (!layout.id) {
-                layout.id = `auto_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+            if (!layouts[i].id) {
+                layouts[i].id = `auto_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
             }
-            if (!layout.created_at) {
-                layout.created_at = new Date().toISOString();
+            if (!layouts[i].created_at) {
+                layouts[i].created_at = new Date().toISOString();
             }
         }
 
@@ -1728,7 +1741,7 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
 // This route must be registered before /api/saved-layouts/:id so /export is not swallowed.
 // Supports optional ?jobId= query param so the client can cancel a running bulk
 // export (Save All / Save Selected) via POST /api/saved-layouts/export/cancel.
-app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
+async function handleSavedLayoutsExport(req, res) {
     const jobId = typeof req.query.jobId === 'string' && req.query.jobId.trim()
         ? req.query.jobId.trim()
         : null;
@@ -1744,6 +1757,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
     const scope = typeof req.query.scope === 'string' && ['load', 'saved', 'collage'].includes(req.query.scope.trim().toLowerCase())
         ? req.query.scope.trim().toLowerCase()
         : 'saved';
+
     let cancelled = false;
 
     try {
@@ -1762,26 +1776,31 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             cancelled = exportCancellations.has(jobId);
         }
 
-        // Get user-configured exports path for this scope (or fall back to default)
         const userExportsRoot = await getExportsPath(scope);
         const exportsRoot = path.resolve(userExportsRoot);
         const exportsHighRoot = path.join(exportsRoot, 'high');
         const exportsLowRoot = path.join(exportsRoot, 'low');
         const exportsAnnotationsRoot = path.join(exportsRoot, 'annotations');
 
+        const containerErr = await containerPathError(exportsRoot);
+        if (containerErr) {
+            console.error(`[saved-layouts/export] Rejected container-only export path: ${exportsRoot}`);
+            if (!res.headersSent) {
+                return res.status(400).json({ ok: false, error: `The export folder is not usable: ${containerErr}` });
+            }
+        }
+
         await fs.mkdir(exportsHighRoot, { recursive: true });
         await fs.mkdir(exportsLowRoot, { recursive: true });
         await fs.mkdir(exportsAnnotationsRoot, { recursive: true });
 
-        // Fail fast if the chosen export folder is read-only / not writable instead
-        // of rendering everything and then reporting every layout as failed.
         const wrProbe = await probeWritableDir(exportsRoot);
         if (!wrProbe.ok) {
-          console.error('[saved-layouts/export] Destination not writable:', wrProbe.message);
-          const insideContainer = await isContainerized();
-          if (!res.headersSent) {
-            return res.status(400).json({ ok: false, error: `The export folder is not writable: ${writableErrorText(wrProbe, insideContainer)}` });
-          }
+            console.error('[saved-layouts/export] Destination not writable:', wrProbe.message);
+            const insideContainer = await isContainerized();
+            if (!res.headersSent) {
+                return res.status(400).json({ ok: false, error: `The export folder is not writable: ${writableErrorText(wrProbe, insideContainer)}` });
+            }
         }
 
         const exported = [];
@@ -1799,35 +1818,34 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             });
         }
 
-        // Publish live progress for Save All / Save Selected so the frontend can
-        // render a progress bar while layouts are being rendered/written.
         if (jobId) {
             exportProgressStore.set(jobId, { done: 0, total: targetLayouts.length });
         }
 
-        // Determine the starting partition number by scanning existing annotation files.
-        // This prevents overwriting previous exports (e.g., annotations_1.json, annotations_2.json).
+        // Save All always rewrites the canonical full export in annotations_1.json.
+        // Save Selected must NOT overwrite that; instead it starts at the next free
+        // partition number so the subset becomes annotations_2.json, ... and the
+        // prior full export is preserved.
         let annotationPartitionNum = 1;
-        try {
-            const existingFiles = await fs.readdir(exportsAnnotationsRoot);
-            const existingPartitionNums = existingFiles
-                .filter(name => /^annotations_\d+\.json$/.test(name))
-                .map(name => {
-                    const match = name.match(/^annotations_(\d+)\.json$/);
-                    return match ? parseInt(match[1], 10) : null;
-                })
-                .filter((num) => num !== null);
+        if (saveMode === 'selected') {
+            try {
+                const existingFiles = await fs.readdir(exportsAnnotationsRoot);
+                const existingPartitionNums = existingFiles
+                    .filter(name => /^annotations_\d+\.json$/.test(name))
+                    .map(name => {
+                        const match = name.match(/^annotations_(\d+)\.json$/);
+                        return match ? parseInt(match[1], 10) : null;
+                    })
+                    .filter((num) => num !== null);
 
-            if (existingPartitionNums.length > 0) {
-                annotationPartitionNum = Math.max(...existingPartitionNums) + 1;
+                if (existingPartitionNums.length > 0) {
+                    annotationPartitionNum = Math.max(...existingPartitionNums) + 1;
+                }
+            } catch (err) {
+                console.warn('[export] Failed to scan existing annotation partitions:', err);
             }
-        } catch (err) {
-            console.warn('[export] Failed to scan existing annotation partitions:', err);
         }
 
-        // Generate segmentation masks for ALL threats across the whole export set in
-        // ONE batched, deduped call BEFORE the loop (instead of once per layout), so
-        // a large Save All does not spawn a python child for every single layout.
         try {
             await attachThreatSegmentationMasks(targetLayouts.map((l) => l.layout_json?.objects).filter(Boolean));
         } catch (err) {
@@ -1839,12 +1857,10 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
 
         for (let idx = 0; idx < targetLayouts.length; idx++) {
             const layout = targetLayouts[idx];
-            // Stop at the next layout boundary if the client requested cancellation.
             if (jobId && exportCancellations.has(jobId)) {
                 cancelled = true;
                 break;
             }
-            // Publish per-layout progress so the frontend progress bar advances live.
             if (jobId) {
                 exportProgressStore.set(jobId, { done: idx, total: targetLayouts.length });
             }
@@ -1922,7 +1938,7 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                                 obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
                             }
                         }
-                        
+
                         const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, 'highenergy');
                         const highExportPath = path.join(exportsHighRoot, `${baseName}_high.png`);
                         await fs.writeFile(highExportPath, highPngBuffer);
@@ -1939,8 +1955,6 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                         lowEnergyFilename = `${baseName}_low.png`;
                     }
 
-                    // Build the annotation record for this layout (the full object data
-                    // from the saved layout, plus references to the rendered images).
                     const annotation = {
                         layoutId: layout.id,
                         layoutName: layout.name,
@@ -1994,13 +2008,11 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
                     error: err.message
                 });
             }
-            // Mark this layout as completed so the progress bar reflects what is done.
             if (jobId) {
                 exportProgressStore.set(jobId, { done: idx + 1, total: targetLayouts.length });
             }
         }
 
-        // Flush remaining annotations in the partition buffer
         if (currentAnnotationPartition.length > 0) {
             try {
                 const partPath = path.join(exportsAnnotationsRoot, `annotations_${annotationPartitionNum}.json`);
@@ -2038,13 +2050,19 @@ app.get('/api/saved-layouts/export', requireAuth, async (req, res) => {
             res.end();
         }
     } finally {
-        // Always release the cancellation flag so a fresh Save All / Save Selected
-        // with the same jobId (or any future job) is not accidentally short-circuited.
         if (jobId) {
             exportCancellations.delete(jobId);
             exportProgressStore.delete(jobId);
         }
     }
+}
+
+app.get('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAuth, async (req, res) => {
+    await handleSavedLayoutsExport(req, res);
+});
+
+app.post('/api/saved-layouts/export', strictRateLimiter.middleware(), requireAuth, async (req, res) => {
+    await handleSavedLayoutsExport(req, res);
 });
 
 // Live progress for a running saved-layouts export job (Save All / Save Selected),
@@ -2079,7 +2097,7 @@ app.post('/api/saved-layouts/export/cancel', requireAuth, async (req, res) => {
 });
 
 // Export annotation combinations as high+low resolution images
-app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
+app.post('/api/load/export-combinations', strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     // Use the client-provided jobId so the frontend can poll progress and cancel.
     const jobId = typeof req.query.jobId === 'string' && req.query.jobId.trim()
         ? req.query.jobId.trim()
@@ -2091,6 +2109,11 @@ app.post('/api/load/export-combinations', requireAuth, async (req, res) => {
         
         if (!Array.isArray(combinations) || combinations.length === 0) {
             return res.status(400).json({ ok: false, error: 'No combinations provided' });
+        }
+
+        const combinationValidation = validateCombinationsArray(combinations, 10000);
+        if (!combinationValidation.ok) {
+            return res.status(400).json({ ok: false, error: combinationValidation.error });
         }
 
         exportProgressStore.set(jobId, { done: 0, total: combinations.length });
@@ -2238,9 +2261,12 @@ app.get('/api/saved-layouts/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/saved-layouts/:id', requireAuth, async (req, res) => {
+app.delete('/api/saved-layouts/:id', auditLog('delete_saved_layout'), requireAuth, async (req, res) => {
     try {
         await deleteSavedLayout(req.params.id);
+        // Also remove the collage images (high + low) belonging ONLY to this
+        // layout, if they exist. Other layouts' images are never touched.
+        await deleteCollageImagesForLayout(req.params.id);
         res.json({ ok: true });
     } catch (err) {
         console.error(err);
@@ -2248,8 +2274,10 @@ app.delete('/api/saved-layouts/:id', requireAuth, async (req, res) => {
     }
 });
 
-// Batch delete saved layouts (more efficient than multiple individual requests)
-app.post('/api/saved-layouts/batch-delete', requireAuth, async (req, res) => {
+// Batch delete saved layouts (more efficient than multiple individual requests).
+// Also removes the collage image files (high + low) belonging ONLY to the
+// deleted layouts — other layouts' images are never touched.
+app.post('/api/saved-layouts/batch-delete', auditLog('batch_delete_saved_layouts'), requireAuth, async (req, res) => {
     try {
         const { ids } = req.body;
         
@@ -2269,6 +2297,8 @@ app.post('/api/saved-layouts/batch-delete', requireAuth, async (req, res) => {
         for (const id of ids) {
             try {
                 await deleteSavedLayout(id);
+                // Remove ONLY this layout's collage images (high + low) if they exist.
+                await deleteCollageImagesForLayout(id);
                 results.push({ id, success: true });
                 successCount++;
             } catch (err) {
@@ -2301,7 +2331,7 @@ app.get('/api/custom-subcategories', publicApiRateLimiter.middleware(), async (r
     }
 });
 
-app.post('/api/custom-subcategories', requireAuth, async (req, res) => {
+app.post('/api/custom-subcategories', auditLog('add_custom_subcategory'), requireAuth, async (req, res) => {
     try {
         const { category, name } = req.body;
         if (!category || !name) {
@@ -2320,7 +2350,7 @@ app.post('/api/custom-subcategories', requireAuth, async (req, res) => {
     }
 });
 
-app.delete('/api/custom-subcategories/:category/:slug', requireAuth, async (req, res) => {
+app.delete('/api/custom-subcategories/:category/:slug', auditLog('remove_custom_subcategory'), requireAuth, async (req, res) => {
     try {
         const { category, slug } = req.params;
         await removeCustomSubcategory(category, slug);
@@ -2343,7 +2373,7 @@ const uploadWithLimits = multer({
   }
 });
 
-app.post("/api/upload", requireAuth, uploadWithLimits.array("images", config.maxFilesPerUpload), async (req, res) => {
+app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithLimits.array("images", config.maxFilesPerUpload), async (req, res) => {
   req.setTimeout(config.uploadTimeoutMs, () => {
     if (!res.headersSent) {
       res.status(408).json({ ok: false, error: "Upload timeout. Please try again with a smaller batch." });
@@ -2374,9 +2404,37 @@ app.post("/api/upload", requireAuth, uploadWithLimits.array("images", config.max
                 console.warn('Warning: failed to parse upload metadata', err);
             }
         }
+
+        // Validate file sizes and magic numbers
+        const fileValidationErrors = [];
+        const validFiles = [];
+        for (const file of files) {
+            const sizeCheck = checkFileSize(file.size, config.maxFileSize);
+            if (!sizeCheck.ok) {
+                fileValidationErrors.push({ filename: file.originalname, message: sizeCheck.error });
+                try {
+                    await fs.unlink(file.path);
+                } catch {}
+                continue;
+            }
+
+            const ext = path.extname(file.originalname).toLowerCase();
+            const magicCheck = await validateFileMagicNumber(file.path, ext);
+            if (!magicCheck.ok) {
+                fileValidationErrors.push({ filename: file.originalname, message: magicCheck.error });
+                try {
+                    await fs.unlink(file.path);
+                } catch {}
+                continue;
+            }
+
+            validFiles.push(file);
+        }
         
         timer.endStage(PIPELINE_STAGES.VALIDATION, { 
-            metadataItems: metadataArray.length 
+            metadataItems: metadataArray.length,
+            validFiles: validFiles.length,
+            invalidFiles: fileValidationErrors.length
         });
 
         // Stage 3: File Processing (per-file)
@@ -2387,7 +2445,7 @@ app.post("/api/upload", requireAuth, uploadWithLimits.array("images", config.max
         const processedIds = new Set();
         const fileProcessingStart = process.hrtime.bigint();
 
-        for (const file of files) {
+        for (const file of validFiles) {
             const fileStart = process.hrtime.bigint();
             const itemId = path.basename(file.originalname, path.extname(file.originalname));
             
@@ -2594,8 +2652,9 @@ app.post("/api/upload", requireAuth, uploadWithLimits.array("images", config.max
         
         res.json({ 
             ok: true, 
-            message: errors.length > 0 ? "Some files processed, some had errors" : "Files uploaded successfully!", 
+            message: errors.length > 0 || fileValidationErrors.length > 0 ? "Some files processed, some had errors" : "Files uploaded successfully!",
             itemsProcessed: processed.length,
+            fileValidationErrors,
             errors
         });
         
@@ -2640,8 +2699,123 @@ app.put("/api/items/:id", requireAuth, async (req, res) => {
   }
 });
 
+// Delete the collage / export image files (high + low) and annotation files
+// for a saved layout id, if they exist. Only the files belonging to the deleted
+// layout are removed — never the whole directory. Checks:
+//   - default collage_images root
+//   - user-configured collage export path (getExportsPath('collage'))
+//   - default saved exports root
+//   - user-configured saved export path (getExportsPath('saved'))
+// and matches:
+//   - direct collage filename ({id}.png)
+//   - saved-layout export filenames (SB_{id}_high.png / SB_{id}_low.png)
+//   - individual annotation file (SB_{id}.json)
+//   - batch annotation entries (annotations_*.json arrays filtered by layoutId)
+async function deleteCollageImagesForLayout(layoutId) {
+  if (!layoutId || typeof layoutId !== 'string') return;
+  const safeId = String(layoutId).replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 100);
+  if (!safeId) return;
+
+  const roots = [];
+
+  // Default collage image roots (backend/data/collage_images/high|low).
+  try {
+    roots.push(path.join(collageHighRoot));
+    roots.push(path.join(collageLowRoot));
+  } catch { /* ignore */ }
+
+  // User-configured collage export root (custom path chosen in the UI).
+  try {
+    const collageRoot = await getExportsPath('collage');
+    roots.push(path.join(collageRoot, 'high'));
+    roots.push(path.join(collageRoot, 'low'));
+  } catch { /* ignore */ }
+
+  // Saved layout export roots (backend/data/exports/high|low or user-configured saved path).
+  let savedAnnotationsRoot = null;
+  try {
+    const savedRoot = await getExportsPath('saved');
+    roots.push(path.join(savedRoot, 'high'));
+    roots.push(path.join(savedRoot, 'low'));
+    savedAnnotationsRoot = path.join(savedRoot, 'annotations');
+  } catch { /* ignore */ }
+
+  const seen = new Set();
+  for (const root of roots) {
+    if (seen.has(root)) continue;
+    seen.add(root);
+
+    // Direct collage render: {id}.png
+    const directPath = path.join(root, `${safeId}.png`);
+    try {
+      await fs.unlink(directPath);
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        console.warn(`[delete-layout] Failed to remove image ${directPath}: ${err.message}`);
+      }
+    }
+
+    // Saved-layout export: SB_{id}_high.png and SB_{id}_low.png
+    const baseName = `SB_${safeId}`;
+    const highPath = path.join(root, `${baseName}_high.png`);
+    try {
+      await fs.unlink(highPath);
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        console.warn(`[delete-layout] Failed to remove image ${highPath}: ${err.message}`);
+      }
+    }
+
+    const lowPath = path.join(root, `${baseName}_low.png`);
+    try {
+      await fs.unlink(lowPath);
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        console.warn(`[delete-layout] Failed to remove image ${lowPath}: ${err.message}`);
+      }
+    }
+  }
+
+  // Delete individual annotation file and purge entries from batch annotation files.
+  if (savedAnnotationsRoot) {
+    // Individual annotation: SB_{id}.json
+    const individualAnnotationPath = path.join(savedAnnotationsRoot, `${safeId}.json`);
+    try {
+      await fs.unlink(individualAnnotationPath);
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        console.warn(`[delete-layout] Failed to remove annotation ${individualAnnotationPath}: ${err.message}`);
+      }
+    }
+
+    // Batch annotations: annotations_*.json — remove entries for this layoutId.
+    try {
+      const files = await fs.readdir(savedAnnotationsRoot);
+      const batchFiles = files.filter(name => /^annotations_\d+\.json$/.test(name));
+      for (const file of batchFiles) {
+        const fullPath = path.join(savedAnnotationsRoot, file);
+        try {
+          const raw = await fs.readFile(fullPath, 'utf8');
+          const arr = JSON.parse(raw);
+          if (!Array.isArray(arr)) continue;
+          const next = arr.filter(entry => entry && entry.layoutId !== layoutId);
+          if (next.length === 0) {
+            await fs.unlink(fullPath);
+          } else {
+            await fs.writeFile(fullPath, JSON.stringify(next, null, 2));
+          }
+        } catch (err) {
+          console.warn(`[delete-layout] Failed to update batch annotation ${fullPath}: ${err.message}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[delete-layout] Failed to scan annotations root ${savedAnnotationsRoot}: ${err.message}`);
+    }
+  }
+}
+
 // Delete an individual item
-app.delete("/api/items/:id", requireAuth, async (req, res) => {
+app.delete("/api/items/:id", auditLog('delete_item'), requireAuth, async (req, res) => {
     try {
         const item = await getItemById(req.params.id);
         if (item) {
@@ -2666,7 +2840,7 @@ app.delete("/api/items/:id", requireAuth, async (req, res) => {
 });
 
 // Bulk delete items (single request, efficient O(partitions) instead of O(N) endpoints)
-app.post("/api/items/bulk-delete", requireAuth, async (req, res) => {
+app.post("/api/items/bulk-delete", auditLog('bulk_delete_items'), requireAuth, async (req, res) => {
     try {
         const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.slice(0, 50000) : [];
         if (ids.length === 0) {
@@ -3110,7 +3284,7 @@ app.get("/api/items/segmentation-masks", publicApiRateLimiter.middleware(), asyn
 });
 
 // Update bag valid region (only supports points and simplifiedPoints)
-app.put("/api/items/:id/valid-region", requireAuth, async (req, res) => {
+app.put("/api/items/:id/valid-region", auditLog('update_valid_region'), requireAuth, async (req, res) => {
     try {
         const { points, simplifiedPoints } = req.body;
         const dataToStore = {
@@ -3126,7 +3300,7 @@ app.put("/api/items/:id/valid-region", requireAuth, async (req, res) => {
 });
 
 // Delete bag valid region (set to null)
-app.delete("/api/items/:id/valid-region", requireAuth, async (req, res) => {
+app.delete("/api/items/:id/valid-region", auditLog('delete_valid_region'), requireAuth, async (req, res) => {
     try {
         await updateBag(req.params.id, { valid_region_points: null });
         res.json({ ok: true });
@@ -3357,7 +3531,7 @@ async function enrichObjectsWithPixelData(objects) {
 }
 
 // Render and save a collage combination as a PNG image
-app.post("/api/render-and-save-collage", requireAuth, async (req, res) => {
+app.post("/api/render-and-save-collage", strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     try {
         const { objects, name, energyType = "highenergy" } = req.body;
         if (!objects || !Array.isArray(objects) || objects.length === 0) {
@@ -3399,7 +3573,7 @@ app.post("/api/render-and-save-collage", requireAuth, async (req, res) => {
 });
 
 // Render and save BOTH high-energy and low-energy collage images at once
-app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
+app.post("/api/render-and-save-collage-both", strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     try {
         const { objects, name, outputPath } = req.body;
         if (!objects || !Array.isArray(objects) || objects.length === 0) {
@@ -3415,26 +3589,13 @@ app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
         let highEnergyDir, lowEnergyDir;
         
         if (outputPath && typeof outputPath === 'string') {
-            // Sanitize output path to prevent traversal
-            const sanitizedPath = outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '');
-            
-            // Prevent directory traversal
-            if (sanitizedPath.includes('..')) {
-                return res.status(400).json({ ok: false, error: "Invalid output path. Directory traversal is not allowed." });
+            const collageRoot = await getExportsPath('collage');
+            const result = validateClientOutputPath(outputPath, collageRoot, collageRoot);
+            if (!result.safe) {
+                return res.status(400).json({ ok: false, error: result.error });
             }
-            
-            const resolvedProjectRoot = path.resolve(__dirname, '..');
-            
-            if (!path.isAbsolute(sanitizedPath)) {
-                const customCollageRoot = path.resolve(resolvedProjectRoot, 'data', sanitizedPath, 'collage_images');
-                highEnergyDir = path.resolve(customCollageRoot, 'high');
-                lowEnergyDir = path.resolve(customCollageRoot, 'low');
-            } else {
-                const customCollageRoot = path.resolve(sanitizedPath, 'collage_images');
-                highEnergyDir = path.resolve(customCollageRoot, 'high');
-                lowEnergyDir = path.resolve(customCollageRoot, 'low');
-            }
-            
+            highEnergyDir = path.join(result.resolvedRoot, 'high');
+            lowEnergyDir = path.join(result.resolvedRoot, 'low');
             await fs.mkdir(highEnergyDir, { recursive: true });
             await fs.mkdir(lowEnergyDir, { recursive: true });
         } else {
@@ -3459,10 +3620,18 @@ app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
         }
 
         const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, "highenergy");
-        await fs.writeFile(path.join(highEnergyDir, filename), highPngBuffer);
-
+        const highPath = path.join(highEnergyDir, filename);
         const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, "lowenergy");
-        await fs.writeFile(path.join(lowEnergyDir, filename), lowPngBuffer);
+        const lowPath = path.join(lowEnergyDir, filename);
+
+        try {
+          await fs.writeFile(highPath, highPngBuffer);
+          await fs.writeFile(lowPath, lowPngBuffer);
+        } catch (err) {
+          try { await fs.unlink(highPath); } catch { /* ignore cleanup errors */ }
+          try { await fs.unlink(lowPath); } catch { /* ignore cleanup errors */ }
+          throw err;
+        }
 
         let isAbsolutePath = false;
         let customCollageRootForUrl;
@@ -3494,7 +3663,7 @@ app.post("/api/render-and-save-collage-both", requireAuth, async (req, res) => {
 
 // Regenerate collage images from layout JSON (for portability - no need to carry image files)
 // Returns base64-encoded PNG images that can be used directly in the frontend
-app.post("/api/regenerate-collage-images", requireAuth, async (req, res) => {
+app.post("/api/regenerate-collage-images", strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     try {
         const { layout_json, layoutId, saveToDisk = false, outputPath } = req.body;
 
@@ -3611,23 +3780,12 @@ app.post("/api/regenerate-collage-images", requireAuth, async (req, res) => {
             let highEnergyDir, lowEnergyDir;
 
             if (outputPath && typeof outputPath === 'string') {
-                const sanitizedPath = outputPath.trim().replace(/[<>"|?*]/g, '_').replace(/\/$|\\$/, '');
-
-                if (sanitizedPath.includes('..')) {
-                    return res.status(400).json({ ok: false, error: "Invalid output path" });
+                const result = validateClientOutputPath(outputPath, collageImagesRoot, collageImagesRoot);
+                if (!result.safe) {
+                    return res.status(400).json({ ok: false, error: result.error });
                 }
-
-                const resolvedProjectRoot = path.resolve(__dirname, '..');
-
-                if (!path.isAbsolute(sanitizedPath)) {
-                    const customCollageRoot = path.resolve(resolvedProjectRoot, 'data', sanitizedPath, 'collage_images');
-                    highEnergyDir = path.resolve(customCollageRoot, 'high');
-                    lowEnergyDir = path.resolve(customCollageRoot, 'low');
-                } else {
-                    const customCollageRoot = path.resolve(sanitizedPath, 'collage_images');
-                    highEnergyDir = path.resolve(customCollageRoot, 'high');
-                    lowEnergyDir = path.resolve(customCollageRoot, 'low');
-                }
+                highEnergyDir = path.join(result.resolvedRoot, 'high');
+                lowEnergyDir = path.join(result.resolvedRoot, 'low');
 
                 await fs.mkdir(highEnergyDir, { recursive: true });
                 await fs.mkdir(lowEnergyDir, { recursive: true });
@@ -3726,7 +3884,7 @@ app.get('/api/saved-layouts/integrity', async (_req, res) => {
 });
 
 // Render a preview image from a saved layout using real pixel data (I1*I2/65535)
-app.post('/api/render-preview', requireAuth, async (req, res) => {
+app.post('/api/render-preview', strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     try {
         const { objects } = req.body;
         if (!objects) return res.status(400).json({ ok: false, error: 'Missing objects' });

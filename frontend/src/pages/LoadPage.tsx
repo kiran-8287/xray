@@ -5,8 +5,10 @@ import { useNavigate } from "react-router-dom";
 import {
   Upload, Loader2, CheckCircle2, AlertTriangle, AlertCircle, X, Play, RefreshCw, Download, Save, Image as ImageIcon, Check,
 } from "lucide-react";
+import ImageWithPlaceholder from "../components/common/ImageWithPlaceholder";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
+import { escapeAttribute, sanitizeId } from "../lib/sanitize";
 import ConfirmModal from "../components/common/ConfirmModal";
 import ExportLocationSelector, { ExportLocationSelectorHandle } from "../components/common/ExportLocationSelector";
 import { setLoadUnsaved } from "../lib/navigationGuard";
@@ -53,6 +55,13 @@ export default function LoadPage() {
   const previewUrlsRef = useRef<Record<string, string>>({});
   const renderingPreviewsRef = useRef<Set<string>>(new Set());
   const generateAbortRef = useRef<AbortController | null>(null);
+
+  // Lazy sequential preview loading: only request backend renders for cards
+  // that have scrolled into (or near) the viewport, 20 items at a time.
+  const BATCH_SIZE = 20;
+  const previewRequestedRef = useRef<Set<string>>(new Set());
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const isLoadingBatchRef = useRef(false);
 
   // Refs to support buffering the next page (page-by-page workflow)
   const lastGeneratedPageRef = useRef<number | null>(null);
@@ -382,9 +391,6 @@ export default function LoadPage() {
     return validCombinations.slice(start, start + PAGE_SIZE);
   }, [validCombinations, page, pagination]);
 
-  /** Generate previews for new page when it changes */
-  useEffect(() => { if ((phase === "results" || phase === "generating") && currentPageCombos.length > 0) { generatePreviews(currentPageCombos, page); } }, [phase, page, currentPageCombos]);
-
   /** Move from "generating" to "results" once first batch of previews are requested */
   useEffect(() => {
     if (phase === "generating" && validCombinations.length > 0) {
@@ -402,7 +408,6 @@ export default function LoadPage() {
     const nextStart = page * PAGE_SIZE;
     const nextCombos = validCombinations.slice(nextStart, nextStart + PAGE_SIZE);
     if (nextCombos.length === 0) { prefetchNextPageRef.current = ""; return; }
-    // The current page's preview batch must have started AND finished first.
     if (lastGeneratedPageRef.current !== page) return;
     const stillBusy = currentPageCombos.some((c) => renderingPreviews.has(c.layoutId));
     if (stillBusy || exporting) return;
@@ -411,6 +416,59 @@ export default function LoadPage() {
     prefetchNextPageRef.current = key;
     generatePreviews(nextCombos, page + 1);
   }, [phase, page, pagination, validCombinations, currentPageCombos, renderingPreviews, exporting]);
+
+  /** Lazy sequential batch loading: trigger the first batch of 20 immediately on
+   *  page entry (so visible cards get their previews without waiting for a scroll),
+   *  then use IntersectionObserver on a sentinel for subsequent batches of 20.
+   *  This replaces the old behavior of firing all 100 requests at once. */
+  useEffect(() => {
+    if (phase !== "results" || currentPageCombos.length === 0) return;
+
+    const timer = setTimeout(() => {
+      const unrequested = currentPageCombos.filter(
+        (c) => !previewRequestedRef.current.has(c.layoutId) && !previewUrlsRef.current[c.layoutId]
+      );
+      if (unrequested.length === 0) return;
+      const batch = unrequested.slice(0, BATCH_SIZE);
+      batch.forEach((c) => previewRequestedRef.current.add(c.layoutId));
+      generatePreviews(batch);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [phase, currentPageCombos, generatePreviews]);
+
+  /** Subsequent batches: IntersectionObserver on a sentinel element at the bottom
+   *  of the grid. Fires when user scrolls within 200px of the bottom, requesting
+   *  the next BATCH_SIZE unrequested items. */
+  useEffect(() => {
+    if (phase !== "results" || currentPageCombos.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0].isIntersecting || isLoadingBatchRef.current) return;
+        isLoadingBatchRef.current = true;
+
+        const unrequested = currentPageCombos.filter(
+          (c) => !previewRequestedRef.current.has(c.layoutId) && !previewUrlsRef.current[c.layoutId]
+        );
+        if (unrequested.length === 0) { isLoadingBatchRef.current = false; return; }
+
+        const batch = unrequested.slice(0, BATCH_SIZE);
+        batch.forEach((c) => previewRequestedRef.current.add(c.layoutId));
+
+        generatePreviews(batch).finally(() => { isLoadingBatchRef.current = false; });
+      },
+      { rootMargin: "200px", threshold: 0 }
+    );
+
+    const el = sentinelRef.current;
+    if (el) observer.observe(el);
+
+    return () => {
+      observer.disconnect();
+      isLoadingBatchRef.current = false;
+    };
+  }, [phase, currentPageCombos, generatePreviews]);
  
 
 /** Export combinations to exports folder (high + low resolution images). */
@@ -551,7 +609,15 @@ export default function LoadPage() {
     });
   };
 
-  const goToPage = (p: number) => { if (!pagination) return; const clamped = Math.min(Math.max(1, p), pagination.totalPages); setPage(clamped); };
+  const goToPage = (p: number) => {
+    if (!pagination) return;
+    const clamped = Math.min(Math.max(1, p), pagination.totalPages);
+    if (clamped !== page) {
+      previewRequestedRef.current = new Set();
+      isLoadingBatchRef.current = false;
+    }
+    setPage(clamped);
+  };
 
   const handleReset = () => {
     setPhase("upload"); setAnalysis(null); setValidCombinations([]); setPage(1);
@@ -696,7 +762,7 @@ return (
                   </div>
                   {showMissingOnly && (
                     <div className="max-h-60 overflow-auto rounded-lg border border-amber-200 bg-white p-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
-                      {analysis.missingObjectIds.map((id, i) => (<div key={i} className="text-xs font-mono text-amber-900 py-0.5 truncate" title={id}>{id}</div>))}
+                      {analysis.missingObjectIds.map((id, i) => (<div key={i} className="text-xs font-mono text-amber-900 py-0.5 truncate" title={escapeAttribute(sanitizeId(id))}>{sanitizeId(id)}</div>))}
                     </div>
                   )}
                 </div>
@@ -763,15 +829,16 @@ return (
               {currentPageCombos.map((combo) => (
                 <div key={combo.layoutId} className={`bg-panel rounded-2xl border border-border shadow-card overflow-hidden transition-all cursor-pointer group text-left w-full ${selectedForExport.has(combo.layoutId) ? "ring-2 ring-accent/20 border-accent" : "hover:border-accent/50"}`}>
                   <div className="relative aspect-[4/3] bg-surface" onClick={() => { if (previewUrls[combo.layoutId]) { setShowHighRes({ combo, url: previewUrls[combo.layoutId] }); } }}>
-                    {previewUrls[combo.layoutId] ? (<img src={previewUrls[combo.layoutId]} alt={combo.layoutName} className="w-full h-full object-contain" />)
-                      : renderingPreviews.has(combo.layoutId) ? (<div className="flex items-center justify-center h-full"><Loader2 size={24} className="animate-spin text-muted" /></div>)
-                      : (<div className="flex items-center justify-center h-full"><ImageIcon size={32} className="text-muted/40" /></div>)}
+                    {previewUrls[combo.layoutId]
+                      ? <ImageWithPlaceholder src={previewUrls[combo.layoutId]} alt={combo.layoutName} className="w-full h-full object-contain" />
+                      : <div className="flex items-center justify-center h-full"><ImageIcon size={32} className="text-muted/40" /></div>
+                    }
                     {selectedForExport.has(combo.layoutId) && (<div className="absolute top-2 left-2 w-6 h-6 rounded-full bg-accent flex items-center justify-center"><Check size={14} className="text-white" /></div>)}
                   </div>
                   <div className="p-4">
                     <div className="flex items-center justify-between gap-3 mb-2">
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-accent-sky font-mono truncate" title={combo.layoutId}>{combo.layoutId}</p>
+                        <p className="text-sm font-semibold text-accent-sky font-mono truncate" title={escapeAttribute(sanitizeId(combo.layoutId))}>{sanitizeId(combo.layoutId)}</p>
                       </div>
                     </div>
                     <div className="space-y-1">
@@ -782,9 +849,9 @@ return (
                         const otherIds = (Array.isArray(objs["non-threats"]) ? objs["non-threats"] : []).map((o: any) => o.id || o.name).filter(Boolean);
                         return (
                           <>
-                            {bagId && <p className="text-[10px] font-mono text-muted truncate" title={String(bagId)}>Bag: {String(bagId)}</p>}
-                            {threatIds.length > 0 && <p className="text-[10px] font-mono text-rose-600 truncate" title={threatIds.join(", ")}>Threat: {threatIds.join(", ")}</p>}
-                            {otherIds.length > 0 && <p className="text-[10px] font-mono text-muted truncate" title={otherIds.join(", ")}>Others: {otherIds.join(", ")}</p>}
+                            {bagId && <p className="text-[10px] font-mono text-muted truncate" title={escapeAttribute(sanitizeId(String(bagId)))}>Bag: {sanitizeId(String(bagId))}</p>}
+                            {threatIds.length > 0 && <p className="text-[10px] font-mono text-rose-600 truncate" title={escapeAttribute(threatIds.map(sanitizeId).join(", "))}>Threat: {threatIds.map(sanitizeId).join(", ")}</p>}
+                            {otherIds.length > 0 && <p className="text-[10px] font-mono text-muted truncate" title={escapeAttribute(otherIds.map(sanitizeId).join(", "))}>Others: {otherIds.map(sanitizeId).join(", ")}</p>}
                           </>
                         );
                       })()}
@@ -801,6 +868,9 @@ return (
                 </div>
               ))}
             </div>
+
+            {/* Sentinel for lazy sequential batch loading — fires when user scrolls near bottom */}
+            <div ref={sentinelRef} className="h-4" />
 
             {pagination && pagination.totalPages > 1 && (
               <div className="mt-6 flex items-center justify-between gap-3">
@@ -831,7 +901,7 @@ return (
             </div>
             <div className="flex flex-col md:flex-row flex-1 min-h-0">
               <div className="flex-1 p-6 flex items-center justify-center bg-surface min-h-0">
-                <img src={showHighRes.url} alt={showHighRes.combo.layoutName} className="max-w-full max-h-full object-contain" />
+                 <img src={showHighRes.url} alt={escapeAttribute(sanitizeId(showHighRes.combo.layoutName))} className="max-w-full max-h-full object-contain" />
               </div>
               <div className="w-full md:w-80 p-6 border-t md:border-t-0 md:border-l border-border flex flex-col gap-4 overflow-y-auto">
                 <div>
@@ -839,7 +909,7 @@ return (
                   <div className="space-y-2">
                     <div className="rounded-xl border border-border bg-white p-2.5">
                       <p className="text-[10px] text-muted mb-0.5">Name</p>
-                      <p className="text-xs font-medium text-ink truncate" title={showHighRes.combo.layoutName}>{showHighRes.combo.layoutName}</p>
+                       <p className="text-xs font-medium text-ink truncate" title={escapeAttribute(sanitizeId(showHighRes.combo.layoutName))}>{sanitizeId(showHighRes.combo.layoutName)}</p>
                     </div>
                     <div className="rounded-xl border border-border bg-white p-2.5">
                       <p className="text-[10px] text-muted mb-0.5">ID</p>
@@ -859,8 +929,8 @@ return (
                     <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Missing Objects</h4>
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
                       <div className="space-y-1">
-                        {showHighRes.combo.missingObjectIds.map((id, i) => (
-                          <p key={i} className="text-xs font-mono text-amber-900 truncate" title={id}>{id}</p>
+                         {showHighRes.combo.missingObjectIds.map((id, i) => (
+                           <p key={i} className="text-xs font-mono text-amber-900 truncate" title={escapeAttribute(sanitizeId(id))}>{sanitizeId(id)}</p>
                         ))}
                       </div>
                     </div>
@@ -885,19 +955,19 @@ return (
                           {bag && (
                             <div className="rounded-xl border border-border bg-white p-2.5">
                               <p className="text-[10px] text-muted mb-1">Bag</p>
-                              <p className="text-xs font-medium text-ink truncate" title={bag.id || bag.name}>{bag.id || bag.name}</p>
+                               <p className="text-xs font-medium text-ink truncate" title={escapeAttribute(sanitizeId(bag.id || bag.name))}>{sanitizeId(bag.id || bag.name)}</p>
                             </div>
                           )}
                           {threats.map((t: any, idx: number) => (
                             <div key={idx} className="rounded-xl border border-rose-200 bg-rose-50 p-2.5">
                               <p className="text-[10px] text-rose-600 mb-1">Threat</p>
-                              <p className="text-xs font-medium text-ink truncate" title={t.id || t.name}>{t.id || t.name}</p>
+                               <p className="text-xs font-medium text-ink truncate" title={escapeAttribute(sanitizeId(t.id || t.name))}>{sanitizeId(t.id || t.name)}</p>
                             </div>
                           ))}
                           {others.map((o: any, idx: number) => (
                             <div key={idx} className="rounded-xl border border-border bg-white p-2.5">
                               <p className="text-[10px] text-muted mb-1">Other</p>
-                              <p className="text-xs font-medium text-ink truncate" title={o.id || o.name}>{o.id || o.name}</p>
+                               <p className="text-xs font-medium text-ink truncate" title={escapeAttribute(sanitizeId(o.id || o.name))}>{sanitizeId(o.id || o.name)}</p>
                             </div>
                           ))}
                         </>

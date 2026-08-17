@@ -26,7 +26,8 @@ cd xray
 From the repository root:
 
 ```bash
-docker compose up --build
+chmod +x bootstrap.sh
+./bootstrap.sh
 ```
 
 Once the containers are healthy:
@@ -40,7 +41,7 @@ To stop:
 docker compose down
 ```
 
-> **File ownership (no sudo needed):** on Linux/macOS, prefer `./bootstrap.sh` (instead of `docker compose up`) — it starts the backend with your own uid/gid (`PUID`/`PGID`). Every file the backend writes into `backend/data` is then owned by *your* account, so you can delete/copy it without `sudo` — essential on office laptops that have no sudo. See **Known deployment issues → `backend/data` is "undeletable"** below.
+> **Do not run `docker compose up --build` directly.** `bootstrap.sh` exports `PUID=$(id -u)` and `PGID=$(id -g)` before starting Docker, which ensures the backend container writes files as your user. If you skip it, the container falls back to UID `1000` (often the admin on office machines), and you will not be able to modify `backend/data` without `sudo`. The entrypoint does attempt to auto-correct leaf-folder ownership when `PUID`/`PGID` are left at the default `1000`, but `bootstrap.sh` is the intended, explicit path.
 
 ### Step 3: Verify the setup
 
@@ -261,27 +262,21 @@ Logging is **always on**.
 
 **Symptoms:** backend exits immediately with `EACCES: permission denied, mkdir '/app/data/storage'`.
 
-**Cause:** `docker-compose.yml` bind-mounts `./backend/data` to `/app/data`. If that host folder is owned by a different UID/GID than the user the container runs as, the non-root container process cannot create subdirectories inside it.
+**Cause:** `docker-compose.yml` bind-mounts `./backend/data` to `/app/data`. If that host folder is owned by a different UID/GID than the user the container runs as, the non-root container process cannot create subdirectories inside it. On office laptops, UID `1000` is often the admin account (e.g. `vehant`), not the person who installed the project.
 
-**Permanent fix included in this repo:** the backend's entrypoint self-heals `/app/data` ownership on every container start to the `PUID`/`PGID` the backend runs as (defaults: `1000`). On Linux/macOS start with `./bootstrap.sh` so it self-heals to *your* uid/gid — no host-side `sudo`/`chown` and no `EACCES`.
+**Permanent fix included in this repo:** the backend's entrypoint now:
+1. Auto-detects the actual owner of the bind-mounted `/app/data` when `PUID`/`PGID` are left at their default `1000`, and silently corrects them to match — no host-side `sudo` or `chown` required.
+2. Creates the backend leaf folders (`storage`, `load_layouts`, `exports`, `collage_images`, `library_images`, `pixel_data`, `temp`) and `chown`s them to `PUID:PGID` before dropping privileges. The parent `backend/data` directory and unrelated host files are never touched.
 
-**One-time workaround commands (only if you can't use `./bootstrap.sh`):**
-
-```bash
-# Option 1: fix ownership from inside a throwaway root container, using the
-# uid/gid your backend will run as (swap in your own if you started with
-# bootstrap.sh, i.e. PUID=... PGID=...):
-docker compose run --rm --user root backend chown -R 1000:1000 /app/data
-
-# Option 2: if Option 1 is blocked, inspect the current owner so you can match it:
-docker compose run --rm --user root backend sh -c "ls -ld /app/data"
-```
-
-After applying either option, restart normally (or simply run `./bootstrap.sh`):
+**Recommended start:** on Linux/macOS, always start with:
 
 ```bash
-docker compose up --build
+./bootstrap.sh
 ```
+
+which exports `PUID=$(id -u)` / `PGID=$(id -g)` so the backend runs as your own uid/gid.
+
+**If you already have an `EACCES` error:** stop the container, then start it with `./bootstrap.sh`. The entrypoint will auto-correct the leaf folder ownership on next start. If the parent `backend/data` itself is owned by the wrong UID, you will need to fix that once — see the **"`backend/data` is undeletable"** section below.
 
 #### Custom export folder "does nothing" — files are saved but never show up (Linux + Docker)
 
@@ -336,10 +331,4 @@ PUID=$(id -u) PGID=$(id -g) docker compose up -d --build
 
 From then on, every new file in `backend/data` belongs to you and can be deleted/copied normally — no `sudo` required.
 
-**One-time fallback for files that were already created under an old UID:** on a system that has sudo, you can re-own them once (this also works after switching to `PUID`/`PGID`, since the entrypoint re-chowns `/app/data` on every start):
-
-```bash
-sudo chown -R "$USER":"$USER" backend/data
-```
-
-After either approach, copy/delete files normally. Ownership does not change how the app works — it only controls who can manage the files.
+**If files were already created under the wrong UID:** the entrypoint now auto-detects the actual mount owner when `PUID`/`PGID` are left at the default `1000`, and it `chown`s the backend leaf folders on every start. So simply restarting with `./bootstrap.sh` will repair the leaf folders. If the parent `backend/data` directory itself is owned by the wrong UID, you will need to fix that once using whatever account owns it (on office laptops, that may require the admin account or a one-time `chown` from a machine where you have access).

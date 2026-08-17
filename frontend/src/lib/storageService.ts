@@ -27,6 +27,13 @@ type GenerationProgress = {
   total: number;
 };
 
+import {
+  COMBO_BATCH_BUFFER_MAX,
+  FAILURE_BATCH_BUFFER_MAX,
+} from "./constants";
+import { debugLog } from "./debugLog";
+import { reportError } from "./errorReporter";
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 let dbInstance: IDBDatabase | null = null;
 let isClosing = false;
@@ -183,7 +190,8 @@ async function flushBatchBuffer(): Promise<void> {
     }
   } catch (err) {
     if (!(err instanceof Error && err.name === 'InvalidStateError')) {
-      console.error("[StorageService] flush failed:", err);
+      debugLog.error("[StorageService] flush failed:", err);
+      reportError(err, { context: "flushBatchBuffer" });
     }
   } finally {
     flushScheduled = false;
@@ -192,6 +200,9 @@ async function flushBatchBuffer(): Promise<void> {
 
 export function addCombos(combos: LightweightCombo[]): void {
   comboBatchBuffer.push(...combos);
+  while (comboBatchBuffer.length > COMBO_BATCH_BUFFER_MAX) {
+    comboBatchBuffer.shift();
+  }
   if (comboBatchBuffer.length >= BATCH_FLUSH_SIZE) {
     flushBatchBuffer();
   } else if (!flushScheduled) {
@@ -202,6 +213,9 @@ export function addCombos(combos: LightweightCombo[]): void {
 
 export function addFailures(failures: FailureLog[]): void {
   failureBatchBuffer.push(...failures);
+  while (failureBatchBuffer.length > FAILURE_BATCH_BUFFER_MAX) {
+    failureBatchBuffer.shift();
+  }
   if (failureBatchBuffer.length >= BATCH_FLUSH_SIZE) {
     flushBatchBuffer();
   } else if (!flushScheduled) {
@@ -241,7 +255,8 @@ export async function setProgress(progress: GenerationProgress): Promise<void> {
     if (err instanceof Error && err.name === 'InvalidStateError') {
       return;
     }
-    console.error("[StorageService] setProgress failed:", err);
+    debugLog.error("[StorageService] setProgress failed:", err);
+    reportError(err, { context: "setProgress" });
   }
 }
 
@@ -275,11 +290,11 @@ export async function getAllCombos(): Promise<LightweightCombo[]> {
       };
     });
   } catch (err) {
-    // Gracefully handle connection closing errors
     if (err instanceof Error && err.name === 'InvalidStateError') {
       return [];
     }
-    console.error("[StorageService] getAllCombos failed:", err);
+    debugLog.error("[StorageService] getAllCombos failed:", err);
+    reportError(err, { context: "getAllCombos" });
     return [];
   }
 }
@@ -314,11 +329,11 @@ export async function getAllFailures(): Promise<FailureLog[]> {
       };
     });
   } catch (err) {
-    // Gracefully handle connection closing errors
     if (err instanceof Error && err.name === 'InvalidStateError') {
       return [];
     }
-    console.error("[StorageService] getAllFailures failed:", err);
+    debugLog.error("[StorageService] getAllFailures failed:", err);
+    reportError(err, { context: "getAllFailures" });
     return [];
   }
 }
@@ -354,7 +369,8 @@ export async function getProgress(): Promise<GenerationProgress | null> {
     if (err instanceof Error && err.name === 'InvalidStateError') {
       return null;
     }
-    console.error("[StorageService] getProgress failed:", err);
+    debugLog.error("[StorageService] getProgress failed:", err);
+    reportError(err, { context: "getProgress" });
     return null;
   }
 }
@@ -402,7 +418,8 @@ export async function clearAll(): Promise<void> {
       failureBatchBuffer = [];
       return;
     }
-    console.error("[StorageService] clearAll failed:", err);
+    debugLog.error("[StorageService] clearAll failed:", err);
+    reportError(err, { context: "clearAll" });
   }
 }
 
@@ -412,7 +429,7 @@ export async function flush(): Promise<void> {
 
 if (typeof window !== "undefined") {
   window.addEventListener("beforeunload", () => {
-    // Close IndexedDB connection gracefully
+    flushBatchBuffer();
     closeConnection();
     
     // Fallback: save to sessionStorage
@@ -432,6 +449,7 @@ if (typeof window !== "undefined") {
   
   // Also close on page hide (mobile browsers, tab switches)
   window.addEventListener("pagehide", () => {
+    flushBatchBuffer();
     closeConnection();
   });
   

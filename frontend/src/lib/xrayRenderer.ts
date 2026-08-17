@@ -1,9 +1,16 @@
 import type { SceneObject } from "../types/customization";
 import { combinePixels, to16Bit, to8Bit } from "./xrayPhysics";
 import { API_BASE_URL } from "../config/api";
+import { IMG_CACHE_MAX, PIXEL_CACHE_MAX } from "./constants";
+import { debugLog } from "./debugLog";
 
 export const imgCache = new Map<string, HTMLImageElement>();
 export const pixelDataCache = new Map<string, number[][]>();
+
+export function clearCaches(): void {
+  imgCache.clear();
+  pixelDataCache.clear();
+}
 
 /**
  * Fetch full 16-bit pixel data from the server's .npz files.
@@ -20,10 +27,14 @@ export async function fetchPixelData(itemId: string, energyType: string = "highe
     if (!res.ok) return null;
     const data = await res.json();
     if (!data.ok || !data.pixel_data) return null;
+    if (pixelDataCache.size >= PIXEL_CACHE_MAX) {
+      const firstKey = pixelDataCache.keys().next().value;
+      if (firstKey) pixelDataCache.delete(firstKey);
+    }
     pixelDataCache.set(cacheKey, data.pixel_data);
     return data.pixel_data;
   } catch (err) {
-    console.warn(`[xrayRenderer] Failed to fetch pixel data for ${itemId}:`, err);
+    debugLog.warn(`[xrayRenderer] Failed to fetch pixel data for ${itemId}:`, err);
     return null;
   }
 }
@@ -45,6 +56,10 @@ export function getLoadedImage(filepath: string, onLoad: () => void): HTMLImageE
   img.onerror = () => {
     imgCache.delete(url);
   };
+  if (imgCache.size >= IMG_CACHE_MAX) {
+    const firstKey = imgCache.keys().next().value;
+    if (firstKey) imgCache.delete(firstKey);
+  }
   imgCache.set(url, img);
   return null;
 }

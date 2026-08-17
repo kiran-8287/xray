@@ -2,6 +2,7 @@
 // Sends batches of combinations back to the main thread as they're generated
 
 import { generateCombinationsIncremental } from "../lib/combinationGenerator";
+import { debugLog } from "../lib/debugLog";
 
 export interface IncrementalWorkerRequest {
   type: "generate" | "generateChunk" | "pause" | "resume";
@@ -28,6 +29,28 @@ export interface IncrementalWorkerResponse {
   progress?: { generated: number; total: number };
   error?: string;
   isComplete?: boolean;
+}
+
+const MAX_MESSAGE_SIZE = 10 * 1024 * 1024;
+
+function validateIncrementalWorkerRequest(data: unknown): IncrementalWorkerRequest | null {
+  if (!data || typeof data !== "object") return null;
+  const obj = data as Record<string, unknown>;
+  if (!["generate", "generateChunk"].includes(obj.type)) return null;
+  if (typeof obj.kValue !== "number" || obj.kValue <= 0) return null;
+  if (!Array.isArray(obj.selectedBags) || !Array.isArray(obj.selectedThreats) || !Array.isArray(obj.selectedOthers)) return null;
+  if (typeof obj.requireAtLeastOneNonThreat !== "boolean") return null;
+  if (!obj.existingIds || typeof obj.existingIds !== "object") return null;
+  return obj as IncrementalWorkerRequest;
+}
+
+function isMessageTooLarge(message: unknown): boolean {
+  try {
+    const json = JSON.stringify(message);
+    return json.length > MAX_MESSAGE_SIZE;
+  } catch {
+    return true;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -58,7 +81,7 @@ async function processQueue() {
 }
 
 async function handleRequest(data: IncrementalWorkerRequest) {
-  console.log("[Worker] Received message:", data.type, {
+  debugLog.info("[Worker] Received message:", data.type, {
     k: data.kValue,
     bags: data.selectedBags.length,
     chunkSize: data.chunkSize,
@@ -66,7 +89,7 @@ async function handleRequest(data: IncrementalWorkerRequest) {
   });
 
   if (data.type !== "generate" && data.type !== "generateChunk") {
-    console.error("[Worker] Invalid request type:", data.type);
+    debugLog.error("[Worker] Invalid request type:", data.type);
     self.postMessage({
       type: "error",
       error: "Invalid request type",
@@ -82,7 +105,7 @@ async function handleRequest(data: IncrementalWorkerRequest) {
       generateCount = Math.min(data.chunkSize, remaining);
     }
 
-    console.log("[Worker] Starting generation:", {
+    debugLog.info("[Worker] Starting generation:", {
       total: data.kValue,
       generating: generateCount,
       alreadyGenerated: data.totalGenerated || 0,
@@ -94,7 +117,7 @@ async function handleRequest(data: IncrementalWorkerRequest) {
       progress: { generated: data.totalGenerated || 0, total: data.kValue },
     } as IncrementalWorkerResponse);
 
-    console.log("[Worker] Calling generateCombinationsIncremental...");
+    debugLog.info("[Worker] Calling generateCombinationsIncremental...");
 
     // Run incremental generation with batch callback
     const { results, failures } = await generateCombinationsIncremental(
@@ -105,7 +128,7 @@ async function handleRequest(data: IncrementalWorkerRequest) {
       // onBatch callback - sends batches to main thread
       (batch, progress) => {
         const totalProgress = (data.totalGenerated || 0) + progress.generated;
-        console.log("[Worker] Batch callback:", batch.length, "combos, total progress:", totalProgress, "/", data.kValue);
+        debugLog.info("[Worker] Batch callback:", batch.length, "combos, total progress:", totalProgress, "/", data.kValue);
         self.postMessage({
           type: "batch",
           batch,
@@ -121,7 +144,7 @@ async function handleRequest(data: IncrementalWorkerRequest) {
     );
 
     const totalGenerated = (data.totalGenerated || 0) + results.length;
-    console.log("[Worker] Chunk complete:", results.length, "results, total:", totalGenerated);
+    debugLog.info("[Worker] Chunk complete:", results.length, "results, total:", totalGenerated);
 
     // Send chunk complete message
     self.postMessage({
@@ -132,7 +155,7 @@ async function handleRequest(data: IncrementalWorkerRequest) {
       isComplete: totalGenerated >= data.kValue,
     } as IncrementalWorkerResponse);
   } catch (err) {
-    console.error("[Worker] Error:", err);
+    debugLog.error("[Worker] Error:", err);
     self.postMessage({
       type: "error",
       error: err instanceof Error ? err.message : "Unknown error",
@@ -140,9 +163,27 @@ async function handleRequest(data: IncrementalWorkerRequest) {
   }
 }
 
-self.onmessage = (event: MessageEvent<IncrementalWorkerRequest>) => {
+self.onmessage = (event: MessageEvent<unknown>) => {
   const data = event.data;
-  messageQueue.push(data);
+
+  const request = validateIncrementalWorkerRequest(data);
+  if (!request) {
+    self.postMessage({
+      type: "error",
+      error: "Invalid request type",
+    } as IncrementalWorkerResponse);
+    return;
+  }
+
+  if (isMessageTooLarge(request)) {
+    self.postMessage({
+      type: "error",
+      error: "Message exceeds maximum allowed size",
+    } as IncrementalWorkerResponse);
+    return;
+  }
+
+  messageQueue.push(request);
   processQueue();
 };
 
