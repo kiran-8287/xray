@@ -1747,7 +1747,8 @@ async function handleSavedLayoutsExport(req, res) {
         : null;
     // saveMode: 'individual' = save images + per-layout JSON only (no batch annotations.json)
     //           'selected' (default) = save images + batch annotations.json partition
-    //           'all' = always save images + batch annotations.json partitions
+    //           'all' = save images + batch annotations.json partitions (append-only,
+    //                   never overwrites existing annotation partition files)
     const saveMode = typeof req.query.saveMode === 'string' && req.query.saveMode.trim()
         ? req.query.saveMode.trim().toLowerCase()
         : 'selected';
@@ -1822,12 +1823,12 @@ async function handleSavedLayoutsExport(req, res) {
             exportProgressStore.set(jobId, { done: 0, total: targetLayouts.length });
         }
 
-        // Save All always rewrites the canonical full export in annotations_1.json.
-        // Save Selected must NOT overwrite that; instead it starts at the next free
-        // partition number so the subset becomes annotations_2.json, ... and the
-        // prior full export is preserved.
+        // Both Save All and Save Selected are append-only bulk exports: each run
+        // starts at the next free partition number (annotations_2.json, ...) so a
+        // previously written annotation file — e.g. an Annotation 1.json produced by an
+        // earlier Save Selected subset — is never overwritten by a later Save All.
         let annotationPartitionNum = 1;
-        if (saveMode === 'selected') {
+        if (saveMode === 'selected' || saveMode === 'all') {
             try {
                 const existingFiles = await fs.readdir(exportsAnnotationsRoot);
                 const existingPartitionNums = existingFiles
@@ -1965,8 +1966,9 @@ async function handleSavedLayoutsExport(req, res) {
                         objects: layout.layout_json?.objects || null
                     };
                     // Per-layout annotation file — only created in 'individual' mode.
-                    // 'selected' and 'all' both write a single batched annotations partition
-                    // so repeated exports do not overwrite each other.
+                    // 'selected' and 'all' both write batched annotations partitions,
+                    // each bulk run appending into the next free partition number so
+                    // existing annotation files are never overwritten.
                     const isBulkMode = saveMode === 'selected' || saveMode === 'all';
                     const shouldCreateIndividualFile = saveMode === 'individual';
                     const shouldCreateBatchAnnotations = isBulkMode;

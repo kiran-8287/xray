@@ -239,11 +239,103 @@ describe('API Tests', () => {
     }, 10000);
 
     it('should NOT write any catalog files into the export folder', async () => {
+      // Wait out the shared strict-rate-limiter window (10 req/s on one instance);
+      // the upload/process-raw tests above can otherwise cause a spurious 429 here.
+      await new Promise((r) => setTimeout(r, 1200));
       const res = await request(app).get('/api/saved-layouts/export?saveMode=all&includeImages=false');
       expect(res.status).toBe(200);
       const savedPaths = res.body.savedPaths || {};
       expect(savedPaths).not.toHaveProperty('catalogs');
     }, 10000);
+  });
+describe('GET /api/saved-layouts/export annotation partition numbering', () => {
+    // The saved-scope annotations folder writes to a dedicated temp dir; after the
+    // suite the original user_config.json is restored so real export settings survive.
+    const userConfigFile = path.join(config.dataDir, 'user_config.json');
+    let userConfigBackup = null;
+    let testDir = null;
+
+    beforeAll(async () => {
+      try {
+        userConfigBackup = await fsPromises.readFile(userConfigFile, 'utf8');
+      } catch (_) {
+        userConfigBackup = null;
+      }
+      testDir = path.join(__dirname, 'tmp', 'saved_export_partition_test');
+      await fsPromises.rm(testDir, { recursive: true, force: true });
+    });
+
+    afterAll(async () => {
+      await fsPromises.rm(testDir, { recursive: true, force: true }).catch(() => {});
+      if (userConfigBackup === null) {
+        await fsPromises.rm(userConfigFile, { force: true }).catch(() => {});
+      } else {
+        await fsPromises.writeFile(userConfigFile, userConfigBackup).catch(() => {});
+      }
+    });
+
+    it('Save All appends from the next free partition number and never overwrites annotations_1.json', async () => {
+      // Scenario from the bug: a first "Save Selected" already wrote
+      // annotations_1.json (e.g. 50 layouts). A later "Save All" must start a NEW
+      // partition file (annotations_2.json ...) instead of deleting and rewriting
+      // annotations_1.json with the first chunk of the full export.
+      const { createSavedLayoutsBatch, deleteSavedLayout } = await import('../src/lib/storage.js');
+      const { setExportsPath } = await import('../src/lib/userConfig.js');
+
+      await setExportsPath('saved', testDir);
+
+      const layoutId = `partition-test-${Date.now()}`;
+      let layoutCreated = false;
+      try {
+        const seeded = await createSavedLayoutsBatch([{
+          id: layoutId,
+          name: 'Partition append test layout',
+          layout_json: {
+            objects: {
+              bag: { id: 'bag-test-1', filepath: 'bag.png', pixel_data_path: 'highenergy/bag.png', center: { x: 0, y: 0 }, size: { width: 100, height: 80 }, layer: 0 },
+              threats: [],
+              'non-threats': [],
+            },
+          },
+        }]);
+        layoutCreated = seeded.length > 0;
+
+        // Simulate the already-existing output of an earlier Save Selected run.
+        const annotationsDir = path.join(testDir, 'annotations');
+        await fsPromises.mkdir(annotationsDir, { recursive: true });
+        const preExisting = [{ layoutId: 'earlier-save-selected-layout' }];
+        await fsPromises.writeFile(path.join(annotationsDir, 'annotations_1.json'), JSON.stringify(preExisting, null, 2));
+
+        // The export route sits behind the strict rate limiter (10 req/sec); the
+        // rest of this test file can consume that window, so wait it out first.
+        await new Promise((r) => setTimeout(r, 1200));
+
+        const res = await request(app)
+          .get(`/api/saved-layouts/export?ids=${encodeURIComponent(layoutId)}&saveMode=all&includeImages=false&scope=saved`)
+          .timeout({ deadline: 30000 });
+
+        expect(res.status).toBe(200);
+        expect(res.body.ok).toBe(true);
+
+        // The earlier annotations_1.json must be preserved unchanged.
+        const part1 = JSON.parse(await fsPromises.readFile(path.join(annotationsDir, 'annotations_1.json'), 'utf8'));
+        expect(part1).toEqual(preExisting);
+
+        // The Save All run must start from the NEXT free partition number.
+        const part2Path = path.join(annotationsDir, 'annotations_2.json');
+        await expect(fsPromises.access(part2Path)).resolves.toBeUndefined();
+        const part2 = JSON.parse(await fsPromises.readFile(part2Path, 'utf8'));
+        expect(Array.isArray(part2)).toBe(true);
+        expect(part2.length).toBe(1);
+        expect(part2[0].layoutId).toBe(layoutId);
+      } finally {
+        if (layoutCreated) {
+          await deleteSavedLayout(layoutId).catch(() => {});
+        }
+        // Reset the exports-path cache back to the default; afterAll restores the file.
+        await setExportsPath('saved', null).catch(() => {});
+      }
+    }, 30000);
   });
 
   describe('GET /api/custom-subcategories', () => {
