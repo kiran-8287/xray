@@ -4,7 +4,7 @@ import type { SceneObject } from "../../types/customization";
 import { getTransformedValidRegion, getObjectAxisAlignedBox } from "../../lib/customizationHelpers";
 import { drawXRayComposite, imgCache, clearCaches } from "../../lib/xrayRenderer";
 import { API_BASE_URL } from "../../config/api";
-import { CANVAS_WIDTHIDTH, CANVAS_HEIGHTEIGHT } from "../../lib/constants";
+import { CANVAS_WIDTH, CANVAS_HEIGHT } from "../../lib/constants";
 
 const IMAGE_BASE_URL = `${API_BASE_URL}/data/library_images/`;
 

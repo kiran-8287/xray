@@ -681,14 +681,17 @@ export const GenerationService = {
     // Reset abort flag at the start of any new generation
     generationAborted = false;
     
-    // Attach segmentation masks to the selected threats/non-threats BEFORE
-    // generation so every chunk re-sends the same (mask-enriched) Item objects
-    // and placement uses the tight mask footprint (-> axis-aligned box).
-    try {
-      await attachSegmentationMasks([...params.selectedThreats, ...params.selectedOthers]);
-    } catch (err) {
+    // Attach segmentation masks CONCURRENTLY and WITHOUT blocking worker start so
+    // combinations begin streaming immediately. Masks only tighten the placement
+    // footprint (axis-aligned box); if they aren't ready yet the generator still
+    // proceeds using image bounds / polygon_json. This is scoped to the generation
+    // flow only — other callers of attachSegmentationMasks keep sequential loading.
+    attachSegmentationMasks(
+      [...params.selectedThreats, ...params.selectedOthers],
+      { concurrency: 6 }
+    ).catch((err) => {
       debugLog.warn("[GenerationService] Could not attach segmentation masks:", err);
-    }
+    });
     
     // Check if we should use split generation for large k values
     if (shouldUseSplitGeneration(params.kValue, splitParams)) {
@@ -914,14 +917,10 @@ export const GenerationService = {
   async startSplitGeneration(params: SplitGenerationParams) {
     const { splitBatchSize = 25_000 } = params;
 
-    // Attach segmentation masks to the selected threats/non-threats so the
-    // split worker uses the tight mask footprint (-> axis-aligned box) for
-    // placement instead of the original image rectangle.
-    try {
-      await attachSegmentationMasks([...params.selectedThreats, ...params.selectedOthers]);
-    } catch (err) {
-      debugLog.warn("[GenerationService] Could not attach segmentation masks:", err);
-    }
+    // Segmentation masks for the selected threats/non-threats are already being
+    // attached CONCURRENTLY by startGeneration() (the only caller of this method),
+    // so nothing is awaited here — the split sub-batches stream combinations
+    // immediately and fall back to image bounds for placement while masks load.
     
     // Reset abort flag for this generation run
     generationAborted = false;

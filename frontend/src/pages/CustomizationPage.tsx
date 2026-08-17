@@ -13,7 +13,7 @@ import {
 import { getRectCorners } from "../lib/geometry";
 import { loadMultipleImageDimensions } from "../lib/imageSizeLoader";
 import { computeObjectStats, type ObjectPixelStats } from "../lib/xrayRenderer";
-import { CANVAS_WIDTHIDTH, CANVAS_HEIGHTEIGHT } from "../lib/constants";
+import { CANVAS_WIDTH, CANVAS_HEIGHT } from "../lib/constants";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 import { normalizeCategoryName, getCategoryConfig, normalizeCategorizedItems } from "../config/categories";
