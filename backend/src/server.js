@@ -47,7 +47,7 @@ import { initializeSystemConfig, getWorkerCount, checkMemoryAvailability } from 
 import { Semaphore, chunked, withSemaphore } from "./lib/concurrency.js";
 import { enqueue as enqueueDiskWrite, getDiskWriteQueueStatus, drain as drainDiskQueue } from './lib/diskWriteQueue.js';
 import { publicApiRateLimiter, strictRateLimiter } from './lib/rateLimiter.js';
-import { getExportsPath, setExportsPath, hasConfiguredExportsPath } from './lib/userConfig.js';
+import { getExportsPath, getCollageImageRoot, setExportsPath, hasConfiguredExportsPath } from './lib/userConfig.js';
 import {
   analyzeImport,
   runImport,
@@ -2724,11 +2724,16 @@ async function deleteCollageImagesForLayout(layoutId) {
     roots.push(path.join(collageLowRoot));
   } catch { /* ignore */ }
 
-  // User-configured collage export root (custom path chosen in the UI).
+  // User-configured collage export root (custom path chosen in the UI). Images are
+  // written under {configured}/collage_images/{high,low}; also scan the legacy
+  // {configured}/{high,low} layout so files saved by older versions get cleaned up.
   try {
-    const collageRoot = await getExportsPath('collage');
-    roots.push(path.join(collageRoot, 'high'));
-    roots.push(path.join(collageRoot, 'low'));
+    const collageImagesRoot = await getCollageImageRoot();
+    roots.push(path.join(collageImagesRoot, 'high'));
+    roots.push(path.join(collageImagesRoot, 'low'));
+    const legacyCollageRoot = await getExportsPath('collage');
+    roots.push(path.join(legacyCollageRoot, 'high'));
+    roots.push(path.join(legacyCollageRoot, 'low'));
   } catch { /* ignore */ }
 
   // Saved layout export roots (backend/data/exports/high|low or user-configured saved path).
@@ -3541,10 +3546,12 @@ app.post("/api/render-and-save-collage", strictRateLimiter.middleware(), require
             return res.status(400).json({ ok: false, error: "Missing name" });
         }
 
-        // Use the user-configured collage exports path (or fall back to default)
-        const collageRoot = await getExportsPath('collage');
-        const collageHighRoot = path.join(collageRoot, 'high');
-        const collageLowRoot = path.join(collageRoot, 'low');
+        // Use the user-configured collage exports path (or fall back to default).
+        // Images always land in the collage_images/high|low subfolders so the
+        // on-disk layout matches what the UI promises.
+        const collageImagesRoot = await getCollageImageRoot();
+        const collageHighRoot = path.join(collageImagesRoot, 'high');
+        const collageLowRoot = path.join(collageImagesRoot, 'low');
         
         await fs.mkdir(collageHighRoot, { recursive: true });
         await fs.mkdir(collageLowRoot, { recursive: true });
@@ -3594,15 +3601,18 @@ app.post("/api/render-and-save-collage-both", strictRateLimiter.middleware(), re
             if (!result.safe) {
                 return res.status(400).json({ ok: false, error: result.error });
             }
-            highEnergyDir = path.join(result.resolvedRoot, 'high');
-            lowEnergyDir = path.join(result.resolvedRoot, 'low');
+            // Custom path: images always go into a collage_images/ subfolder so the
+            // on-disk layout matches the UI ({path}/collage_images/high|low).
+            highEnergyDir = path.join(result.resolvedRoot, 'collage_images', 'high');
+            lowEnergyDir = path.join(result.resolvedRoot, 'collage_images', 'low');
             await fs.mkdir(highEnergyDir, { recursive: true });
             await fs.mkdir(lowEnergyDir, { recursive: true });
         } else {
-            // Use the user-configured collage exports path (or fall back to default)
-            const collageRoot = await getExportsPath('collage');
-            highEnergyDir = path.join(collageRoot, 'high');
-            lowEnergyDir = path.join(collageRoot, 'low');
+            // Use the user-configured collage exports path (or fall back to default).
+            // Images always land in the collage_images/high|low subfolders.
+            const collageImagesRoot = await getCollageImageRoot();
+            highEnergyDir = path.join(collageImagesRoot, 'high');
+            lowEnergyDir = path.join(collageImagesRoot, 'low');
             
             await fs.mkdir(highEnergyDir, { recursive: true });
             await fs.mkdir(lowEnergyDir, { recursive: true });

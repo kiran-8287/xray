@@ -814,6 +814,15 @@ export default function CollagePage() {
     isGenerating || totalPending > 0
   );
 
+  // While any save flow is active, the Customize button must stay disabled.
+  // Otherwise the user could open a combination in the customize page while it's
+  // being saved (or about to be saved by "Save as you go"), leading to edits on a
+  // stale combination that is concurrently saved underneath them.
+  const isCustomizeLocked =
+    isSavingPage ||
+    bulkSaveState.status === "saving" ||
+    (autoSaveStatus?.enabled ?? false);
+
   return (
     <div className="max-w-6xl mx-auto py-8 px-6 animate-fade-in text-sm">
       <style>{toastStyles}</style>
@@ -1281,7 +1290,16 @@ export default function CollagePage() {
                     handleCloseModal();
                     handleOpenCombination(selectedCombination);
                   }}
-                  disabled={isSavingPage || bulkSaveState.status === "saving"}
+                  disabled={isCustomizeLocked}
+                  title={
+                    autoSaveStatus?.enabled
+                      ? "Customize is disabled while 'Save as you go' is active. Uncheck 'Save as you go' to customize."
+                      : isSavingPage
+                      ? "Customize is disabled while this page is being saved."
+                      : bulkSaveState.status === "saving"
+                      ? "Customize is disabled while saving all workspaces."
+                      : "Open this combination in the customization workspace."
+                  }
                   className="w-full px-5 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm bg-blue-600 text-white shadow-btn hover:shadow-btn-hover transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-btn"
                 >
                   <Edit3 size={16} />
