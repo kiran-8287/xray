@@ -1294,7 +1294,7 @@ export default function SavedPage() {
           onClick={() => openSaveOptions('all')}
           disabled={exporting || !pagination || pagination.total === 0}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-white text-sm font-semibold text-ink hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Export all layouts as ZIP"
+          title="Export all layouts"
         >
           {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
           Save All
@@ -1303,7 +1303,7 @@ export default function SavedPage() {
           onClick={() => openSaveOptions('selected')}
           disabled={exporting || selectedForExport.size === 0}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-white text-sm font-semibold text-ink hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          title={`Export ${selectedForExport.size} selected layout(s) as ZIP`}
+          title={`Export ${selectedForExport.size} selected layout(s)`}
         >
           {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
           Save Selected ({selectedForExport.size})
