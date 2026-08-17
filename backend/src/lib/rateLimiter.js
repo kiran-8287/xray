@@ -133,8 +133,8 @@ export const publicApiRateLimiter = new RateLimiter({
 
 export const strictRateLimiter = new RateLimiter({
   windowMs: 1000,
-  maxRequests: 10, // 10 requests per second
-  maxConcurrent: 5 // 5 concurrent requests
+  maxRequests: 20, // 20 requests per second for heavy render/export endpoints
+  maxConcurrent: 10 // 10 concurrent requests — headroom so a Save is never rejected while a couple of previews are still in flight
 });
 
 export default RateLimiter;
