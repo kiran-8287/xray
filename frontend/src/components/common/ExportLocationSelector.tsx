@@ -37,6 +37,8 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
     const [exportsPath, setExportsPath] = useState<string | null>(null);
     const [configured, setConfigured] = useState(false);
     const [platform, setPlatform] = useState<ServerPlatform | "">("");
+    const [isContainerized, setIsContainerized] = useState(false);
+    const [dataMountPath, setDataMountPath] = useState<string | null>(null);
     const [showModal, setShowModal] = useState(false);
     const [input, setInput] = useState("");
     const [saving, setSaving] = useState(false);
@@ -59,10 +61,12 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
           const p = typeof scopedPath === "string" && scopedPath.length > 0 ? scopedPath : null;
           const isConfigured = scopedConfigured === true && p !== null;
           
-          setExportsPath(p);
-          setConfigured(isConfigured);
-          setPlatform(data.platform || "");
-          onConfigLoaded?.(p, isConfigured, data.platform || "");
+           setExportsPath(p);
+           setConfigured(isConfigured);
+           setPlatform(data.platform || "");
+           setIsContainerized(data.isContainerized || false);
+           setDataMountPath(data.dataMountPath || null);
+           onConfigLoaded?.(p, isConfigured, data.platform || "");
           
           // NOTE: Auto-open on first visit was removed because it caused repeated
           // 400 POSTs to /api/user-config/exports-path on every page load when
@@ -88,7 +92,7 @@ const ExportLocationSelector = forwardRef<ExportLocationSelectorHandle, ExportLo
 
     useImperativeHandle(ref, () => ({ open: openModal }));
 
-    const validation = useMemo(() => validateExportPath(input, platform), [input, platform]);
+    const validation = useMemo(() => validateExportPath(input, platform, dataMountPath || undefined), [input, platform, dataMountPath]);
 
     const submit = async (useDefault: boolean) => {
       if (saving) return;
@@ -202,7 +206,7 @@ return (
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && validation.ok && !saving) submit(false);
                   }}
-                  placeholder={isWin ? "C:\\XrayExports" : "/home/you/XrayExports"}
+                   placeholder={isWin ? "C:\\XrayExports" : isContainerized && dataMountPath ? `${dataMountPath}/exports2` : "/home/you/XrayExports"}
                   className="w-full px-4 py-2.5 rounded-xl border border-border bg-surface text-sm text-ink font-mono focus:outline-none focus:ring-2 focus:ring-accent/50"
                   autoFocus
                 />
@@ -244,34 +248,31 @@ return (
                   How to type the path ({platformDisplayName(platform)} server)
                 </p>
                 <ul className="space-y-1 text-xs text-amber-800 list-disc ml-4">
-                  {!isWin ? (
-                    <>
-                      <li>
-                        Linux system: must start with a forward slash — e.g.{" "}
-                        <span className="font-mono">/home/you/XrayExports</span>
-                      </li>
-                      <li>
-                        Linux system: give the full absolute path from the root directory (no ~, no shortcuts, no quotes).
-                      </li>
-                    </>
-                  ) : (
-                    <>
-                      <li>
-                        Linux system: must start with a forward slash — e.g.{" "}
-                        <span className="font-mono">/home/you/XrayExports</span>
-                      </li>
-                      <li>
-                        Linux system: give the full absolute path from the root directory (no ~, no shortcuts, no quotes).
-                      </li>
-                    </>
-                  )}
-                  {isWin && (
+                  {isWin ? (
                     <>
                       <li>
                         Windows: drive letter + backslash or forward slash — e.g.{" "}
                         <span className="font-mono">C:\XrayExports</span> or <span className="font-mono">C:/XrayExports</span>
                       </li>
                       <li>Windows: give the full absolute path from the drive root (no shortcuts, no quotes).</li>
+                    </>
+                  ) : isContainerized && dataMountPath ? (
+                    <>
+                      <li>
+                        Docker: use a path under the mounted data folder — e.g.{" "}
+                        <span className="font-mono">{dataMountPath}/exports2</span>
+                      </li>
+                      <li>The folder must be inside the bind-mounted data directory so it persists on the host.</li>
+                    </>
+                  ) : (
+                    <>
+                      <li>
+                        Linux/macOS: must start with a forward slash — e.g.{" "}
+                        <span className="font-mono">/home/you/XrayExports</span>
+                      </li>
+                      <li>
+                        Linux/macOS: give the full absolute path from the root directory (no ~, no shortcuts, no quotes).
+                      </li>
                     </>
                   )}
                   <li>A trailing slash or backslash is removed automatically.</li>

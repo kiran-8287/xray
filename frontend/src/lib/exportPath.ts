@@ -36,7 +36,7 @@ export interface PathValidation {
  *  - Must be an absolute path in the server platform's convention.
  *  - No `..` traversal, no illegal Windows characters.
  */
-export function validateExportPath(raw: string, platform: ServerPlatform | ""): PathValidation {
+export function validateExportPath(raw: string, platform: ServerPlatform | "", dataMountPath?: string): PathValidation {
   const v = normalizePathInput(raw);
   if (!v) {
     return { ok: false, error: 'Enter an absolute folder path, or choose "Use Default".' };
@@ -77,6 +77,16 @@ export function validateExportPath(raw: string, platform: ServerPlatform | ""): 
         ok: false,
         error:
           "Use an absolute path — on Windows e.g. C:\\XrayExports, on Linux/macOS e.g. /home/you/XrayExports.",
+      };
+    }
+  }
+
+  if (dataMountPath) {
+    const mountPath = dataMountPath.replace(/[\\/]+$/, "");
+    if (v !== mountPath && !v.startsWith(mountPath + "/")) {
+      return {
+        ok: false,
+        error: `When running in Docker, custom export paths must be under ${dataMountPath}/… (the only folder bind-mounted to the host). For example: ${dataMountPath}/exports2`,
       };
     }
   }

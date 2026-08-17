@@ -109,6 +109,7 @@ Then edit `.env` in the project root. Common settings:
 - **Docker fails on Windows:** use `bootstrap.bat` or the Node.js option.
 - **Backend won't start:** check that port 8080 is free and `.env` exists in the root and `backend/`.
 - **Backend crashes with `EACCES: permission denied, mkdir '/app/data/storage'`:** see **[Known Issues](#known-issues)** below.
+- **Export folders in Docker must be under `backend/data/` on the host** (use `/app/data/...` in the UI). Saving to other container paths is rejected to prevent files from being lost when the container is recreated. See **[SETUP.md → Custom export folder](SETUP.md)** for details.
 - **Where are the logs?** every API request is logged to `backend/data/storage/monitoring.log` — see **Logging & monitoring** in **[SETUP.md](SETUP.md)**.
 
 ### Known Issues
