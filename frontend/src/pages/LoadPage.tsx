@@ -3,13 +3,13 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Upload, Loader2, CheckCircle2, AlertTriangle, AlertCircle, X, Play, RefreshCw, Download, Save, Image as ImageIcon, Check,
+  Upload, Loader2, CheckCircle2, AlertTriangle, AlertCircle, X, Play, RefreshCw, Download, Save, Check,
 } from "lucide-react";
-import ImageWithPlaceholder from "../components/common/ImageWithPlaceholder";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout, LONG_REQUEST_TIMEOUT_MS } from "../lib/fetchWithTimeout";
 import { escapeAttribute, sanitizeId } from "../lib/sanitize";
 import ConfirmModal from "../components/common/ConfirmModal";
+import LoadPreviewScene from "../components/load/LoadPreviewScene";
 import ExportLocationSelector, { ExportLocationSelectorHandle } from "../components/common/ExportLocationSelector";
 import { setLoadUnsaved } from "../lib/navigationGuard";
 
@@ -47,29 +47,7 @@ export default function LoadPage() {
   const [exporting, setExporting] = useState(false);
   const [exportMode, setExportMode] = useState<"all" | "selected" | "individual" | "page" | null>(null);
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
-  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
-  const [renderingPreviews, setRenderingPreviews] = useState<Set<string>>(new Set());
-  const [showHighRes, setShowHighRes] = useState<{ combo: Combination; url: string } | null>(null);
-
-  // Refs to avoid stale closures in async preview generation
-  const previewUrlsRef = useRef<Record<string, string>>({});
-  const renderingPreviewsRef = useRef<Set<string>>(new Set());
-  const generateAbortRef = useRef<AbortController | null>(null);
-
-  // Lazy sequential preview loading: only request backend renders for cards
-  // that have scrolled into (or near) the viewport, 20 items at a time.
-  const BATCH_SIZE = 20;
-  const previewRequestedRef = useRef<Set<string>>(new Set());
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const isLoadingBatchRef = useRef(false);
-
-  // Refs to support buffering the next page (page-by-page workflow)
-  const lastGeneratedPageRef = useRef<number | null>(null);
-  const prefetchNextPageRef = useRef<string>("");
-
-  // Keep refs in sync with state
-  useEffect(() => { previewUrlsRef.current = previewUrls; }, [previewUrls]);
-  useEffect(() => { renderingPreviewsRef.current = renderingPreviews; }, [renderingPreviews]);
+  const [showHighRes, setShowHighRes] = useState<{ combo: Combination } | null>(null);
 
   // Clear the progress-polling interval if the user leaves the page mid-export.
   useEffect(() => {
@@ -294,89 +272,13 @@ export default function LoadPage() {
     if (action === "upload-missing") { navigate("/"); } else {
       const validCombos = analysis?.combinations.filter((c) => c.allPresent) || [];
       setValidCombinations(validCombos); setPage(1); setSelectedForExport(new Set()); setPhase("generating");
-      showToast("info", `Generating images for ${validCombos.length} valid combinations...`);
-      generatePreviews(validCombos.slice(0, PAGE_SIZE), 1);
+      showToast("info", `Loading ${validCombos.length} combinations...`);
     }
   };
-/** Generate preview thumbnail for a set of combinations via /api/render-preview
- *  Uses concurrency limiting (MAX_CONCURRENT_RENDERS = 3) to prevent backend overload,
- *  matching the pattern used in CollagePage. */
-  const MAX_CONCURRENT_RENDERS = 3;
-
-  const generatePreviews = async (combos: Combination[], pageNum: number | null = null) => {
-    // Abort any in-flight generation for a previous page
-    if (generateAbortRef.current) {
-      generateAbortRef.current.abort();
-    }
-    const controller = new AbortController();
-    generateAbortRef.current = controller;
-    if (pageNum != null) lastGeneratedPageRef.current = pageNum;
-
-    const semaphore = { current: 0, queue: [] as (() => void)[] };
-    const acquire = () => new Promise<void>((resolve) => {
-      if (semaphore.current < MAX_CONCURRENT_RENDERS) {
-        semaphore.current++;
-        resolve();
-      } else {
-        semaphore.queue.push(resolve);
-      }
-    });
-    const release = () => {
-      semaphore.current--;
-      if (semaphore.queue.length > 0 && semaphore.current < MAX_CONCURRENT_RENDERS) {
-        const next = semaphore.queue.shift()!;
-        semaphore.current++;
-        next();
-      }
-    };
-
-    // Mark combos that need rendering (using refs to avoid stale closures)
-    const newRendering = new Set(renderingPreviewsRef.current);
-    for (const combo of combos) {
-      if (!previewUrlsRef.current[combo.layoutId]) {
-        newRendering.add(combo.layoutId);
-      }
-    }
-    setRenderingPreviews(newRendering);
-
-    // Process combos with concurrency limit
-    const pending = combos.map((combo) => (async () => {
-      if (controller.signal.aborted) return;
-      // Skip if already rendered (check ref for latest value)
-      if (previewUrlsRef.current[combo.layoutId]) return;
-      await acquire();
-      try {
-        // /api/render-preview expects the nested { bag, threats, non-threats } format
-        const objects = combo.objects || {};
-        if (!objects.bag && !Array.isArray(objects.threats) && !Array.isArray(objects["non-threats"])) return;
-        if (controller.signal.aborted) return;
-        const res = await fetchWithTimeout(
-          `${API_BASE}/api/render-preview`,
-          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objects }), signal: controller.signal },
-          LONG_REQUEST_TIMEOUT_MS
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.image) {
-          setPreviewUrls((prev) => {
-            if (prev[combo.layoutId]) return prev; // already set by concurrent call
-            return { ...prev, [combo.layoutId]: `data:image/png;base64,${data.image}` };
-          });
-        }
-      } catch (err) {
-        if ((err as any)?.name !== "AbortError") {
-          console.error(`Failed to render preview for ${combo.layoutId}:`, err);
-        }
-      } finally {
-        release();
-      }
-    })());
-
-    await Promise.all(pending);
-    if (!controller.signal.aborted) {
-      setRenderingPreviews(new Set());
-    }
-  };
+/** Preview thumbnails are now composed client-side by <LoadPreviewScene /> — the
+   *  same approach the Collage page uses for its 100-image tiles. No per-combination
+   *  /api/render-preview backend requests are needed, so all cards appear as fast as
+   *  the (cached) static library images load, and nothing contends with saving. */
 
   /** Pagination */
   useEffect(() => {
@@ -391,7 +293,7 @@ export default function LoadPage() {
     return validCombinations.slice(start, start + PAGE_SIZE);
   }, [validCombinations, page, pagination]);
 
-  /** Move from "generating" to "results" once first batch of previews are requested */
+  /** Move from "generating" to "results" once the first page of cards is mounted. */
   useEffect(() => {
     if (phase === "generating" && validCombinations.length > 0) {
       const t = setTimeout(() => setPhase("results"), 800);
@@ -399,76 +301,8 @@ export default function LoadPage() {
     }
   }, [phase, validCombinations.length]);
 
-  /** Buffer the next page's previews once the current page has finished rendering.
-   *  Page-by-page workflow (like the Collage/upload flows): only ever render one
-   *  page at a time and pre-render at most the NEXT page, so mass loads never
-   *  trigger a one-shot render of everything at once. */
-  useEffect(() => {
-    if (phase !== "results" || !pagination) return;
-    const nextStart = page * PAGE_SIZE;
-    const nextCombos = validCombinations.slice(nextStart, nextStart + PAGE_SIZE);
-    if (nextCombos.length === 0) { prefetchNextPageRef.current = ""; return; }
-    if (lastGeneratedPageRef.current !== page) return;
-    const stillBusy = currentPageCombos.some((c) => renderingPreviews.has(c.layoutId));
-    if (stillBusy || exporting) return;
-    const key = `${page + 1}`;
-    if (prefetchNextPageRef.current === key) return;
-    prefetchNextPageRef.current = key;
-    generatePreviews(nextCombos, page + 1);
-  }, [phase, page, pagination, validCombinations, currentPageCombos, renderingPreviews, exporting]);
-
-  /** Lazy sequential batch loading: trigger the first batch of 20 immediately on
-   *  page entry (so visible cards get their previews without waiting for a scroll),
-   *  then use IntersectionObserver on a sentinel for subsequent batches of 20.
-   *  This replaces the old behavior of firing all 100 requests at once. */
-  useEffect(() => {
-    if (phase !== "results" || currentPageCombos.length === 0) return;
-
-    const timer = setTimeout(() => {
-      const unrequested = currentPageCombos.filter(
-        (c) => !previewRequestedRef.current.has(c.layoutId) && !previewUrlsRef.current[c.layoutId]
-      );
-      if (unrequested.length === 0) return;
-      const batch = unrequested.slice(0, BATCH_SIZE);
-      batch.forEach((c) => previewRequestedRef.current.add(c.layoutId));
-      generatePreviews(batch);
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [phase, currentPageCombos, generatePreviews]);
-
-  /** Subsequent batches: IntersectionObserver on a sentinel element at the bottom
-   *  of the grid. Fires when user scrolls within 200px of the bottom, requesting
-   *  the next BATCH_SIZE unrequested items. */
-  useEffect(() => {
-    if (phase !== "results" || currentPageCombos.length === 0) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries[0].isIntersecting || isLoadingBatchRef.current) return;
-        isLoadingBatchRef.current = true;
-
-        const unrequested = currentPageCombos.filter(
-          (c) => !previewRequestedRef.current.has(c.layoutId) && !previewUrlsRef.current[c.layoutId]
-        );
-        if (unrequested.length === 0) { isLoadingBatchRef.current = false; return; }
-
-        const batch = unrequested.slice(0, BATCH_SIZE);
-        batch.forEach((c) => previewRequestedRef.current.add(c.layoutId));
-
-        generatePreviews(batch).finally(() => { isLoadingBatchRef.current = false; });
-      },
-      { rootMargin: "200px", threshold: 0 }
-    );
-
-    const el = sentinelRef.current;
-    if (el) observer.observe(el);
-
-    return () => {
-      observer.disconnect();
-      isLoadingBatchRef.current = false;
-    };
-  }, [phase, currentPageCombos, generatePreviews]);
+  /** Previews are client-side, so there is nothing to buffer or prefetch — every
+   *  card renders immediately from cached static images when its page is shown. */
  
 
 /** Export combinations to exports folder (high + low resolution images). */
@@ -525,9 +359,12 @@ export default function LoadPage() {
         const jobId = `load_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
         exportJobIdRef.current = jobId;
         exportProgressBaseRef.current = start;
+        // Retry on 429 (backend rate limiter) so a transient "too many concurrent
+        // requests" never kills a Save. Export POSTs are serialized page-by-page
+        // (one request at a time), so we never flood the server ourselves.
         const res = await fetchWithTimeout(`${API_BASE}/api/load/export-combinations?jobId=${encodeURIComponent(jobId)}`,
           { method: "POST", headers, body: JSON.stringify({ combinations: batch, scope: 'load' }), signal: controller.signal },
-          LONG_REQUEST_TIMEOUT_MS);
+          LONG_REQUEST_TIMEOUT_MS, 3, 2000, [429]);
         const data = await res.json();
         if (!data.ok) { throw new Error(data.error || "Export failed"); }
         // Use the backend's REAL success count. Never fall back to batch.length when
@@ -612,18 +449,12 @@ export default function LoadPage() {
   const goToPage = (p: number) => {
     if (!pagination) return;
     const clamped = Math.min(Math.max(1, p), pagination.totalPages);
-    if (clamped !== page) {
-      previewRequestedRef.current = new Set();
-      isLoadingBatchRef.current = false;
-    }
     setPage(clamped);
   };
 
   const handleReset = () => {
     setPhase("upload"); setAnalysis(null); setValidCombinations([]); setPage(1);
-    setSelectedForExport(new Set()); setPreviewUrls({}); setShowHighRes(null); setPagination(null);
-    prefetchNextPageRef.current = "";
-    lastGeneratedPageRef.current = null;
+    setSelectedForExport(new Set()); setShowHighRes(null); setPagination(null);
   };
 return (
     <div className="min-h-screen bg-surface">
@@ -828,11 +659,8 @@ return (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {currentPageCombos.map((combo) => (
                 <div key={combo.layoutId} className={`bg-panel rounded-2xl border border-border shadow-card overflow-hidden transition-all cursor-pointer group text-left w-full ${selectedForExport.has(combo.layoutId) ? "ring-2 ring-accent/20 border-accent" : "hover:border-accent/50"}`}>
-                  <div className="relative aspect-[4/3] bg-surface" onClick={() => { if (previewUrls[combo.layoutId]) { setShowHighRes({ combo, url: previewUrls[combo.layoutId] }); } }}>
-                    {previewUrls[combo.layoutId]
-                      ? <ImageWithPlaceholder src={previewUrls[combo.layoutId]} alt={combo.layoutName} className="w-full h-full object-contain" />
-                      : <div className="flex items-center justify-center h-full"><ImageIcon size={32} className="text-muted/40" /></div>
-                    }
+                  <div className="relative aspect-[4/3] bg-surface" onClick={() => setShowHighRes({ combo })}>
+                    <LoadPreviewScene objects={combo.objects} />
                     {selectedForExport.has(combo.layoutId) && (<div className="absolute top-2 left-2 w-6 h-6 rounded-full bg-accent flex items-center justify-center"><Check size={14} className="text-white" /></div>)}
                   </div>
                   <div className="p-4">
@@ -869,9 +697,6 @@ return (
               ))}
             </div>
 
-            {/* Sentinel for lazy sequential batch loading — fires when user scrolls near bottom */}
-            <div ref={sentinelRef} className="h-4" />
-
             {pagination && pagination.totalPages > 1 && (
               <div className="mt-6 flex items-center justify-between gap-3">
                 <p className="text-sm text-muted">Showing {((pagination.page - 1) * pagination.limit) + 1}-{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}</p>
@@ -901,7 +726,7 @@ return (
             </div>
             <div className="flex flex-col md:flex-row flex-1 min-h-0">
               <div className="flex-1 p-6 flex items-center justify-center bg-surface min-h-0">
-                 <img src={showHighRes.url} alt={escapeAttribute(sanitizeId(showHighRes.combo.layoutName))} className="max-w-full max-h-full object-contain" />
+                <LoadPreviewScene large objects={showHighRes.combo.objects} />
               </div>
               <div className="w-full md:w-80 p-6 border-t md:border-t-0 md:border-l border-border flex flex-col gap-4 overflow-y-auto">
                 <div>
