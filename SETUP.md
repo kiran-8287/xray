@@ -280,6 +280,8 @@ which exports `PUID=$(id -u)` / `PGID=$(id -g)` so the backend runs as your own 
 
 #### Custom export folder "does nothing" — files are saved but never show up (Linux + Docker)
 
+**Design note:** Exports are intentionally restricted to folders under the bind-mounted data directory (`backend/data/` on the host, `/app/data/` inside the container). This ensures files are always written to a location that persists on the host and is owned by your user account. Do not attempt to save exports to arbitrary system paths when running in Docker.
+
 **Symptoms:** using the **Export location** button, you pick a custom path on an absolute Linux path such as `/home/you/exports` — saving works (no error, a success toast appears), but **no files appear in the folder** on your machine. Saving to the *default* folders (`backend/data/...`) works fine.
 
 **First: the app never blocks custom paths.** The backend happily creates and writes to any absolute path it can reach. Whether "it can reach" your folder depends on **where the backend is running**:

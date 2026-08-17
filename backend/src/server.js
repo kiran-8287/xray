@@ -1114,7 +1114,15 @@ app.get('/api/user-config/exports-path', async (_req, res) => {
     }
     // `platform` tells the UI which path convention (Windows drive vs POSIX /) to
     // expect, so the client can show the right format instructions.
-    res.json({ ok: true, paths, configured, platform: process.platform });
+    const insideContainer = await isContainerized();
+    res.json({ 
+      ok: true, 
+      paths, 
+      configured, 
+      platform: process.platform, 
+      isContainerized: insideContainer, 
+      dataMountPath: insideContainer ? CONTAINER_DATA_MOUNT : null 
+    });
   } catch (err) {
     console.error('[user-config/exports-path] Error:', err);
     res.status(500).json({ ok: false, error: String(err) });
@@ -1737,6 +1745,9 @@ async function handleSavedLayoutsExport(req, res) {
     const jobId = typeof req.query.jobId === 'string' && req.query.jobId.trim()
         ? req.query.jobId.trim()
         : null;
+    // saveMode: 'individual' = save images + per-layout JSON only (no batch annotations.json)
+    //           'selected' (default) = save images + batch annotations.json partition
+    //           'all' = always save images + batch annotations.json partitions
     const saveMode = typeof req.query.saveMode === 'string' && req.query.saveMode.trim()
         ? req.query.saveMode.trim().toLowerCase()
         : 'selected';
@@ -1746,8 +1757,7 @@ async function handleSavedLayoutsExport(req, res) {
     const scope = typeof req.query.scope === 'string' && ['load', 'saved', 'collage'].includes(req.query.scope.trim().toLowerCase())
         ? req.query.scope.trim().toLowerCase()
         : 'saved';
-    const BATCH_THRESHOLD = 50;
-    const useBatchAnnotations = saveMode === 'all';
+
     let cancelled = false;
 
     try {
@@ -1954,8 +1964,11 @@ async function handleSavedLayoutsExport(req, res) {
                         lowEnergyImage: lowEnergyFilename,
                         objects: layout.layout_json?.objects || null
                     };
-                    const isBulkMode = saveMode === 'all' || saveMode === 'selected';
-                    const shouldCreateIndividualFile = !isBulkMode;
+                    // Per-layout annotation file — only created in 'individual' mode.
+                    // 'selected' and 'all' both write a single batched annotations partition
+                    // so repeated exports do not overwrite each other.
+                    const isBulkMode = saveMode === 'selected' || saveMode === 'all';
+                    const shouldCreateIndividualFile = saveMode === 'individual';
                     const shouldCreateBatchAnnotations = isBulkMode;
 
                     if (shouldCreateIndividualFile) {
@@ -2639,7 +2652,7 @@ app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithL
         
         res.json({ 
             ok: true, 
-            message: errors.length > 0 || fileValidationErrors.length > 0 ? "Some files processed, some had errors" : "Files uploaded successfully!", 
+            message: errors.length > 0 || fileValidationErrors.length > 0 ? "Some files processed, some had errors" : "Files uploaded successfully!",
             itemsProcessed: processed.length,
             fileValidationErrors,
             errors

@@ -22,7 +22,7 @@ export function hasDangerousPrototype(obj) {
 export function safeClone(obj) {
   if (obj === null || typeof obj !== 'object') return obj;
   if (Array.isArray(obj)) return obj.map(safeClone);
-  
+
   // Use Object.create(null) to avoid prototype pollution
   const clean = Object.create(null);
   for (const key of Object.keys(obj)) {
