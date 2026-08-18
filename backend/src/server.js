@@ -3979,7 +3979,7 @@ app.post('/api/render-preview', strictRateLimiter.middleware(), requireAuth, asy
             renderWarnings.push('No pixel data files (.npz) found for any objects. Preview may not render correctly.');
         }
 
-        const pngBuffer = await renderSceneAsync(flatObjects, bagWidth, bagHeight, undefined, renderWarnings);
+        const pngBuffer = await renderSceneAsync(flatObjects, bagWidth, bagHeight, "highenergy", renderWarnings);
 
         const isBlank = pngBuffer.length < 500;
         

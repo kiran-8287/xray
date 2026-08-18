@@ -1,8 +1,8 @@
-import Jimp from 'jimp';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import zlib from 'zlib';
 
 import config from './config.js';
 
@@ -11,16 +11,75 @@ const libraryImagesRoot = config.libraryImagesRoot;
 const pixelDataRoot = config.pixelDataRoot;
 const READ_NPZ_SCRIPT = path.join(__dirname, 'read_npz.py');
 
+function crc32(data) {
+  let crc = 0xFFFFFFFF;
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) {
+      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c;
+  }
+  for (let i = 0; i < data.length; i++) {
+    crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function pngChunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const typeBuf = Buffer.from(type, 'ascii');
+  const crcData = Buffer.concat([typeBuf, data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(crcData));
+  return Buffer.concat([len, typeBuf, data, crc]);
+}
+
+function encode16BitGrayscalePNG(width, height, pixels) {
+  const rowBytes = 1 + width * 2;
+  const rawData = Buffer.allocUnsafe(height * rowBytes);
+
+  for (let y = 0; y < height; y++) {
+    rawData[y * rowBytes] = 0;
+    const rowStart = y * rowBytes + 1;
+    for (let x = 0; x < width; x++) {
+      const val = pixels[y * width + x];
+      rawData[rowStart + x * 2] = (val >>> 8) & 0xFF;
+      rawData[rowStart + x * 2 + 1] = val & 0xFF;
+    }
+  }
+
+  const compressed = zlib.deflateSync(rawData);
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 16;
+  ihdr[9] = 0;
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+
+  const signature = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+
+  return Buffer.concat([
+    signature,
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', compressed),
+    pngChunk('IEND', Buffer.alloc(0))
+  ]);
+}
+
 async function loadPixelData(filepath) {
   try {
     const pixelDataPath = path.join(pixelDataRoot, filepath);
     
-    // Check if it's an .npz file
     if (filepath.endsWith('.npz')) {
       return await loadPixelDataFromNpz(pixelDataPath);
     }
     
-    // Legacy JSON format support (for backward compatibility)
     const data = await fs.readFile(pixelDataPath, 'utf8');
     return JSON.parse(data);
   } catch (err) {
@@ -52,20 +111,11 @@ async function loadPixelDataFromNpz(npzPath) {
 
       if (code === 0 && lastLine) {
         try {
-          // read_npz.py streams output:
-          //   Line 1: {"width": W, "height": H, "pixel_data": "streaming"}
-          //   Last line: raw JSON array [[row0],[row1],...]
-          // The last line must be parsed FIRST because it could be either:
-          //   - a raw pixel array (streaming format) OR
-          //   - a metadata object (older/error format)
           const parsed = JSON.parse(lastLine);
 
           if (parsed.status === 'error') {
             reject(new Error(parsed.reason || 'Python script returned error'));
           } else if (Array.isArray(parsed)) {
-            // ── Streaming format ──
-            // parsed is the raw 2D pixel array. Extract width/height from the
-            // first metadata line ("pixel_data": "streaming").
             let width = 0;
             let height = parsed.length;
             try {
@@ -80,7 +130,6 @@ async function loadPixelDataFromNpz(npzPath) {
             if (width === 0 && parsed[0]) width = parsed[0].length;
             resolve({ pixel_data: parsed, width, height });
           } else if (parsed && typeof parsed === 'object' && parsed.pixel_data) {
-            // ── Legacy object format ──
             resolve({
               pixel_data: parsed.pixel_data,
               width: parsed.width,
@@ -104,10 +153,8 @@ async function loadPixelDataFromNpz(npzPath) {
 }
 
 function getPixelArray(pixelData) {
-  // For .npz format, pixel data is in pixel_data property
   if (pixelData.pixel_data) return pixelData.pixel_data;
   
-  // Legacy JSON format support
   if (pixelData.R) return pixelData.R;
   if (pixelData.high) return pixelData.high;
   if (pixelData.high_raw) return pixelData.high_raw;
@@ -116,10 +163,6 @@ function getPixelArray(pixelData) {
   return null;
 }
 
-/**
- * Load a PNG image and extract its grayscale pixel data as a 2D array.
- * Each pixel value is mapped from 0-255 to the 0-65535 range.
- */
 async function loadPngAsPixelArray(filepath) {
   try {
     const fullPath = path.join(libraryImagesRoot, filepath);
@@ -127,13 +170,11 @@ async function loadPngAsPixelArray(filepath) {
     const width = image.bitmap.width;
     const height = image.bitmap.height;
     
-    // Build a 2D array of pixel values (0–65535 range)
     const data = [];
     for (let y = 0; y < height; y++) {
       const row = [];
       for (let x = 0; x < width; x++) {
         const pixel = Jimp.intToRGBA(image.getPixelColor(x, y));
-        // Convert grayscale: average RGB channels, then map 0-255 → 0-65535
         const gray = Math.round((pixel.r + pixel.g + pixel.b) / 3);
         const val = Math.round((gray / 255) * 65535);
         row.push(val);
@@ -162,7 +203,6 @@ function applyAffineTransform(
 ) {
   const dstData = new Float32Array(dstWidth * dstHeight);
   
-  // Inverse transform parameters
   const cos = Math.cos(-rotation);
   const sin = Math.sin(-rotation);
   const invScaleX = 1 / scaleX;
@@ -170,23 +210,18 @@ function applyAffineTransform(
   
   for (let dstY = 0; dstY < dstHeight; dstY++) {
     for (let dstX = 0; dstX < dstWidth; dstX++) {
-      // Translate to origin relative to object center
       const x = (dstX - tx);
       const y = (dstY - ty);
       
-      // Rotate
       const rx = x * cos - y * sin;
       const ry = x * sin + y * cos;
       
-      // Scale
       const sx = rx * invScaleX;
       const sy = ry * invScaleY;
       
-      // Translate back to source coordinates
       const srcX = sx + srcWidth / 2;
       const srcY = sy + srcHeight / 2;
       
-      // Check bounds
       if (srcX >= 0 && srcX < srcWidth && srcY >= 0 && srcY < srcHeight) {
         const sx0 = Math.floor(srcX);
         const sy0 = Math.floor(srcY);
@@ -196,7 +231,6 @@ function applyAffineTransform(
         const dx = srcX - sx0;
         const dy = srcY - sy0;
         
-        // Bilinear interpolation
         const v00 = srcData[sy0][sx0];
         const v01 = srcData[sy0][sx1];
         const v10 = srcData[sy1][sx0];
@@ -214,25 +248,14 @@ function applyAffineTransform(
   return dstData;
 }
 
-/**
- * Async helper that loads raw pixel arrays and performs per‑pixel attenuation calculation.
- * Returns a PNG buffer of the composited scene.
- * @param {Array} objects - Scene objects to render
- * @param {number} width - Canvas width
- * @param {number} height - Canvas height
- * @param {string} energyType - "highenergy" or "lowenergy"
- * @param {string[]} [warnings] - Optional array to collect warning messages
- */
 export async function renderSceneAsync(objects, width = 800, height = 600, energyType = "highenergy", warnings = null) {
-  // Initialize density buffer with 0 (air)
   const densityBuffer = new Float32Array(width * height);
 
   const sorted = [...objects].sort((a, b) => a.layer - b.layer);
-  
+   
   for (const obj of sorted) {
     if (!obj.id) continue;
     
-    // Guard: skip objects with missing or invalid transform
     if (!obj.transform || typeof obj.transform !== 'object') {
       const msg = `Missing transform for object ${obj.name || obj.id}, skipping`;
       console.warn(`⚠️  ${msg}`);
@@ -242,7 +265,6 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
       continue;
     }
     
-    // Guard: ensure transform has required numeric properties
     const tx = obj.transform.x;
     const ty = obj.transform.y;
     const objWidth = obj.transform.width;
@@ -264,10 +286,8 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
     let srcWidth = 0;
     let srcHeight = 0;
     
-    // Try pixel data first (from raw .dump.pgm / .tip processing)
     let pixelDataFilename = obj.pixel_data_path || null;
     if (pixelDataFilename) {
-      // If low energy requested, replace the folder prefix from highenergy to lowenergy
       if (energyType === "lowenergy") {
         pixelDataFilename = pixelDataFilename.replace(/^highenergy[\\/]/, "lowenergy/");
       }
@@ -281,7 +301,6 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
       }
     }
     
-    // Fallback: load from PNG image (for library items uploaded as regular images)
     if (!srcArray && obj.filepath) {
       const pngResult = await loadPngAsPixelArray(obj.filepath);
       if (pngResult) {
@@ -291,7 +310,6 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
       }
     }
     
-    // If still no data, skip this object and collect warning
     if (!srcArray) {
       const msg = `No pixel data or image found for ${obj.name || obj.id}`;
       console.warn(`⚠️  ${msg}`);
@@ -301,12 +319,10 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
       continue;
     }
     
-    // Calculate transformation
     const scaleX = objWidth / srcWidth;
     const scaleY = objHeight / srcHeight;
     const rotation = (objRotation * Math.PI) / 180;
     
-    // Apply transformation to source data
     const transformedData = applyAffineTransform(
       srcArray,
       srcWidth,
@@ -320,28 +336,20 @@ export async function renderSceneAsync(objects, width = 800, height = 600, energ
       rotation
     );
     
-    // Update density buffer
     for (let i = 0; i < transformedData.length; i++) {
       const val = transformedData[i];
-      if (val > 0 && val < 65535) { // Only add density if pixel has value
+      if (val > 0 && val < 65535) {
         const mu = -Math.log(Math.max(1, val) / 65535);
         densityBuffer[i] += mu;
       }
     }
   }
 
-  // Convert density buffer to final grayscale image using Beer-Lambert Law
-  const image = new Jimp(width, height, 0x000000);
-  
+  const raw16 = new Uint16Array(width * height);
   for (let i = 0; i < densityBuffer.length; i++) {
-    const density = densityBuffer[i];
-    const intensity = 65535 * Math.exp(-density);
-    const g = Math.round((intensity / 65535) * 255);
-    
-    const x = i % width;
-    const y = Math.floor(i / width);
-    image.setPixelColor(Jimp.rgbaToInt(g, g, g, 255), x, y);
+    const intensity = 65535 * Math.exp(-densityBuffer[i]);
+    raw16[i] = Math.min(65535, Math.max(0, Math.round(intensity)));
   }
   
-  return await image.getBufferAsync(Jimp.MIME_PNG);
+  return encode16BitGrayscalePNG(width, height, raw16);
 }
