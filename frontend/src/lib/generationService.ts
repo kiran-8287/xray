@@ -885,20 +885,22 @@ export const GenerationService = {
         effectiveNonThreatDist[i] = (params.nonThreatDistribution && params.nonThreatDistribution[i]) ?? 0;
       }
 
-      // IMPORTANT: mark the initial generate as an in-flight "chunk" before
-      // sending it. This prevents the batch handler from firing a duplicate
-      // generateChunk request, and keeps the chunkComplete handler's
-      // progress-delta / zero-chunk accounting accurate for the first run.
+      // IMPORTANT: use chunked generation so we can pace by buffer capacity
+      // and pause when the buffer is full instead of generating everything
+      // at once. Each chunk is at most CHUNK_SIZE combos; the next chunk
+      // is requested from chunkComplete only when the buffer has room.
       isGeneratingChunk = true;
       chunkStartGeneratedCount = 0;
 
       debugLog.info("[GenerationService] Sending message to worker...");
       newWorker.postMessage({
-        type: "generate",
+        type: "generateChunk",
         selectedBags: params.selectedBags,
         selectedThreats: params.selectedThreats,
         selectedOthers: params.selectedOthers,
         kValue: params.kValue,
+        chunkSize: CHUNK_SIZE,
+        totalGenerated: 0,
         threatDistribution: effectiveThreatDist,
         nonThreatDistribution: effectiveNonThreatDist,
         requireAtLeastOneNonThreat: params.requireAtLeastOneNonThreat || false,
@@ -1306,8 +1308,6 @@ export const GenerationService = {
   },
 
   updateCombination(combinationId: string, updatedObjects: SceneObject[]) {
-    if (state.isGenerating) return;
-
     const idx1 = state.combinations.findIndex(c => c.id === combinationId);
     if (idx1 !== -1) {
       state.combinations[idx1] = { ...state.combinations[idx1], objects: updatedObjects };

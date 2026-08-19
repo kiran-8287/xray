@@ -6,7 +6,7 @@
 import pino from 'pino';
 import config from './config.js';
 
-const logger = pino({ level: config.logLevel || 'info' });
+const logger = pino({ level: config.logLevel === 'info' ? 'warn' : config.logLevel });
 
 /**
  * Middleware that logs mutation operations for audit trail.
