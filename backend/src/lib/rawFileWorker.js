@@ -12,7 +12,7 @@ import client from 'prom-client';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PYTHON_SCRIPT = path.join(__dirname, "process_raw_file.py");
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+const logger = pino({ level: process.env.LOG_LEVEL || 'warn' });
 let pythonBatchDuration;
 try {
   pythonBatchDuration = new client.Histogram({
