@@ -46,27 +46,41 @@ export default function CanvasArea({
     setBagImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
   };
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    if (bagImageDimensions) {
-      canvas.width = bagImageDimensions.width;
-      canvas.height = bagImageDimensions.height;
+  const prevBagImageDimensionsRef = useRef<{ width: number; height: number } | null>(null);
+  const rafIdRef = useRef<number>(0);
+
+  const scheduleRedraw = () => {
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current);
     }
-    (async () => {
+    rafIdRef.current = requestAnimationFrame(async () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      if (bagImageDimensions) {
+        canvas.width = bagImageDimensions.width;
+        canvas.height = bagImageDimensions.height;
+      }
       await drawXRayComposite(canvas!, objects, onImagesLoadedRef.current);
-    })();
+    });
+  };
+
+  useEffect(() => {
+    scheduleRedraw();
     return () => {
-      clearCaches();
+      cancelAnimationFrame(rafIdRef.current);
+      const prev = prevBagImageDimensionsRef.current;
+      const changed = !prev
+        || (bagImageDimensions?.width || 0) !== prev.width
+        || (bagImageDimensions?.height || 0) !== prev.height;
+      if (changed) {
+        clearCaches();
+      }
+      prevBagImageDimensionsRef.current = bagImageDimensions;
     };
   }, [objects, bagImageDimensions]);
 
   onImagesLoadedRef.current = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    (async () => {
-      await drawXRayComposite(canvas!, objects!, onImagesLoadedRef.current);
-    })();
+    scheduleRedraw();
   };
 
   return (
