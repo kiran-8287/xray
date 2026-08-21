@@ -694,11 +694,15 @@ export default function SavedPage() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedForExport.size === layouts.length) {
-      setSelectedForExport(new Set());
-    } else {
-      setSelectedForExport(new Set(layouts.map(l => l.id)));
-    }
+    setSelectedForExport((prev) => {
+      const next = new Set(prev);
+      if (layouts.every((l) => next.has(l.id))) {
+        layouts.forEach((l) => next.delete(l.id));
+      } else {
+        layouts.forEach((l) => next.add(l.id));
+      }
+      return next;
+    });
   };
 
   const clearExportSelection = () => setSelectedForExport(new Set());
@@ -1575,7 +1579,7 @@ export default function SavedPage() {
                     <th className="text-left py-3 px-4 w-10">
                       <input
                         type="checkbox"
-                        checked={selectedForExport.size === layouts.length && layouts.length > 0}
+                        checked={layouts.length > 0 && layouts.every((l) => selectedForExport.has(l.id))}
                         onChange={toggleSelectAll}
                         className="w-4 h-4 rounded border-border"
                         title="Select all for export"
