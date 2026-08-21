@@ -4,7 +4,6 @@ import type { SceneObject } from "../../types/customization";
 import { getTransformedValidRegion, getObjectAxisAlignedBox } from "../../lib/customizationHelpers";
 import { drawXRayComposite, imgCache, clearCaches } from "../../lib/xrayRenderer";
 import { API_BASE_URL } from "../../config/api";
-import { CANVAS_WIDTH, CANVAS_HEIGHT } from "../../lib/constants";
 
 const IMAGE_BASE_URL = `${API_BASE_URL}/data/library_images/`;
 
@@ -94,27 +93,25 @@ export default function CanvasArea({
         ref={canvasDivRef}
         className="bg-white border border-border rounded-2xl shadow-panel relative select-none overflow-hidden transition-transform duration-75"
         style={{
-          width: bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH,
-          height: bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT,
+          width: bagImageDimensions ? bagImageDimensions.width : undefined,
+          height: bagImageDimensions ? bagImageDimensions.height : undefined,
           transform: `scale(${zoom})`,
           transformOrigin: "center",
         }}
       >
-        {showGrid && (
+        {showGrid && bagImageDimensions && (
           <svg className="absolute top-0 left-0 w-full h-full pointer-events-none">
-            {/* Minor grid lines every 20px */}
-            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH) / 20 + 1 }).map((_, i) => (
-              <line key={`v-${i}`} x1={i * 20} y1={0} x2={i * 20} y2={bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT} stroke="rgba(37, 99, 235, 0.15)" strokeWidth={0.5} />
+            {Array.from({ length: Math.floor(bagImageDimensions.width / 20) + 1 }).map((_, i) => (
+              <line key={`v-${i}`} x1={i * 20} y1={0} x2={i * 20} y2={bagImageDimensions.height} stroke="rgba(37, 99, 235, 0.15)" strokeWidth={0.5} />
             ))}
-            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT) / 20 + 1 }).map((_, i) => (
-              <line key={`h-${i}`} x1={0} y1={i * 20} x2={bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH} y2={i * 20} stroke="rgba(37, 99, 235, 0.15)" strokeWidth={0.5} />
+            {Array.from({ length: Math.floor(bagImageDimensions.height / 20) + 1 }).map((_, i) => (
+              <line key={`h-${i}`} x1={0} y1={i * 20} x2={bagImageDimensions.width} y2={i * 20} stroke="rgba(37, 99, 235, 0.15)" strokeWidth={0.5} />
             ))}
-            {/* Major grid lines every 100px */}
-            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH) / 100 + 1 }).map((_, i) => (
-              <line key={`mv-${i}`} x1={i * 100} y1={0} x2={i * 100} y2={bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT} stroke="rgba(37, 99, 235, 0.5)" strokeWidth={1} />
+            {Array.from({ length: Math.floor(bagImageDimensions.width / 100) + 1 }).map((_, i) => (
+              <line key={`mv-${i}`} x1={i * 100} y1={0} x2={i * 100} y2={bagImageDimensions.height} stroke="rgba(37, 99, 235, 0.5)" strokeWidth={1} />
             ))}
-            {Array.from({ length: (bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT) / 100 + 1 }).map((_, i) => (
-              <line key={`mh-${i}`} x1={0} y1={i * 100} x2={bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH} y2={i * 100} stroke="rgba(37, 99, 235, 0.5)" strokeWidth={1} />
+            {Array.from({ length: Math.floor(bagImageDimensions.height / 100) + 1 }).map((_, i) => (
+              <line key={`mh-${i}`} x1={0} y1={i * 100} x2={bagImageDimensions.width} y2={i * 100} stroke="rgba(37, 99, 235, 0.5)" strokeWidth={1} />
             ))}
           </svg>
         )}
@@ -126,13 +123,15 @@ export default function CanvasArea({
           <line x1="0" y1="0" x2="0" y2="12" stroke="#DC2626" strokeWidth={1.5} />
         </svg>
 
-        <canvas
-          ref={canvasRef}
-          width={bagImageDimensions ? bagImageDimensions.width : CANVAS_WIDTH}
-          height={bagImageDimensions ? bagImageDimensions.height : CANVAS_HEIGHT}
-          className="absolute top-0 left-0 w-full h-full pointer-events-none"
-          style={{ zIndex: 1 }}
-        />
+        {bagImageDimensions && (
+          <canvas
+            ref={canvasRef}
+            width={bagImageDimensions.width}
+            height={bagImageDimensions.height}
+            className="absolute top-0 left-0 w-full h-full pointer-events-none"
+            style={{ zIndex: 1 }}
+          />
+        )}
 
         {bagObject?.filepath && (
           <img
@@ -159,9 +158,6 @@ export default function CanvasArea({
           .filter((obj) => obj.library !== "bag")
           .map((obj) => {
             const isSelected = selectedObjectId === obj.id;
-            // Use the object's footprint (segmentation mask/outline) axis-aligned
-            // box so the visible box hugs the threat — never the full original
-            // image rectangle.
             const box = getObjectAxisAlignedBox(obj);
 
             return (

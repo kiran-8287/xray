@@ -427,7 +427,7 @@ export default function SavedPage() {
   const [deleting, setDeleting] = useState(false);
 
   // Export confirmation state
-  const [exportConfirm, setExportConfirm] = useState<{ show: boolean; includeImages: boolean }>({ show: false, includeImages: true });
+  const [exportConfirm, setExportConfirm] = useState<{ show: boolean; includeImages: boolean; includeThreatImages: boolean }>({ show: false, includeImages: true, includeThreatImages: true });
   
   // Toast notifications
   const [exporting, setExporting] = useState(false);
@@ -447,6 +447,7 @@ export default function SavedPage() {
     type: 'all' | 'selected' | 'individual';
     layoutId?: string;
   } | null>(null);
+  const [includeThreatImages, setIncludeThreatImages] = useState(true);
   
   const [toasts, setToasts] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
   
@@ -842,7 +843,7 @@ export default function SavedPage() {
   };
 
   // Export a single layout by id.
-  const exportIndividual = async (layoutId: string, includeImages: boolean = true) => {
+  const exportIndividual = async (layoutId: string, includeImages: boolean = true, includeThreatImages: boolean = true) => {
     if (exporting) return;
     setExporting(true);
     setExportMode('single');
@@ -853,7 +854,7 @@ export default function SavedPage() {
       if (apiKey) headers['X-API-Key'] = apiKey;
 
       const res = await fetchWithTimeout(
-        `${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(layoutId)}&saveMode=individual&includeImages=${includeImages}&scope=saved`,
+        `${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(layoutId)}&saveMode=individual&includeImages=${includeImages}&includeThreatImages=${includeThreatImages}&scope=saved`,
         { headers }
       );
 
@@ -900,16 +901,16 @@ export default function SavedPage() {
     setPendingSaveAction(null);
 
     if (type === 'all') {
-      await exportAll(includeImages);
+      await exportAll(includeImages, includeThreatImages);
     } else if (type === 'selected') {
-      await exportSelected(includeImages);
+      await exportSelected(includeImages, includeThreatImages);
     } else if (type === 'individual' && layoutId) {
-      await exportIndividual(layoutId, includeImages);
+      await exportIndividual(layoutId, includeImages, includeThreatImages);
     }
   };
 
   // Export selected layouts - saves to exports folder with high/low resolution
-  const exportSelected = async (includeImages: boolean = true) => {
+  const exportSelected = async (includeImages: boolean = true, includeThreatImages: boolean = true) => {
     if (selectedForExport.size === 0) {
       showToast('error', 'No layouts selected for export');
       return;
@@ -941,7 +942,7 @@ export default function SavedPage() {
         headers['X-API-Key'] = apiKey;
       }
 
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}&saveMode=selected&includeImages=${includeImages}&scope=saved`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}&saveMode=selected&includeImages=${includeImages}&includeThreatImages=${includeThreatImages}&scope=saved`, {
         headers,
         signal: controller.signal,
       }, LONG_REQUEST_TIMEOUT_MS);
@@ -1027,19 +1028,19 @@ export default function SavedPage() {
 
   // Export all layouts - saves to exports folder with high/low resolution.
   // Supports cancellation via the Stop Saving button (jobId + AbortController).
-  const exportAll = async (includeImages: boolean = true) => {
+  const exportAll = async (includeImages: boolean = true, includeThreatImages: boolean = true) => {
     if (!pagination || pagination.total === 0) {
       showToast('error', 'No layouts to export');
       return;
     }
     if (exporting) return;
 
-    setExportConfirm({ show: true, includeImages });
+    setExportConfirm({ show: true, includeImages, includeThreatImages });
   };
 
   const confirmExportAll = async () => {
-    const { includeImages } = exportConfirm;
-    setExportConfirm({ show: false, includeImages: true });
+    const { includeImages, includeThreatImages } = exportConfirm;
+    setExportConfirm({ show: false, includeImages: true, includeThreatImages: true });
     
     if (!pagination || pagination.total === 0) {
       showToast('error', 'No layouts to export');
@@ -1070,7 +1071,7 @@ export default function SavedPage() {
         headers['X-API-Key'] = apiKey;
       }
       
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}&saveMode=all&includeImages=${includeImages}&scope=saved`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}&saveMode=all&includeImages=${includeImages}&includeThreatImages=${includeThreatImages}&scope=saved`, {
         headers,
         signal: controller.signal,
       }, LONG_REQUEST_TIMEOUT_MS); // 30 minute timeout
@@ -1923,6 +1924,19 @@ export default function SavedPage() {
               </div>
             </div>
 
+            <div className="space-y-2 mb-4">
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={includeThreatImages}
+                  onChange={(e) => setIncludeThreatImages(e.target.checked)}
+                  className="w-4 h-4 rounded border-border accent-accent"
+                />
+                Save clean threat images
+              </label>
+              <p className="text-[10px] text-muted ml-6">When enabled, individual high/low threat images are exported in addition to the synthesized bag images.</p>
+            </div>
+
             <div className="space-y-2 mb-6">
               <button
                 onClick={() => handleSaveOptionConfirm(false)}
@@ -2006,7 +2020,7 @@ export default function SavedPage() {
 
       {/* Export Confirmation Modal */}
       {exportConfirm.show && (
-        <div className="fixed inset-0 z-[60] bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setExportConfirm({ show: false, includeImages: true })}>
+        <div className="fixed inset-0 z-[60] bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setExportConfirm({ show: false, includeImages: true, includeThreatImages: true })}>
           <div
             className="w-full max-w-md bg-panel rounded-2xl border border-border shadow-2xl p-6"
             onClick={(event) => event.stopPropagation()}
@@ -2029,10 +2043,10 @@ export default function SavedPage() {
               </span>
             </p>
 
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={() => setExportConfirm({ show: false, includeImages: true })}
-                disabled={exporting}
+             <div className="flex items-center justify-end gap-2">
+               <button
+                 onClick={() => setExportConfirm({ show: false, includeImages: true, includeThreatImages: true })}
+                 disabled={exporting}
                 className="px-4 py-2 rounded-lg border border-border bg-white text-sm text-ink hover:bg-surface transition-colors disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Cancel

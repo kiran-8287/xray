@@ -9,8 +9,6 @@ import {
 import { generateSynthesizedId } from "./synthesizedIdGenerator";
 import type { Point } from "../types/geometry";
 import {
-  CANVAS_WIDTH,
-  CANVAS_HEIGHT,
   DEFAULT_BATCH_SIZE,
   YIELD_INTERVAL,
   VALID_REGION_CACHE_MAX_SIZE,
@@ -61,8 +59,8 @@ function parseOutline(item: Item): { x: number; y: number }[] | undefined {
 
 function createBagSceneObject(bag: Item): SceneObject {
   const outline = parseOutline(bag);
-  const bagWidth = bag.width || bag.height || Math.min(CANVAS_WIDTH, CANVAS_HEIGHT);
-  const bagHeight = bag.height || bag.width || Math.min(CANVAS_WIDTH, CANVAS_HEIGHT);
+  const bagWidth = bag.width || bag.height || 0;
+  const bagHeight = bag.height || bag.width || 0;
   return {
     id: bag.id, name: bag.name, library: "bag", subcategory: bag.subcategory,
     originalPixelValue: bag.pixel_value, currentPixelValue: bag.pixel_value,
