@@ -248,7 +248,7 @@ function applyAffineTransform(
   return dstData;
 }
 
-export async function renderSceneAsync(objects, width = 800, height = 600, energyType = "highenergy", warnings = null) {
+export async function renderSceneAsync(objects, width, height, energyType = "highenergy", warnings = null) {
   const densityBuffer = new Float32Array(width * height);
 
   const sorted = [...objects].sort((a, b) => a.layer - b.layer);

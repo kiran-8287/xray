@@ -13,7 +13,6 @@ import {
 import { getRectCorners } from "../lib/geometry";
 import { loadMultipleImageDimensions } from "../lib/imageSizeLoader";
 import { computeObjectStats, type ObjectPixelStats } from "../lib/xrayRenderer";
-import { CANVAS_WIDTH, CANVAS_HEIGHT } from "../lib/constants";
 import { API_BASE_URL } from "../config/api";
 import { fetchWithTimeout } from "../lib/fetchWithTimeout";
 import { normalizeCategoryName, getCategoryConfig, normalizeCategorizedItems } from "../config/categories";
@@ -344,7 +343,7 @@ export default function CustomizationPage() {
       const h = naturalDims?.height && naturalDims.height > 0 ? naturalDims.height : getItemDisplaySize(item).height;
       let pos = null as { x: number; y: number; rotation?: number } | null;
       if (bagObject) pos = getRandomPositionInContainer(w, h, bagObject, itemOutline);
-      if (!pos) pos = { x: 50 + Math.random() * (CANVAS_WIDTH - 100), y: 50 + Math.random() * (CANVAS_HEIGHT - 100), rotation: Math.random() * 360 };
+      if (!pos) return;
       newObjects.push({
         id: `random-object-${i}`,
         name: item.name || item.id,
@@ -372,7 +371,7 @@ export default function CustomizationPage() {
       const h = naturalDims?.height && naturalDims.height > 0 ? naturalDims.height : getItemDisplaySize(threatItem).height;
       let pos = null as { x: number; y: number; rotation?: number } | null;
       if (bagObject) pos = getRandomPositionInContainer(w, h, bagObject, threatOutline);
-      if (!pos) pos = { x: 50 + Math.random() * (CANVAS_WIDTH - 100), y: 50 + Math.random() * (CANVAS_HEIGHT - 100), rotation: Math.random() * 360 };
+      if (!pos) return;
       newObjects.push({
         id: `initial-threat-${i}`,
         name: threatItem.name || threatItem.id,
@@ -444,7 +443,7 @@ export default function CustomizationPage() {
     const bagObject = objects.find((obj) => obj.library === "bag");
     let pos = null as { x: number; y: number; rotation?: number } | null;
     if (bagObject && item.category !== "bags") pos = getRandomPositionInContainer(width, height, bagObject, itemOutline);
-    if (!pos) pos = { x: 50 + Math.random() * (CANVAS_WIDTH - 100), y: 50 + Math.random() * (CANVAS_HEIGHT - 100), rotation: Math.random() * 360 };
+    if (!pos) return;
 
     const newObject: SceneObject = {
       id: instanceId,

@@ -1755,6 +1755,9 @@ async function handleSavedLayoutsExport(req, res) {
     const includeImages = typeof req.query.includeImages === 'string'
         ? req.query.includeImages.trim().toLowerCase() !== 'false'
         : true;
+    const includeThreatImages = typeof req.query.includeThreatImages === 'string'
+        ? req.query.includeThreatImages.trim().toLowerCase() !== 'false'
+        : true;
     const scope = typeof req.query.scope === 'string' && ['load', 'saved', 'collage'].includes(req.query.scope.trim().toLowerCase())
         ? req.query.scope.trim().toLowerCase()
         : 'saved';
@@ -1867,6 +1870,8 @@ async function handleSavedLayoutsExport(req, res) {
             }
             try {
                 const objects = layout.layout_json?.objects || {};
+                const bagWidth = objects.bag?.size?.width;
+                const bagHeight = objects.bag?.size?.height;
                 const flatObjects = [];
 
                 if (objects.bag) {
@@ -1877,8 +1882,8 @@ async function handleSavedLayoutsExport(req, res) {
                         transform: {
                             x: objects.bag.center?.x || 0,
                             y: objects.bag.center?.y || 0,
-                            width: objects.bag.size?.width || 800,
-                            height: objects.bag.size?.height || 600,
+                            width: objects.bag.size?.width,
+                            height: objects.bag.size?.height,
                             rotation: 0,
                         },
                         layer: objects.bag.layer || 0,
@@ -1932,80 +1937,80 @@ async function handleSavedLayoutsExport(req, res) {
                     let annotationPath = null;
                     let threatImageList = [];
 
-                    if (includeImages) {
-                        const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
-                        const lowEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
-                        for (const obj of lowEnergyObjects) {
-                            if (obj.pixel_data_path) {
-                                obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
+                        if (includeImages) {
+                            const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
+                            const lowEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
+                            for (const obj of lowEnergyObjects) {
+                                if (obj.pixel_data_path) {
+                                    obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
+                                }
                             }
-                        }
 
-                        const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, 'highenergy');
-                        const highExportPath = path.join(exportsHighRoot, `${baseName}_high.png`);
-                        await fs.writeFile(highExportPath, highPngBuffer);
-                        savedPaths.high.push(highExportPath);
+                            const highPngBuffer = await renderSceneAsync(highEnergyObjects, bagWidth, bagHeight, 'highenergy');
+                            const highExportPath = path.join(exportsHighRoot, `${baseName}_high.png`);
+                            await fs.writeFile(highExportPath, highPngBuffer);
+                            savedPaths.high.push(highExportPath);
 
-                        const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, 'lowenergy');
-                        const lowExportPath = path.join(exportsLowRoot, `${baseName}_low.png`);
-                        await fs.writeFile(lowExportPath, lowPngBuffer);
-                        savedPaths.low.push(lowExportPath);
+                            const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, bagWidth, bagHeight, 'lowenergy');
+                            const lowExportPath = path.join(exportsLowRoot, `${baseName}_low.png`);
+                            await fs.writeFile(lowExportPath, lowPngBuffer);
+                            savedPaths.low.push(lowExportPath);
 
-                        highEnergyPath = highExportPath;
-                        lowEnergyPath = lowExportPath;
-                        highEnergyFilename = `${baseName}_high.png`;
-                        lowEnergyFilename = `${baseName}_low.png`;
+                            highEnergyPath = highExportPath;
+                            lowEnergyPath = lowExportPath;
+                            highEnergyFilename = `${baseName}_high.png`;
+                            lowEnergyFilename = `${baseName}_low.png`;
 
-                        if (Array.isArray(objects.threats)) {
-                            for (let t = 0; t < objects.threats.length; t++) {
-                                try {
-                                    const threat = objects.threats[t];
-                                    const threatFlat = [{
-                                        id: threat.id,
-                                        filepath: threat.filepath,
-                                        pixel_data_path: threat.pixel_data_path,
-                                        transform: {
-                                            x: threat.center?.x || 0,
-                                            y: threat.center?.y || 0,
-                                            width: threat.size?.width || 100,
-                                            height: threat.size?.height || 100,
-                                            rotation: threat.rotation || 0,
-                                        },
-                                        layer: threat.layer || 1,
-                                    }];
+                            if (includeThreatImages && Array.isArray(objects.threats)) {
+                                for (let t = 0; t < objects.threats.length; t++) {
+                                    try {
+                                        const threat = objects.threats[t];
+                                        const threatFlat = [{
+                                            id: threat.id,
+                                            filepath: threat.filepath,
+                                            pixel_data_path: threat.pixel_data_path,
+                                            transform: {
+                                                x: threat.center?.x || 0,
+                                                y: threat.center?.y || 0,
+                                                width: threat.size?.width || 100,
+                                                height: threat.size?.height || 100,
+                                                rotation: threat.rotation || 0,
+                                            },
+                                            layer: threat.layer || 1,
+                                        }];
 
-                                    const threatHighObjects = await enrichObjectsWithPixelData(threatFlat);
-                                    const threatLowObjects = await enrichObjectsWithPixelData(threatFlat);
-                                    for (const obj of threatLowObjects) {
-                                        if (obj.pixel_data_path) {
-                                            obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
+                                        const threatHighObjects = await enrichObjectsWithPixelData(threatFlat);
+                                        const threatLowObjects = await enrichObjectsWithPixelData(threatFlat);
+                                        for (const obj of threatLowObjects) {
+                                            if (obj.pixel_data_path) {
+                                                obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
+                                            }
                                         }
+
+                                        const threatHighBuffer = await renderSceneAsync(threatHighObjects, bagWidth, bagHeight, 'highenergy');
+                                        const threatLowBuffer = await renderSceneAsync(threatLowObjects, bagWidth, bagHeight, 'lowenergy');
+
+                                        const threatHighPath = path.join(exportsHighRoot, `${baseName}_threat_${t}_high.png`);
+                                        const threatLowPath = path.join(exportsLowRoot, `${baseName}_threat_${t}_low.png`);
+
+                                        await fs.writeFile(threatHighPath, threatHighBuffer);
+                                        await fs.writeFile(threatLowPath, threatLowBuffer);
+
+                                        savedPaths.threatHigh.push(threatHighPath);
+                                        savedPaths.threatLow.push(threatLowPath);
+
+                                        threatImageList.push({
+                                            index: t,
+                                            id: threat.id,
+                                            high: `${baseName}_threat_${t}_high.png`,
+                                            low: `${baseName}_threat_${t}_low.png`,
+                                        });
+                                    } catch (err) {
+                                        console.warn(`[export] Failed to render clean threat ${t} for layout ${layout.id}:`, err);
                                     }
-
-                                    const threatHighBuffer = await renderSceneAsync(threatHighObjects, 800, 600, 'highenergy');
-                                    const threatLowBuffer = await renderSceneAsync(threatLowObjects, 800, 600, 'lowenergy');
-
-                                    const threatHighPath = path.join(exportsHighRoot, `${baseName}_threat_${t}_high.png`);
-                                    const threatLowPath = path.join(exportsLowRoot, `${baseName}_threat_${t}_low.png`);
-
-                                    await fs.writeFile(threatHighPath, threatHighBuffer);
-                                    await fs.writeFile(threatLowPath, threatLowBuffer);
-
-                                    savedPaths.threatHigh.push(threatHighPath);
-                                    savedPaths.threatLow.push(threatLowPath);
-
-                                    threatImageList.push({
-                                        index: t,
-                                        id: threat.id,
-                                        high: `${baseName}_threat_${t}_high.png`,
-                                        low: `${baseName}_threat_${t}_low.png`,
-                                    });
-                                } catch (err) {
-                                    console.warn(`[export] Failed to render clean threat ${t} for layout ${layout.id}:`, err);
                                 }
                             }
                         }
-                    }
 
                     const annotation = {
                         layoutId: layout.id,
@@ -2202,10 +2207,12 @@ app.post('/api/load/export-combinations', strictRateLimiter.middleware(), requir
 
             const combo = combinations[i];
             const objects = combo.objects || {};
+            const bagWidth = objects.bag?.size?.width;
+            const bagHeight = objects.bag?.size?.height;
             const flatObjects = [];
             
             if (objects.bag) {
-                flatObjects.push({ ...objects.bag, transform: { x: objects.bag.center?.x || 0, y: objects.bag.center?.y || 0, width: objects.bag.size?.width || 800, height: objects.bag.size?.height || 600, rotation: 0 }, layer: objects.bag.layer || 0 });
+                flatObjects.push({ ...objects.bag, transform: { x: objects.bag.center?.x || 0, y: objects.bag.center?.y || 0, width: objects.bag.size?.width, height: objects.bag.size?.height, rotation: 0 }, layer: objects.bag.layer || 0 });
             }
             if (Array.isArray(objects.threats)) {
                 for (const t of objects.threats) {
@@ -2234,8 +2241,8 @@ app.post('/api/load/export-combinations', strictRateLimiter.middleware(), requir
                 });
 
                 const [highPngBuffer, lowPngBuffer] = await Promise.all([
-                    renderSceneAsync(highEnergyObjects, 800, 600, "highenergy"),
-                    renderSceneAsync(lowEnergyObjects, 800, 600, "lowenergy")
+                    renderSceneAsync(highEnergyObjects, bagWidth, bagHeight, "highenergy"),
+                    renderSceneAsync(lowEnergyObjects, bagWidth, bagHeight, "lowenergy")
                 ]);
 
                 // Name files from the layout ID with a resolution suffix (e.g.
@@ -3658,9 +3665,11 @@ app.post("/api/render-and-save-collage", strictRateLimiter.middleware(), require
         const filename = `${safeName}.png`;
         const outputPath = path.join(energyDir, filename);
 
+        const bagWidth = objects?.bag?.size?.width;
+        const bagHeight = objects?.bag?.size?.height;
         const enrichedObjects = await enrichObjectsWithPixelData(objects);
 
-        const pngBuffer = await renderSceneAsync(enrichedObjects, 800, 600, energyType);
+        const pngBuffer = await renderSceneAsync(enrichedObjects, bagWidth, bagHeight, energyType);
 
         await fs.writeFile(outputPath, pngBuffer);
 
@@ -3685,6 +3694,9 @@ app.post("/api/render-and-save-collage-both", strictRateLimiter.middleware(), re
         if (!name) {
             return res.status(400).json({ ok: false, error: "Missing name" });
         }
+
+        const bagWidth = objects?.bag?.size?.width;
+        const bagHeight = objects?.bag?.size?.height;
 
         const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
         const filename = `${safeName}.png`;
@@ -3725,9 +3737,9 @@ app.post("/api/render-and-save-collage-both", strictRateLimiter.middleware(), re
             }
         }
 
-        const highPngBuffer = await renderSceneAsync(highEnergyObjects, 800, 600, "highenergy");
+        const highPngBuffer = await renderSceneAsync(highEnergyObjects, bagWidth, bagHeight, "highenergy");
         const highPath = path.join(highEnergyDir, filename);
-        const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, 800, 600, "lowenergy");
+        const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, bagWidth, bagHeight, "lowenergy");
         const lowPath = path.join(lowEnergyDir, filename);
 
         try {
@@ -3796,6 +3808,9 @@ app.post("/api/regenerate-collage-images", strictRateLimiter.middleware(), requi
             return res.status(400).json({ ok: false, error: "No objects found in layout" });
         }
 
+        const bagWidth = objects.bag?.size?.width;
+        const bagHeight = objects.bag?.size?.height;
+
         // Flatten objects array (bag, threats, non-threats)
         const flatObjects = [];
         if (objects.bag) {
@@ -3804,8 +3819,8 @@ app.post("/api/regenerate-collage-images", strictRateLimiter.middleware(), requi
                 transform: {
                     x: objects.bag.center?.x || 0,
                     y: objects.bag.center?.y || 0,
-                    width: objects.bag.size?.width || 800,
-                    height: objects.bag.size?.height || 600,
+                    width: objects.bag.size?.width,
+                    height: objects.bag.size?.height,
                     rotation: 0,
                 },
                 layer: objects.bag.layer || 0,
@@ -3863,8 +3878,8 @@ app.post("/api/regenerate-collage-images", strictRateLimiter.middleware(), requi
 
         // Render both energy types
         const [highPngBuffer, lowPngBuffer] = await Promise.all([
-            renderSceneAsync(highEnergyObjects, 800, 600, "highenergy"),
-            renderSceneAsync(lowEnergyObjects, 800, 600, "lowenergy")
+            renderSceneAsync(highEnergyObjects, bagWidth, bagHeight, "highenergy"),
+            renderSceneAsync(lowEnergyObjects, bagWidth, bagHeight, "lowenergy")
         ]);
 
         // Convert to base64 for easy transport
@@ -3999,15 +4014,15 @@ app.post('/api/render-preview', strictRateLimiter.middleware(), requireAuth, asy
         const itemMap = new Map(allItems.map(i => [i.id, i]));
 
         const flatObjects = [];
-        let bagWidth = 800;
-        let bagHeight = 600;
+        let bagWidth = null;
+        let bagHeight = null;
         const missingPixelDataObjs = [];
         const missingImageObjs = [];
 
         if (objects.bag) {
             const b = objects.bag;
-            bagWidth = b.size?.width || 800;
-            bagHeight = b.size?.height || 600;
+            bagWidth = b.size?.width;
+            bagHeight = b.size?.height;
             const item = itemMap.get(b.id);
             const pixelDataPath = await resolvePixelDataPath(b.id, item?.pixel_data_path || null);
             if (!pixelDataPath && !b.filepath) {
