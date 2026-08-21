@@ -1,6 +1,7 @@
 import { isPointInPolygon, getRectCorners, edgeIntersectsPolygon, getTransformedPolygon } from "./geometry";
 import type { Point } from "../types/geometry";
 import type { SceneObject } from "../types/customization";
+import { getObjectPixelBounds } from "../lib/xrayRenderer";
 
 export const getTransformedValidRegion = (
   bag: SceneObject,
@@ -57,10 +58,25 @@ export const getObjectFootprintPolygon = (
  */
 export const getObjectAxisAlignedBox = (
   obj: {
+    id?: string;
     polygonOutline?: Point[];
     transform: { x: number; y: number; width: number; height: number; rotation: number };
   }
 ): { left: number; top: number; width: number; height: number; centerX: number; centerY: number } => {
+  if (obj.id) {
+    const cachedBounds = getObjectPixelBounds(obj.id);
+    if (cachedBounds) {
+      return {
+        left: cachedBounds.left,
+        top: cachedBounds.top,
+        width: cachedBounds.width,
+        height: cachedBounds.height,
+        centerX: cachedBounds.left + cachedBounds.width / 2,
+        centerY: cachedBounds.top + cachedBounds.height / 2,
+      };
+    }
+  }
+
   const b = getAxisAlignedBounds(getObjectFootprintPolygon(obj));
   const left = b.minX;
   const top = b.minY;
@@ -203,10 +219,12 @@ export const getRandomPositionInContainer = (
 };
 
 export const doObjectsOverlap = (obj1: SceneObject, obj2: SceneObject): boolean => {
+  const box1 = getObjectAxisAlignedBox(obj1);
+  const box2 = getObjectAxisAlignedBox(obj2);
   return !(
-    obj1.transform.x + obj1.transform.width / 2 < obj2.transform.x - obj2.transform.width / 2 ||
-    obj1.transform.x - obj1.transform.width / 2 > obj2.transform.x + obj2.transform.width / 2 ||
-    obj1.transform.y + obj1.transform.height / 2 < obj2.transform.y - obj2.transform.height / 2 ||
-    obj1.transform.y - obj1.transform.height / 2 > obj2.transform.y + obj2.transform.height / 2
+    box1.centerX + box1.width / 2 < box2.centerX - box2.width / 2 ||
+    box1.centerX - box1.width / 2 > box2.centerX + box2.width / 2 ||
+    box1.centerY + box1.height / 2 < box2.centerY - box2.height / 2 ||
+    box1.centerY - box1.height / 2 > box2.centerY + box2.height / 2
   );
 };
