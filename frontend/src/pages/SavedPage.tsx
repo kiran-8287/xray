@@ -396,11 +396,28 @@ function MultiSelectDropdown({ selected, options, onChange, placeholder }: {
   );
 }
 
+function ThreatImageCard({ src, alt, label }: { src: string; alt: string; label: string }) {
+    const [error, setError] = useState(false);
+    if (error) return null;
+    return (
+        <div className="rounded-xl border border-border bg-white p-1.5">
+            <p className="text-[9px] text-muted mb-1">{label}</p>
+            <img
+                src={src}
+                alt={alt}
+                onError={() => setError(true)}
+                className="w-full h-24 object-contain bg-white"
+            />
+        </div>
+    );
+}
+
 export default function SavedPage() {
   const [layouts, setLayouts] = useState<SavedLayout[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedLayout, setSelectedLayout] = useState<SavedLayout | null>(null);
+  const [threatImages, setThreatImages] = useState<{index: number, id: string, high: string | null, low: string | null}[]>([]);
   const [integrityIssues, setIntegrityIssues] = useState<Map<string, any[]>>(new Map());
   const [integrityLoading, setIntegrityLoading] = useState(false);
   
@@ -947,6 +964,8 @@ export default function SavedPage() {
         if (fileCount) {
           if (fileCount.high > 0) counts.push(`${fileCount.high} high`);
           if (fileCount.low > 0) counts.push(`${fileCount.low} low`);
+          if (fileCount.threatHigh > 0) counts.push(`${fileCount.threatHigh} threat high`);
+          if (fileCount.threatLow > 0) counts.push(`${fileCount.threatLow} threat low`);
           if (fileCount.annotations > 0) {
             counts.push(`${fileCount.annotations} annotation${fileCount.annotations === 1 ? '' : 's'}${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}`);
           }
@@ -979,6 +998,8 @@ export default function SavedPage() {
           savedPaths: {
             high: savedPaths.high.length,
             low: savedPaths.low.length,
+            threatHigh: savedPaths.threatHigh?.length || 0,
+            threatLow: savedPaths.threatLow?.length || 0,
             annotations: savedPaths.annotations?.length || 0
           }
         });
@@ -1072,6 +1093,8 @@ export default function SavedPage() {
         if (fileCount) {
           if (fileCount.high > 0) counts.push(`${fileCount.high} high`);
           if (fileCount.low > 0) counts.push(`${fileCount.low} low`);
+          if (fileCount.threatHigh > 0) counts.push(`${fileCount.threatHigh} threat high`);
+          if (fileCount.threatLow > 0) counts.push(`${fileCount.threatLow} threat low`);
           if (fileCount.annotations > 0) {
             counts.push(`${fileCount.annotations} annotation${fileCount.annotations === 1 ? '' : 's'}${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}`);
           }
@@ -1104,6 +1127,8 @@ export default function SavedPage() {
           savedPaths: {
             high: savedPaths.high.length,
             low: savedPaths.low.length,
+            threatHigh: savedPaths.threatHigh?.length || 0,
+            threatLow: savedPaths.threatLow?.length || 0,
             annotations: savedPaths.annotations?.length || 0
           }
         });
@@ -1205,6 +1230,29 @@ export default function SavedPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // Fetch clean threat image URLs when a layout detail is opened
+  useEffect(() => {
+    if (!selectedLayout) {
+      setThreatImages([]);
+      return;
+    }
+    let cancelled = false;
+    const fetchThreatImages = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/saved-layouts/${selectedLayout!.id}/threat-images`);
+        const data = await res.json();
+        if (!cancelled && data.ok) {
+          setThreatImages(data.threatImages || []);
+        }
+      } catch (err) {
+        console.error('Failed to fetch threat images:', err);
+        if (!cancelled) setThreatImages([]);
+      }
+    };
+    fetchThreatImages();
+    return () => { cancelled = true; };
+  }, [selectedLayout]);
+
   // Toast notification styles
   const toastStyles = `
     @keyframes slide-down {
@@ -1226,6 +1274,14 @@ export default function SavedPage() {
 
     if (savedPaths.low && savedPaths.low.length > 0) {
       parts.push(`Low-res: ${savedPaths.low[0]}`);
+    }
+
+    if (savedPaths.threatHigh && savedPaths.threatHigh.length > 0) {
+      parts.push(`Threat high-res (${savedPaths.threatHigh.length}): ${savedPaths.threatHigh[0]}`);
+    }
+
+    if (savedPaths.threatLow && savedPaths.threatLow.length > 0) {
+      parts.push(`Threat low-res (${savedPaths.threatLow.length}): ${savedPaths.threatLow[0]}`);
     }
 
     if (savedPaths.annotations && savedPaths.annotations.length > 0) {
@@ -1766,10 +1822,30 @@ export default function SavedPage() {
                               })}
                             </div>
                           </div>
-                        );
-                      })()}
-                   </div>
-                 </div>
+                         );
+                       })()}
+                       {threatImages.length > 0 && (
+                         <div className="mt-4 pt-4 border-t border-border">
+                           <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">Clean Threat Images</h3>
+                           <div className="space-y-3">
+                             {threatImages.map((ti) => (
+                                <div key={ti.index}>
+                                  <p className="text-[10px] text-muted font-medium mb-1">{ti.id || `Threat ${ti.index + 1}`}</p>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {ti.high && (
+                                      <ThreatImageCard src={ti.high} alt={`${ti.id} high`} label="High" />
+                                    )}
+                                    {ti.low && (
+                                      <ThreatImageCard src={ti.low} alt={`${ti.id} low`} label="Low" />
+                                    )}
+                                  </div>
+                                </div>
+                             ))}
+                           </div>
+                         </div>
+                       )}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
