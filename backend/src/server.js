@@ -1805,7 +1805,7 @@ async function handleSavedLayoutsExport(req, res) {
         }
 
         const exported = [];
-        const savedPaths = { high: [], low: [], annotations: [] };
+        const savedPaths = { high: [], low: [], annotations: [], threatHigh: [], threatLow: [] };
         const annotationRecords = [];
         const ANNOTATION_PARTITION_CAP = 5000;
 
@@ -1930,6 +1930,7 @@ async function handleSavedLayoutsExport(req, res) {
                     let highEnergyFilename = null;
                     let lowEnergyFilename = null;
                     let annotationPath = null;
+                    let threatImageList = [];
 
                     if (includeImages) {
                         const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
@@ -1954,6 +1955,56 @@ async function handleSavedLayoutsExport(req, res) {
                         lowEnergyPath = lowExportPath;
                         highEnergyFilename = `${baseName}_high.png`;
                         lowEnergyFilename = `${baseName}_low.png`;
+
+                        if (Array.isArray(objects.threats)) {
+                            for (let t = 0; t < objects.threats.length; t++) {
+                                try {
+                                    const threat = objects.threats[t];
+                                    const threatFlat = [{
+                                        id: threat.id,
+                                        filepath: threat.filepath,
+                                        pixel_data_path: threat.pixel_data_path,
+                                        transform: {
+                                            x: threat.center?.x || 0,
+                                            y: threat.center?.y || 0,
+                                            width: threat.size?.width || 100,
+                                            height: threat.size?.height || 100,
+                                            rotation: threat.rotation || 0,
+                                        },
+                                        layer: threat.layer || 1,
+                                    }];
+
+                                    const threatHighObjects = await enrichObjectsWithPixelData(threatFlat);
+                                    const threatLowObjects = await enrichObjectsWithPixelData(threatFlat);
+                                    for (const obj of threatLowObjects) {
+                                        if (obj.pixel_data_path) {
+                                            obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
+                                        }
+                                    }
+
+                                    const threatHighBuffer = await renderSceneAsync(threatHighObjects, 800, 600, 'highenergy');
+                                    const threatLowBuffer = await renderSceneAsync(threatLowObjects, 800, 600, 'lowenergy');
+
+                                    const threatHighPath = path.join(exportsHighRoot, `${baseName}_threat_${t}_high.png`);
+                                    const threatLowPath = path.join(exportsLowRoot, `${baseName}_threat_${t}_low.png`);
+
+                                    await fs.writeFile(threatHighPath, threatHighBuffer);
+                                    await fs.writeFile(threatLowPath, threatLowBuffer);
+
+                                    savedPaths.threatHigh.push(threatHighPath);
+                                    savedPaths.threatLow.push(threatLowPath);
+
+                                    threatImageList.push({
+                                        index: t,
+                                        id: threat.id,
+                                        high: `${baseName}_threat_${t}_high.png`,
+                                        low: `${baseName}_threat_${t}_low.png`,
+                                    });
+                                } catch (err) {
+                                    console.warn(`[export] Failed to render clean threat ${t} for layout ${layout.id}:`, err);
+                                }
+                            }
+                        }
                     }
 
                     const annotation = {
@@ -1963,7 +2014,8 @@ async function handleSavedLayoutsExport(req, res) {
                         exportedAt: new Date().toISOString(),
                         highEnergyImage: highEnergyFilename,
                         lowEnergyImage: lowEnergyFilename,
-                        objects: layout.layout_json?.objects || null
+                        objects: layout.layout_json?.objects || null,
+                        threatImages: threatImageList
                     };
                     // Per-layout annotation file — only created in 'individual' mode.
                     // 'selected' and 'all' both write batched annotations partitions,
@@ -2039,6 +2091,8 @@ async function handleSavedLayoutsExport(req, res) {
                 fileCount: {
                     high: savedPaths.high.length,
                     low: savedPaths.low.length,
+                    threatHigh: savedPaths.threatHigh.length,
+                    threatLow: savedPaths.threatLow.length,
                     annotations: savedPaths.annotations.length,
                     annotationPartitions: annotationPartitions.length
                 }
@@ -2257,6 +2311,32 @@ app.get('/api/saved-layouts/:id', async (req, res) => {
         const layout = await getSavedLayoutById(req.params.id);
         if (!layout) return res.status(404).json({ ok: false, error: 'Not found' });
         res.json({ ok: true, layout });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Return expected clean threat image URLs for a saved layout.
+// The frontend can use these to display per-threat images rendered on a white background.
+app.get('/api/saved-layouts/:id/threat-images', async (req, res) => {
+    try {
+        const layout = await getSavedLayoutById(req.params.id);
+        if (!layout) return res.status(404).json({ ok: false, error: 'Not found' });
+
+        const objects = layout.layout_json?.objects || {};
+        const threats = Array.isArray(objects.threats) ? objects.threats : [];
+        const safeLayoutId = String(layout.id || 'layout').replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'layout';
+        const baseName = `SB_${safeLayoutId}`;
+
+        const threatImages = threats.map((threat, t) => ({
+            index: t,
+            id: threat.id,
+            high: `/data/exports/high/${baseName}_threat_${t}_high.png`,
+            low: `/data/exports/low/${baseName}_threat_${t}_low.png`,
+        }));
+
+        res.json({ ok: true, threatImages });
     } catch (err) {
         console.error(err);
         res.status(500).json({ ok: false, error: String(err) });
@@ -2779,6 +2859,20 @@ async function deleteCollageImagesForLayout(layoutId) {
     } catch (err) {
       if (err && err.code !== 'ENOENT') {
         console.warn(`[delete-layout] Failed to remove image ${lowPath}: ${err.message}`);
+      }
+    }
+
+    // Clean threat images: SB_{id}_threat_{index}_high.png and _low.png
+    const threatFiles = await fs.readdir(root).catch(() => []);
+    for (const file of threatFiles) {
+      if (file.startsWith(`${baseName}_threat_`) && (file.endsWith('_high.png') || file.endsWith('_low.png'))) {
+        try {
+          await fs.unlink(path.join(root, file));
+        } catch (err) {
+          if (err && err.code !== 'ENOENT') {
+            console.warn(`[delete-layout] Failed to remove threat image ${file}: ${err.message}`);
+          }
+        }
       }
     }
   }
