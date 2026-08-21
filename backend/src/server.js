@@ -1758,6 +1758,9 @@ async function handleSavedLayoutsExport(req, res) {
     const includeThreatImages = typeof req.query.includeThreatImages === 'string'
         ? req.query.includeThreatImages.trim().toLowerCase() !== 'false'
         : true;
+    const includeNonThreatImages = typeof req.query.includeNonThreatImages === 'string'
+        ? req.query.includeNonThreatImages.trim().toLowerCase() !== 'false'
+        : true;
     const scope = typeof req.query.scope === 'string' && ['load', 'saved', 'collage'].includes(req.query.scope.trim().toLowerCase())
         ? req.query.scope.trim().toLowerCase()
         : 'saved';
@@ -1808,7 +1811,7 @@ async function handleSavedLayoutsExport(req, res) {
         }
 
         const exported = [];
-        const savedPaths = { high: [], low: [], annotations: [], threatHigh: [], threatLow: [] };
+        const savedPaths = { high: [], low: [], annotations: [], threatHigh: [], threatLow: [], nonThreatHigh: [], nonThreatLow: [] };
         const annotationRecords = [];
         const ANNOTATION_PARTITION_CAP = 5000;
 
@@ -1936,8 +1939,9 @@ async function handleSavedLayoutsExport(req, res) {
                     let lowEnergyFilename = null;
                     let annotationPath = null;
                     let threatImageList = [];
+                    let nonThreatImageList = [];
 
-                        if (includeImages) {
+                    if (includeImages) {
                             const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
                             const lowEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
                             for (const obj of lowEnergyObjects) {
@@ -2010,6 +2014,56 @@ async function handleSavedLayoutsExport(req, res) {
                                     }
                                 }
                             }
+
+                            if (includeNonThreatImages && Array.isArray(objects['non-threats'])) {
+                                for (let n = 0; n < objects['non-threats'].length; n++) {
+                                    try {
+                                        const nonThreat = objects['non-threats'][n];
+                                        const nonThreatFlat = [{
+                                            id: nonThreat.id,
+                                            filepath: nonThreat.filepath,
+                                            pixel_data_path: nonThreat.pixel_data_path,
+                                            transform: {
+                                                x: nonThreat.center?.x || 0,
+                                                y: nonThreat.center?.y || 0,
+                                                width: nonThreat.size?.width || 100,
+                                                height: nonThreat.size?.height || 100,
+                                                rotation: nonThreat.rotation || 0,
+                                            },
+                                            layer: nonThreat.layer || 2,
+                                        }];
+
+                                        const nonThreatHighObjects = await enrichObjectsWithPixelData(nonThreatFlat);
+                                        const nonThreatLowObjects = await enrichObjectsWithPixelData(nonThreatFlat);
+                                        for (const obj of nonThreatLowObjects) {
+                                            if (obj.pixel_data_path) {
+                                                obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
+                                            }
+                                        }
+
+                                        const nonThreatHighBuffer = await renderSceneAsync(nonThreatHighObjects, bagWidth, bagHeight, 'highenergy');
+                                        const nonThreatLowBuffer = await renderSceneAsync(nonThreatLowObjects, bagWidth, bagHeight, 'lowenergy');
+
+                                        const nonThreatHighPath = path.join(exportsHighRoot, `${baseName}_nonthreat_${n}_high.png`);
+                                        const nonThreatLowPath = path.join(exportsLowRoot, `${baseName}_nonthreat_${n}_low.png`);
+
+                                        await fs.writeFile(nonThreatHighPath, nonThreatHighBuffer);
+                                        await fs.writeFile(nonThreatLowPath, nonThreatLowBuffer);
+
+                                        savedPaths.nonThreatHigh.push(nonThreatHighPath);
+                                        savedPaths.nonThreatLow.push(nonThreatLowPath);
+
+                                        nonThreatImageList.push({
+                                            index: n,
+                                            id: nonThreat.id,
+                                            high: `${baseName}_nonthreat_${n}_high.png`,
+                                            low: `${baseName}_nonthreat_${n}_low.png`,
+                                        });
+                                    } catch (err) {
+                                        console.warn(`[export] Failed to render clean non-threat ${n} for layout ${layout.id}:`, err);
+                                    }
+                                }
+                            }
                         }
 
                     const annotation = {
@@ -2020,7 +2074,8 @@ async function handleSavedLayoutsExport(req, res) {
                         highEnergyImage: highEnergyFilename,
                         lowEnergyImage: lowEnergyFilename,
                         objects: layout.layout_json?.objects || null,
-                        threatImages: threatImageList
+                        threatImages: threatImageList,
+                        nonThreatImages: nonThreatImageList
                     };
                     // Per-layout annotation file — only created in 'individual' mode.
                     // 'selected' and 'all' both write batched annotations partitions,
@@ -2098,6 +2153,8 @@ async function handleSavedLayoutsExport(req, res) {
                     low: savedPaths.low.length,
                     threatHigh: savedPaths.threatHigh.length,
                     threatLow: savedPaths.threatLow.length,
+                    nonThreatHigh: savedPaths.nonThreatHigh.length,
+                    nonThreatLow: savedPaths.nonThreatLow.length,
                     annotations: savedPaths.annotations.length,
                     annotationPartitions: annotationPartitions.length
                 }
@@ -2344,6 +2401,31 @@ app.get('/api/saved-layouts/:id/threat-images', async (req, res) => {
         }));
 
         res.json({ ok: true, threatImages });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
+});
+
+// Return expected clean non-threat image URLs for a saved layout.
+app.get('/api/saved-layouts/:id/non-threat-images', async (req, res) => {
+    try {
+        const layout = await getSavedLayoutById(req.params.id);
+        if (!layout) return res.status(404).json({ ok: false, error: 'Not found' });
+
+        const objects = layout.layout_json?.objects || {};
+        const nonThreats = Array.isArray(objects['non-threats']) ? objects['non-threats'] : [];
+        const safeLayoutId = String(layout.id || 'layout').replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'layout';
+        const baseName = `SB_${safeLayoutId}`;
+
+        const nonThreatImages = nonThreats.map((nonThreat, n) => ({
+            index: n,
+            id: nonThreat.id,
+            high: `/data/exports/high/${baseName}_nonthreat_${n}_high.png`,
+            low: `/data/exports/low/${baseName}_nonthreat_${n}_low.png`,
+        }));
+
+        res.json({ ok: true, nonThreatImages });
     } catch (err) {
         console.error(err);
         res.status(500).json({ ok: false, error: String(err) });
@@ -2878,6 +2960,20 @@ async function deleteCollageImagesForLayout(layoutId) {
         } catch (err) {
           if (err && err.code !== 'ENOENT') {
             console.warn(`[delete-layout] Failed to remove threat image ${file}: ${err.message}`);
+          }
+        }
+      }
+    }
+
+    // Clean non-threat images: SB_{id}_nonthreat_{index}_high.png and _low.png
+    const nonThreatFiles = await fs.readdir(root).catch(() => []);
+    for (const file of nonThreatFiles) {
+      if (file.startsWith(`${baseName}_nonthreat_`) && (file.endsWith('_high.png') || file.endsWith('_low.png'))) {
+        try {
+          await fs.unlink(path.join(root, file));
+        } catch (err) {
+          if (err && err.code !== 'ENOENT') {
+            console.warn(`[delete-layout] Failed to remove non-threat image ${file}: ${err.message}`);
           }
         }
       }

@@ -239,10 +239,16 @@ def highlight_threats(canvas, flat_objects):
         threat_idx += 1
 
         poly = mask_points_to_image(mask, obj)
-        # Bounding box derived from the segmentation mask as an axis-aligned box
-        # (standard detection format, never tilted). We ignore the annotation's
-        # rotated center/size/rotation for the box.
-        corners = axis_aligned_box(poly)
+        # Tight bounding box: AABB of the mask at 0° rotation, then rotated
+        # to match the object's orientation. Matches the frontend rotated-box
+        # rendering and avoids the loose empty-corner triangles of the AABB.
+        pts = np.array([[p["x"], p["y"]] for p in mask], dtype=np.float64)
+        local = (pts - 0.5) * np.array([box_w, box_h])
+        x0, x1 = float(local[:, 0].min()), float(local[:, 0].max())
+        y0, y1 = float(local[:, 1].min()), float(local[:, 1].max())
+        local_corners = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float64)
+        world = local_corners @ rot2d(angle).T + np.array([cx, cy])
+        corners = np.round(world).astype(np.int32)
 
         # 1) fill the mask in the threat's colour (semi-transparent so the threat
         #    underneath stays visible)

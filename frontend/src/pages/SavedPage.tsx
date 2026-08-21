@@ -418,6 +418,7 @@ export default function SavedPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedLayout, setSelectedLayout] = useState<SavedLayout | null>(null);
   const [threatImages, setThreatImages] = useState<{index: number, id: string, high: string | null, low: string | null}[]>([]);
+  const [nonThreatImages, setNonThreatImages] = useState<{index: number, id: string, high: string | null, low: string | null}[]>([]);
   const [integrityIssues, setIntegrityIssues] = useState<Map<string, any[]>>(new Map());
   const [integrityLoading, setIntegrityLoading] = useState(false);
   
@@ -427,7 +428,7 @@ export default function SavedPage() {
   const [deleting, setDeleting] = useState(false);
 
   // Export confirmation state
-  const [exportConfirm, setExportConfirm] = useState<{ show: boolean; includeImages: boolean; includeThreatImages: boolean }>({ show: false, includeImages: true, includeThreatImages: true });
+  const [exportConfirm, setExportConfirm] = useState<{ show: boolean; includeImages: boolean; includeThreatImages: boolean; includeNonThreatImages: boolean }>({ show: false, includeImages: true, includeThreatImages: true, includeNonThreatImages: true });
   
   // Toast notifications
   const [exporting, setExporting] = useState(false);
@@ -448,6 +449,7 @@ export default function SavedPage() {
     layoutId?: string;
   } | null>(null);
   const [includeThreatImages, setIncludeThreatImages] = useState(true);
+  const [includeNonThreatImages, setIncludeNonThreatImages] = useState(true);
   
   const [toasts, setToasts] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
   
@@ -843,7 +845,7 @@ export default function SavedPage() {
   };
 
   // Export a single layout by id.
-  const exportIndividual = async (layoutId: string, includeImages: boolean = true, includeThreatImages: boolean = true) => {
+  const exportIndividual = async (layoutId: string, includeImages: boolean = true, includeThreatImages: boolean = true, includeNonThreatImages: boolean = true) => {
     if (exporting) return;
     setExporting(true);
     setExportMode('single');
@@ -854,7 +856,7 @@ export default function SavedPage() {
       if (apiKey) headers['X-API-Key'] = apiKey;
 
       const res = await fetchWithTimeout(
-        `${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(layoutId)}&saveMode=individual&includeImages=${includeImages}&includeThreatImages=${includeThreatImages}&scope=saved`,
+        `${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(layoutId)}&saveMode=individual&includeImages=${includeImages}&includeThreatImages=${includeThreatImages}&includeNonThreatImages=${includeNonThreatImages}&scope=saved`,
         { headers }
       );
 
@@ -901,16 +903,16 @@ export default function SavedPage() {
     setPendingSaveAction(null);
 
     if (type === 'all') {
-      await exportAll(includeImages, includeThreatImages);
+      await exportAll(includeImages, includeThreatImages, includeNonThreatImages);
     } else if (type === 'selected') {
-      await exportSelected(includeImages, includeThreatImages);
+      await exportSelected(includeImages, includeThreatImages, includeNonThreatImages);
     } else if (type === 'individual' && layoutId) {
-      await exportIndividual(layoutId, includeImages, includeThreatImages);
+      await exportIndividual(layoutId, includeImages, includeThreatImages, includeNonThreatImages);
     }
   };
 
   // Export selected layouts - saves to exports folder with high/low resolution
-  const exportSelected = async (includeImages: boolean = true, includeThreatImages: boolean = true) => {
+  const exportSelected = async (includeImages: boolean = true, includeThreatImages: boolean = true, includeNonThreatImages: boolean = true) => {
     if (selectedForExport.size === 0) {
       showToast('error', 'No layouts selected for export');
       return;
@@ -942,7 +944,7 @@ export default function SavedPage() {
         headers['X-API-Key'] = apiKey;
       }
 
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}&saveMode=selected&includeImages=${includeImages}&includeThreatImages=${includeThreatImages}&scope=saved`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?ids=${encodeURIComponent(ids)}&jobId=${encodeURIComponent(jobId)}&saveMode=selected&includeImages=${includeImages}&includeThreatImages=${includeThreatImages}&includeNonThreatImages=${includeNonThreatImages}&scope=saved`, {
         headers,
         signal: controller.signal,
       }, LONG_REQUEST_TIMEOUT_MS);
@@ -967,6 +969,8 @@ export default function SavedPage() {
           if (fileCount.low > 0) counts.push(`${fileCount.low} low`);
           if (fileCount.threatHigh > 0) counts.push(`${fileCount.threatHigh} threat high`);
           if (fileCount.threatLow > 0) counts.push(`${fileCount.threatLow} threat low`);
+          if (fileCount.nonThreatHigh > 0) counts.push(`${fileCount.nonThreatHigh} non-threat high`);
+          if (fileCount.nonThreatLow > 0) counts.push(`${fileCount.nonThreatLow} non-threat low`);
           if (fileCount.annotations > 0) {
             counts.push(`${fileCount.annotations} annotation${fileCount.annotations === 1 ? '' : 's'}${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}`);
           }
@@ -1001,6 +1005,8 @@ export default function SavedPage() {
             low: savedPaths.low.length,
             threatHigh: savedPaths.threatHigh?.length || 0,
             threatLow: savedPaths.threatLow?.length || 0,
+            nonThreatHigh: savedPaths.nonThreatHigh?.length || 0,
+            nonThreatLow: savedPaths.nonThreatLow?.length || 0,
             annotations: savedPaths.annotations?.length || 0
           }
         });
@@ -1028,19 +1034,19 @@ export default function SavedPage() {
 
   // Export all layouts - saves to exports folder with high/low resolution.
   // Supports cancellation via the Stop Saving button (jobId + AbortController).
-  const exportAll = async (includeImages: boolean = true, includeThreatImages: boolean = true) => {
+  const exportAll = async (includeImages: boolean = true, includeThreatImages: boolean = true, includeNonThreatImages: boolean = true) => {
     if (!pagination || pagination.total === 0) {
       showToast('error', 'No layouts to export');
       return;
     }
     if (exporting) return;
 
-    setExportConfirm({ show: true, includeImages, includeThreatImages });
+    setExportConfirm({ show: true, includeImages, includeThreatImages, includeNonThreatImages });
   };
 
   const confirmExportAll = async () => {
-    const { includeImages, includeThreatImages } = exportConfirm;
-    setExportConfirm({ show: false, includeImages: true, includeThreatImages: true });
+    const { includeImages, includeThreatImages, includeNonThreatImages } = exportConfirm;
+    setExportConfirm({ show: false, includeImages: true, includeThreatImages: true, includeNonThreatImages: true });
     
     if (!pagination || pagination.total === 0) {
       showToast('error', 'No layouts to export');
@@ -1071,7 +1077,7 @@ export default function SavedPage() {
         headers['X-API-Key'] = apiKey;
       }
       
-      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}&saveMode=all&includeImages=${includeImages}&includeThreatImages=${includeThreatImages}&scope=saved`, {
+      const res = await fetchWithTimeout(`${API_BASE}/api/saved-layouts/export?jobId=${encodeURIComponent(jobId)}&saveMode=all&includeImages=${includeImages}&includeThreatImages=${includeThreatImages}&includeNonThreatImages=${includeNonThreatImages}&scope=saved`, {
         headers,
         signal: controller.signal,
       }, LONG_REQUEST_TIMEOUT_MS); // 30 minute timeout
@@ -1096,6 +1102,8 @@ export default function SavedPage() {
           if (fileCount.low > 0) counts.push(`${fileCount.low} low`);
           if (fileCount.threatHigh > 0) counts.push(`${fileCount.threatHigh} threat high`);
           if (fileCount.threatLow > 0) counts.push(`${fileCount.threatLow} threat low`);
+          if (fileCount.nonThreatHigh > 0) counts.push(`${fileCount.nonThreatHigh} non-threat high`);
+          if (fileCount.nonThreatLow > 0) counts.push(`${fileCount.nonThreatLow} non-threat low`);
           if (fileCount.annotations > 0) {
             counts.push(`${fileCount.annotations} annotation${fileCount.annotations === 1 ? '' : 's'}${fileCount.annotationPartitions > 1 ? ` in ${fileCount.annotationPartitions} partitions` : ''}`);
           }
@@ -1130,6 +1138,8 @@ export default function SavedPage() {
             low: savedPaths.low.length,
             threatHigh: savedPaths.threatHigh?.length || 0,
             threatLow: savedPaths.threatLow?.length || 0,
+            nonThreatHigh: savedPaths.nonThreatHigh?.length || 0,
+            nonThreatLow: savedPaths.nonThreatLow?.length || 0,
             annotations: savedPaths.annotations?.length || 0
           }
         });
@@ -1254,6 +1264,29 @@ export default function SavedPage() {
     return () => { cancelled = true; };
   }, [selectedLayout]);
 
+  // Fetch clean non-threat image URLs when a layout detail is opened
+  useEffect(() => {
+    if (!selectedLayout) {
+      setNonThreatImages([]);
+      return;
+    }
+    let cancelled = false;
+    const fetchNonThreatImages = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/saved-layouts/${selectedLayout!.id}/non-threat-images`);
+        const data = await res.json();
+        if (!cancelled && data.ok) {
+          setNonThreatImages(data.nonThreatImages || []);
+        }
+      } catch (err) {
+        console.error('Failed to fetch non-threat images:', err);
+        if (!cancelled) setNonThreatImages([]);
+      }
+    };
+    fetchNonThreatImages();
+    return () => { cancelled = true; };
+  }, [selectedLayout]);
+
   // Toast notification styles
   const toastStyles = `
     @keyframes slide-down {
@@ -1283,6 +1316,14 @@ export default function SavedPage() {
 
     if (savedPaths.threatLow && savedPaths.threatLow.length > 0) {
       parts.push(`Threat low-res (${savedPaths.threatLow.length}): ${savedPaths.threatLow[0]}`);
+    }
+
+    if (savedPaths.nonThreatHigh && savedPaths.nonThreatHigh.length > 0) {
+      parts.push(`Non-threat high-res (${savedPaths.nonThreatHigh.length}): ${savedPaths.nonThreatHigh[0]}`);
+    }
+
+    if (savedPaths.nonThreatLow && savedPaths.nonThreatLow.length > 0) {
+      parts.push(`Non-threat low-res (${savedPaths.nonThreatLow.length}): ${savedPaths.nonThreatLow[0]}`);
     }
 
     if (savedPaths.annotations && savedPaths.annotations.length > 0) {
@@ -1825,26 +1866,46 @@ export default function SavedPage() {
                           </div>
                          );
                        })()}
-                       {threatImages.length > 0 && (
-                         <div className="mt-4 pt-4 border-t border-border">
-                           <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">Clean Threat Images</h3>
-                           <div className="space-y-3">
-                             {threatImages.map((ti) => (
-                                <div key={ti.index}>
-                                  <p className="text-[10px] text-muted font-medium mb-1">{ti.id || `Threat ${ti.index + 1}`}</p>
-                                  <div className="grid grid-cols-2 gap-2">
-                                    {ti.high && (
-                                      <ThreatImageCard src={ti.high} alt={`${ti.id} high`} label="High" />
-                                    )}
-                                    {ti.low && (
-                                      <ThreatImageCard src={ti.low} alt={`${ti.id} low`} label="Low" />
-                                    )}
-                                  </div>
-                                </div>
-                             ))}
-                           </div>
-                         </div>
-                       )}
+                        {threatImages.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-border">
+                            <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">Clean Threat Images</h3>
+                            <div className="space-y-3">
+                              {threatImages.map((ti) => (
+                                 <div key={ti.index}>
+                                   <p className="text-[10px] text-muted font-medium mb-1">{ti.id || `Threat ${ti.index + 1}`}</p>
+                                   <div className="grid grid-cols-2 gap-2">
+                                     {ti.high && (
+                                       <ThreatImageCard src={ti.high} alt={`${ti.id} high`} label="High" />
+                                     )}
+                                     {ti.low && (
+                                       <ThreatImageCard src={ti.low} alt={`${ti.id} low`} label="Low" />
+                                     )}
+                                   </div>
+                                 </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {nonThreatImages.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-border">
+                            <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">Clean Non-Threat Images</h3>
+                            <div className="space-y-3">
+                              {nonThreatImages.map((nti) => (
+                                 <div key={nti.index}>
+                                   <p className="text-[10px] text-muted font-medium mb-1">{nti.id || `Non-threat ${nti.index + 1}`}</p>
+                                   <div className="grid grid-cols-2 gap-2">
+                                     {nti.high && (
+                                       <ThreatImageCard src={nti.high} alt={`${nti.id} high`} label="High" />
+                                     )}
+                                     {nti.low && (
+                                       <ThreatImageCard src={nti.low} alt={`${nti.id} low`} label="Low" />
+                                     )}
+                                   </div>
+                                 </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                     </div>
                   </div>
                 </div>
@@ -1924,18 +1985,31 @@ export default function SavedPage() {
               </div>
             </div>
 
-            <div className="space-y-2 mb-4">
-              <label className="flex items-center gap-2 text-sm text-ink">
-                <input
-                  type="checkbox"
-                  checked={includeThreatImages}
-                  onChange={(e) => setIncludeThreatImages(e.target.checked)}
-                  className="w-4 h-4 rounded border-border accent-accent"
-                />
-                Save clean threat images
-              </label>
-              <p className="text-[10px] text-muted ml-6">When enabled, individual high/low threat images are exported in addition to the synthesized bag images.</p>
-            </div>
+             <div className="space-y-2 mb-4">
+               <label className="flex items-center gap-2 text-sm text-ink">
+                 <input
+                   type="checkbox"
+                   checked={includeThreatImages}
+                   onChange={(e) => setIncludeThreatImages(e.target.checked)}
+                   className="w-4 h-4 rounded border-border accent-accent"
+                 />
+                 Save clean threat images
+               </label>
+               <p className="text-[10px] text-muted ml-6">When enabled, individual high/low threat images are exported in addition to the synthesized bag images.</p>
+             </div>
+
+             <div className="space-y-2 mb-4">
+               <label className="flex items-center gap-2 text-sm text-ink">
+                 <input
+                   type="checkbox"
+                   checked={includeNonThreatImages}
+                   onChange={(e) => setIncludeNonThreatImages(e.target.checked)}
+                   className="w-4 h-4 rounded border-border accent-accent"
+                 />
+                 Save clean non-threat images
+               </label>
+               <p className="text-[10px] text-muted ml-6">When enabled, individual high/low non-threat images are exported in addition to the synthesized bag images.</p>
+             </div>
 
             <div className="space-y-2 mb-6">
               <button
@@ -2020,7 +2094,7 @@ export default function SavedPage() {
 
       {/* Export Confirmation Modal */}
       {exportConfirm.show && (
-        <div className="fixed inset-0 z-[60] bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setExportConfirm({ show: false, includeImages: true, includeThreatImages: true })}>
+        <div className="fixed inset-0 z-[60] bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setExportConfirm({ show: false, includeImages: true, includeThreatImages: true, includeNonThreatImages: true })}>
           <div
             className="w-full max-w-md bg-panel rounded-2xl border border-border shadow-2xl p-6"
             onClick={(event) => event.stopPropagation()}
@@ -2045,7 +2119,7 @@ export default function SavedPage() {
 
              <div className="flex items-center justify-end gap-2">
                <button
-                 onClick={() => setExportConfirm({ show: false, includeImages: true, includeThreatImages: true })}
+                 onClick={() => setExportConfirm({ show: false, includeImages: true, includeThreatImages: true, includeNonThreatImages: true })}
                  disabled={exporting}
                 className="px-4 py-2 rounded-lg border border-border bg-white text-sm text-ink hover:bg-surface transition-colors disabled:cursor-not-allowed disabled:opacity-40"
               >

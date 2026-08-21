@@ -5,9 +5,15 @@ import { IMG_CACHE_MAX } from "./constants";
 import { debugLog } from "./debugLog";
 
 export const imgCache = new Map<string, HTMLImageElement>();
+export const objectPixelBoundsCache = new Map<string, { left: number; top: number; width: number; height: number }>();
 
 export function clearCaches(): void {
   imgCache.clear();
+  objectPixelBoundsCache.clear();
+}
+
+export function getObjectPixelBounds(objId: string): { left: number; top: number; width: number; height: number } | undefined {
+  return objectPixelBoundsCache.get(objId);
 }
 
 export function getLoadedImage(filepath: string, onLoad: () => void): HTMLImageElement | null {
@@ -83,8 +89,8 @@ export async function drawXRayComposite(
   for (const { obj, img } of renderList) {
     layerCtx.clearRect(0, 0, width, height);
 
-    const imgWidth = img.naturalWidth;
-    const imgHeight = img.naturalHeight;
+    const imgWidth = obj.transform.width;
+    const imgHeight = obj.transform.height;
 
     layerCtx.save();
     layerCtx.translate(obj.transform.x, obj.transform.y);
@@ -100,6 +106,39 @@ export async function drawXRayComposite(
 
     const imgData = layerCtx.getImageData(0, 0, width, height);
     const pixels = imgData.data;
+
+    let minX = width, minY = height, maxX = 0, maxY = 0;
+    let hasNonWhite = false;
+
+    for (let i = 0; i < pixels.length; i += 4) {
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      const alpha = pixels[i + 3];
+
+      if (alpha === 0) continue;
+      if (r >= 245 && g >= 245 && b >= 245) continue;
+
+      hasNonWhite = true;
+      const idx = i / 4;
+      const x = idx % width;
+      const y = Math.floor(idx / width);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+
+    if (hasNonWhite) {
+      objectPixelBoundsCache.set(obj.id, {
+        left: minX,
+        top: minY,
+        width: Math.max(1, maxX - minX + 1),
+        height: Math.max(1, maxY - minY + 1),
+      });
+    } else {
+      objectPixelBoundsCache.delete(obj.id);
+    }
 
     for (let i = 0; i < pixels.length; i += 4) {
       const r = pixels[i];
@@ -170,10 +209,10 @@ export function computeObjectStats(
     tempCtx.rotate((obj.transform.rotation * Math.PI) / 180);
     tempCtx.drawImage(
       img,
-      -img.naturalWidth / 2,
-      -img.naturalHeight / 2,
-      img.naturalWidth,
-      img.naturalHeight
+      -obj.transform.width / 2,
+      -obj.transform.height / 2,
+      obj.transform.width,
+      obj.transform.height
     );
     tempCtx.restore();
 
