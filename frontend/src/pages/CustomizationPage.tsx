@@ -24,14 +24,14 @@ import CanvasArea from "../components/customization/CanvasArea";
 
 function getStencilKind(category: string): string {
   const normalized = category.toLowerCase();
-  if (normalized.includes("bag")) return "bag";
-  if (normalized.includes("tray")) return "tray";
-  if (normalized.includes("threat") || normalized.includes("prohibited")) return "threat";
-  if (normalized.includes("cloth")) return "clothes";
-  if (normalized.includes("electronics")) return "electronics";
-  if (normalized.includes("food") || normalized.includes("drink")) return "food";
-  if (normalized.includes("stationery") || normalized.includes("stationary") || normalized.includes("office")) return "stationary";
-  if (normalized.includes("lag")) return "lag";
+  if (normalized.startsWith("bag")) return "bag";
+  if (normalized.startsWith("tray")) return "tray";
+  if (normalized.startsWith("threat") || normalized.startsWith("prohibited")) return "threat";
+  if (normalized.startsWith("cloth")) return "clothes";
+  if (normalized.startsWith("electronics")) return "electronics";
+  if (normalized.startsWith("food") || normalized.startsWith("drink")) return "food";
+  if (normalized.startsWith("stationery") || normalized.startsWith("stationary") || normalized.startsWith("office")) return "stationary";
+  if (normalized.startsWith("lag")) return "lag";
   return "stationary";
 }
 
@@ -613,7 +613,7 @@ export default function CustomizationPage() {
         tags: bagTags.length > 0 ? bagTags : undefined,
       } : null;
 
-      const threats = objects.filter(o => o.library === "threat").map(obj => ({
+      const threats = objects.filter(o => o.library === "threat" && o.id !== bagObject?.id).map(obj => ({
         // Use the original library item id (itemId) so the backend can resolve
         // pixel data / masks even when the same item is placed multiple times.
         id: obj.itemId || obj.id,
@@ -627,7 +627,7 @@ export default function CustomizationPage() {
         layer: obj.layer,
       }));
 
-      const nonThreats = objects.filter(o => o.library !== "bag" && o.library !== "threat").map(obj => ({
+      const nonThreats = objects.filter(o => o.library !== "bag" && o.library !== "threat" && o.id !== bagObject?.id).map(obj => ({
         // Use the original library item id (itemId) so the backend can resolve
         // pixel data / masks even when the same item is placed multiple times.
         id: obj.itemId || obj.id,
