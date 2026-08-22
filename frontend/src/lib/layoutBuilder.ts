@@ -84,11 +84,11 @@ export function buildLayoutPayload(comb: CombinatorialResult): LayoutPayload {
     : null;
 
   const threats = comb.objects
-    .filter((o) => o.library === "threat")
+    .filter((o) => o.library === "threat" && o.id !== bagObject?.id)
     .map((obj) => toLayoutObject(obj));
 
   const nonThreats = comb.objects
-    .filter((o) => o.library !== "bag" && o.library !== "threat")
+    .filter((o) => o.library !== "bag" && o.library !== "threat" && o.id !== bagObject?.id)
     .map((obj) => toLayoutObject(obj));
 
   return {

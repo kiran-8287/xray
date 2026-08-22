@@ -116,7 +116,6 @@ export const isObjectInsideContainer = (
         { x: obj.transform.x, y: obj.transform.y },
         { width: obj.transform.width, height: obj.transform.height },
         obj.transform.rotation,
-        // Normalize from [0,1] to [-0.5,0.5] range — same as getTransformedValidRegion
         obj.polygonOutline.map(p => ({ x: p.x - 0.5, y: p.y - 0.5 }))
       )
     : getRectCorners(
@@ -125,24 +124,19 @@ export const isObjectInsideContainer = (
         obj.transform.rotation
       );
 
-  // Use the tight axis-aligned bounding box of the footprint (mask boundary),
-  // never the tilted polygon, matching standard detection-model box format.
-  const b = getAxisAlignedBounds(objectOutline);
-  const objectBox: Point[] = [
-    { x: b.minX, y: b.minY },
-    { x: b.maxX, y: b.minY },
-    { x: b.maxX, y: b.maxY },
-    { x: b.minX, y: b.maxY },
-  ];
+  // Check the actual shape outline, not an inflated axis-aligned bounding box.
+  // Using the AABB of a rotated polygon produces false positives because the
+  // bounding-box corners extend beyond the real rotated shape.
+  const objectBox = objectOutline;
 
-  // 1. Verify all axis-aligned corners are inside the valid region
+  // 1. Verify all actual corners are inside the valid region
   for (const corner of objectBox) {
     if (!isPointInPolygon(corner, validRegion)) {
       return false;
     }
   }
-  
-  // 2. Verify no box edge crosses the valid region boundary
+
+  // 2. Verify no shape edge crosses the valid region boundary
   for (let i = 0; i < objectBox.length; i++) {
     const a = objectBox[i];
     const b = objectBox[(i + 1) % objectBox.length];
