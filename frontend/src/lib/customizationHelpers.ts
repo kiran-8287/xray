@@ -103,6 +103,7 @@ export const getAxisAlignedBounds = (points: Point[]): { minX: number; minY: num
 
 export const isObjectInsideContainer = (
   obj: {
+    id?: string;
     polygonOutline?: Point[];
     transform: { x: number; y: number; width: number; height: number; rotation: number };
   },
@@ -110,7 +111,10 @@ export const isObjectInsideContainer = (
 ): boolean => {
   const validRegion = getTransformedValidRegion(container);
   if (validRegion.length < 3) return true;
-  
+
+  // Most accurate: use the actual transformed polygon outline from the
+  // segmentation mask. This follows the real object shape, including any
+  // user-applied rotation, instead of an inflated axis-aligned box.
   const objectOutline = obj.polygonOutline && obj.polygonOutline.length >= 3
     ? getTransformedPolygon(
         { x: obj.transform.x, y: obj.transform.y },
@@ -124,27 +128,22 @@ export const isObjectInsideContainer = (
         obj.transform.rotation
       );
 
-  // Check the actual shape outline, not an inflated axis-aligned bounding box.
-  // Using the AABB of a rotated polygon produces false positives because the
-  // bounding-box corners extend beyond the real rotated shape.
-  const objectBox = objectOutline;
-
   // 1. Verify all actual corners are inside the valid region
-  for (const corner of objectBox) {
+  for (const corner of objectOutline) {
     if (!isPointInPolygon(corner, validRegion)) {
       return false;
     }
   }
 
   // 2. Verify no shape edge crosses the valid region boundary
-  for (let i = 0; i < objectBox.length; i++) {
-    const a = objectBox[i];
-    const b = objectBox[(i + 1) % objectBox.length];
+  for (let i = 0; i < objectOutline.length; i++) {
+    const a = objectOutline[i];
+    const b = objectOutline[(i + 1) % objectOutline.length];
     if (edgeIntersectsPolygon(a, b, validRegion)) {
       return false;
     }
   }
-  
+
   return true;
 };
 
