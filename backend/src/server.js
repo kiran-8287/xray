@@ -3734,6 +3734,31 @@ async function enrichObjectsWithPixelData(objects) {
   return resolved;
 }
 
+// Resolve the canvas dimensions for rendering from either payload shape:
+//  - Shape A (saved layout JSON): { bag: { size: { width, height } }, threats: [...], "non-threats": [...] }
+//  - Shape B (scene-object array): [{ stencilId: "bag", transform: { width, height }, ... }, ...]
+// Both shapes carry the ORIGINAL bag pixel size (the bag is never resized), so the
+// resolved values are used directly as the output canvas size.
+function resolveCanvasSize(objects) {
+  if (objects && !Array.isArray(objects)) {
+    const b = objects.bag;
+    if (b) {
+      return { width: Number(b.size?.width), height: Number(b.size?.height) };
+    }
+    return null;
+  }
+  const bag = (Array.isArray(objects) ? objects : []).find(o => o?.stencilId === "bag" || o?.library === "bag");
+  if (!bag) return null;
+  const w = bag.transform?.width ?? bag.initialWidth;
+  const h = bag.transform?.height ?? bag.initialHeight;
+  return { width: Number(w), height: Number(h) };
+}
+
+// True when the resolved canvas size is usable (finite, positive numbers).
+function isValidCanvasSize(size) {
+  return !!size && Number.isFinite(size.width) && Number.isFinite(size.height) && size.width > 0 && size.height > 0;
+}
+
 // Render and save a collage combination as a PNG image
 app.post("/api/render-and-save-collage", strictRateLimiter.middleware(), requireAuth, async (req, res) => {
     try {
@@ -3761,8 +3786,12 @@ app.post("/api/render-and-save-collage", strictRateLimiter.middleware(), require
         const filename = `${safeName}.png`;
         const outputPath = path.join(energyDir, filename);
 
-        const bagWidth = objects?.bag?.size?.width;
-        const bagHeight = objects?.bag?.size?.height;
+        const canvasSize = resolveCanvasSize(objects);
+        if (!isValidCanvasSize(canvasSize)) {
+            return res.status(400).json({ ok: false, error: "Cannot determine bag dimensions from objects payload" });
+        }
+        const bagWidth = canvasSize.width;
+        const bagHeight = canvasSize.height;
         const enrichedObjects = await enrichObjectsWithPixelData(objects);
 
         const pngBuffer = await renderSceneAsync(enrichedObjects, bagWidth, bagHeight, energyType);
@@ -3791,8 +3820,12 @@ app.post("/api/render-and-save-collage-both", strictRateLimiter.middleware(), re
             return res.status(400).json({ ok: false, error: "Missing name" });
         }
 
-        const bagWidth = objects?.bag?.size?.width;
-        const bagHeight = objects?.bag?.size?.height;
+        const canvasSize = resolveCanvasSize(objects);
+        if (!isValidCanvasSize(canvasSize)) {
+            return res.status(400).json({ ok: false, error: "Cannot determine bag dimensions from objects payload" });
+        }
+        const bagWidth = canvasSize.width;
+        const bagHeight = canvasSize.height;
 
         const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
         const filename = `${safeName}.png`;

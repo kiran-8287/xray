@@ -1307,16 +1307,22 @@ export const GenerationService = {
     notifySubscribers();
   },
 
-  updateCombination(combinationId: string, updatedObjects: SceneObject[]) {
+  updateCombination(combinationId: string, updatedObjects: SceneObject[], threats?: Item[], others?: Item[]) {
     const idx1 = state.combinations.findIndex(c => c.id === combinationId);
     if (idx1 !== -1) {
-      state.combinations[idx1] = { ...state.combinations[idx1], objects: updatedObjects };
+      const updated = { ...state.combinations[idx1], objects: updatedObjects };
+      if (threats !== undefined) updated.threats = threats;
+      if (others !== undefined) updated.others = others;
+      state.combinations[idx1] = updated;
       notifySubscribers();
       return;
     }
     const idx2 = generatedBuffer.findIndex(c => c.id === combinationId);
     if (idx2 !== -1) {
-      generatedBuffer[idx2] = { ...generatedBuffer[idx2], objects: updatedObjects };
+      const updated = { ...generatedBuffer[idx2], objects: updatedObjects };
+      if (threats !== undefined) updated.threats = threats;
+      if (others !== undefined) updated.others = others;
+      generatedBuffer[idx2] = updated;
     }
   },
 

@@ -37,6 +37,7 @@ interface LayoutPayload {
 
 function toLayoutObject(obj: {
   id: string;
+  itemId?: string;
   subcategory?: string;
   filepath?: string;
   transform: { x: number; y: number; width: number; height: number; rotation: number };
@@ -45,7 +46,7 @@ function toLayoutObject(obj: {
   layer: number;
 }): LayoutObject {
   return {
-    id: obj.id,
+    id: obj.itemId || obj.id,
     subcategory: obj.subcategory?.toLowerCase().replace(/\s+/g, "-"),
     filepath: obj.filepath || "",
     center: { x: obj.transform.x, y: obj.transform.y },
