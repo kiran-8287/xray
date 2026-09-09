@@ -334,7 +334,7 @@ export default function CustomizationPage() {
 
     const allOthers = allItems.filter(isOther);
     const matchedOthers = otherIds.map((id) => allOthers.find((item) => item.id === id)).filter(Boolean) as Item[];
-    const itemsToPlace = hasQueryParams ? matchedOthers : (matchedOthers.length > 0 ? matchedOthers : allOthers.slice(0, 2));
+    const itemsToPlace = hasQueryParams ? matchedOthers : (matchedOthers.length > 0 ? matchedOthers : allOthers);
 
     itemsToPlace.forEach((item, i) => {
       let itemOutline = resolveItemOutline(item);
@@ -664,7 +664,44 @@ export default function CustomizationPage() {
       
       if (precomputedId) {
         try {
-          GenerationService.updateCombination(precomputedId, objects);
+          const itemMap = new Map<string, Item>();
+          if (categorizedList) {
+            for (const subcats of Object.values(categorizedList)) {
+              for (const items of Object.values(subcats)) {
+                if (Array.isArray(items)) {
+                  for (const item of items) {
+                    itemMap.set(item.id, item);
+                  }
+                }
+              }
+            }
+          }
+
+          const updatedThreats: Item[] = [];
+          const updatedOthers: Item[] = [];
+          const seenThreatIds = new Set<string>();
+          const seenOtherIds = new Set<string>();
+
+          objects.forEach((obj) => {
+            if (obj.library === "bag") return;
+            const itemId = obj.itemId || obj.id;
+            const item = itemMap.get(itemId);
+            if (!item) return;
+
+            if (obj.library === "threat") {
+              if (!seenThreatIds.has(itemId)) {
+                seenThreatIds.add(itemId);
+                updatedThreats.push(item);
+              }
+            } else {
+              if (!seenOtherIds.has(itemId)) {
+                seenOtherIds.add(itemId);
+                updatedOthers.push(item);
+              }
+            }
+          });
+
+          GenerationService.updateCombination(precomputedId, objects, updatedThreats, updatedOthers);
         } catch (err) {
           console.error("Error updating collage combinations:", err);
         }

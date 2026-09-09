@@ -345,6 +345,82 @@ describe('GET /api/saved-layouts/export annotation partition numbering', () => {
     });
   });
 
+  describe('POST /api/render-and-save-collage-both (original bag size preserved)', () => {
+    // The collage-scope exports folder writes to a dedicated temp dir; after the
+    // suite the original user_config.json is restored so real export settings survive.
+    const userConfigFile = path.join(config.dataDir, 'user_config.json');
+    let userConfigBackup = null;
+    let renderTestDir = null;
+
+    beforeAll(async () => {
+      try {
+        userConfigBackup = await fsPromises.readFile(userConfigFile, 'utf8');
+      } catch (_) {
+        userConfigBackup = null;
+      }
+      renderTestDir = path.join(__dirname, 'tmp', 'collage_render_test');
+      await fsPromises.rm(renderTestDir, { recursive: true, force: true });
+    });
+
+    afterAll(async () => {
+      await fsPromises.rm(renderTestDir, { recursive: true, force: true }).catch(() => {});
+      if (userConfigBackup === null) {
+        await fsPromises.rm(userConfigFile, { force: true }).catch(() => {});
+      } else {
+        await fsPromises.writeFile(userConfigFile, userConfigBackup).catch(() => {});
+      }
+    });
+
+    it('renders at the original bag size from a scene-object array payload', async () => {
+      const { setExportsPath } = await import('../src/lib/userConfig.js');
+      await setExportsPath('collage', renderTestDir);
+
+      const safeName = 'sb-size-test-00001';
+      const objects = [
+        {
+          id: 'bag-test', name: 'Test Bag', stencilId: 'bag', library: 'bag',
+          filepath: 'missing.png',
+          transform: { x: 500, y: 250, width: 1000, height: 500, rotation: 0 },
+          initialWidth: 1000, initialHeight: 500, layer: 0,
+        },
+      ];
+
+      // Wait out the shared strict-rate-limiter window before rendering.
+      await new Promise((r) => setTimeout(r, 1200));
+
+      const res = await request(app)
+        .post('/api/render-and-save-collage-both')
+        .send({ objects, name: safeName })
+        .timeout({ deadline: 30000 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+
+      // The exported PNG must keep the ORIGINAL bag pixel size (1000 x 500).
+      const highPath = path.join(renderTestDir, 'collage_images', 'high', `${safeName}.png`);
+      expect(await fsPromises.access(highPath).then(() => true).catch(() => false)).toBe(true);
+      const png = await fsPromises.readFile(highPath);
+      // PNG signature
+      expect(Array.from(png.slice(0, 8))).toEqual([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+      expect(png.readUInt32BE(16)).toBe(1000); // IHDR width — bag stays 1000px
+      expect(png.readUInt32BE(20)).toBe(500);  // IHDR height — bag stays 500px
+    });
+
+    it('returns 400 (not 500) when bag dimensions cannot be resolved', async () => {
+      await new Promise((r) => setTimeout(r, 1200));
+      const res = await request(app)
+        .post('/api/render-and-save-collage-both')
+        .send({
+          objects: [{ id: 'orphan', stencilId: 'threat', transform: { x: 10, y: 10, width: 40, height: 30, rotation: 0 }, layer: 1 }],
+          name: 'sb-no-bag',
+        })
+        .timeout({ deadline: 30000 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.ok).toBe(false);
+    });
+  });
+
   describe('Error handling', () => {
     it('should return 404 for unknown routes', async () => {
       const res = await request(app).get('/api/nonexistent-route');

@@ -286,11 +286,11 @@ function generateSingleThreatPlacement(
 
 function pickThreatCountByDistribution(distribution: Record<number, number>, availableThreats: number): number {
   const eligible: { count: number; weight: number }[] = [];
-  for (let i = 1; i <= Math.min(4, availableThreats); i++) {
+  for (let i = 1; i <= availableThreats; i++) {
     const weight = distribution[i] ?? 0;
     if (weight > 0) eligible.push({ count: i, weight });
   }
-  if (eligible.length === 0) return 1 + Math.floor(Math.random() * Math.min(4, availableThreats));
+  if (eligible.length === 0) return 1 + Math.floor(Math.random() * availableThreats);
   const totalWeight = eligible.reduce((sum, e) => sum + e.weight, 0);
   const random = Math.random() * totalWeight;
   let cumulative = 0;
@@ -303,13 +303,13 @@ function pickThreatCountByDistribution(distribution: Record<number, number>, ava
 
 function pickNonThreatCountByDistribution(distribution: Record<number, number>, availableNonThreats: number, requireAtLeastOne: boolean = false): number {
   const eligible: { count: number; weight: number }[] = [];
-  for (let i = 1; i <= Math.min(4, availableNonThreats); i++) {
+  for (let i = 1; i <= availableNonThreats; i++) {
     const weight = distribution[i] ?? 0;
     if (weight > 0) eligible.push({ count: i, weight });
   }
   if (eligible.length === 0) {
     if (requireAtLeastOne && availableNonThreats > 0) return 1;
-    return 1 + Math.floor(Math.random() * Math.min(4, availableNonThreats));
+    return 1 + Math.floor(Math.random() * availableNonThreats);
   }
   const totalWeight = eligible.reduce((sum, e) => sum + e.weight, 0);
   const random = Math.random() * totalWeight;
@@ -493,8 +493,18 @@ function generateCleanCombinations(
 
 export async function generateCombinations(
   bags: Item[], threats: Item[], nonThreats: Item[], k: number,
-  threatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 },
-  nonThreatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 },
+  threatDistribution: Record<number, number> = (() => {
+    const dist: Record<number, number> = {};
+    const max = Math.min(10, threats.length);
+    for (let i = 1; i <= max; i++) dist[i] = 25;
+    return dist;
+  })(),
+  nonThreatDistribution: Record<number, number> = (() => {
+    const dist: Record<number, number> = {};
+    const max = Math.min(10, nonThreats.length);
+    for (let i = 1; i <= max; i++) dist[i] = 25;
+    return dist;
+  })(),
   requireAtLeastOneNonThreat: boolean = false, existingIds: string[] = []
 ): Promise<GenerationResult> {
   const startTime = Date.now();
@@ -503,8 +513,18 @@ export async function generateCombinations(
   }
   const hasValidThreatDist = Object.values(threatDistribution).some(v => v > 0);
   const hasValidNonThreatDist = Object.values(nonThreatDistribution).some(v => v > 0);
-  if (!hasValidThreatDist && threats.length > 0) threatDistribution = { 1: 25, 2: 25, 3: 25, 4: 25 };
-  if (!hasValidNonThreatDist && nonThreats.length > 0) nonThreatDistribution = { 1: 25, 2: 25, 3: 25, 4: 25 };
+  if (!hasValidThreatDist && threats.length > 0) {
+    const dist: Record<number, number> = {};
+    const max = Math.min(10, threats.length);
+    for (let i = 1; i <= max; i++) dist[i] = 25;
+    threatDistribution = dist;
+  }
+  if (!hasValidNonThreatDist && nonThreats.length > 0) {
+    const dist: Record<number, number> = {};
+    const max = Math.min(10, nonThreats.length);
+    for (let i = 1; i <= max; i++) dist[i] = 25;
+    nonThreatDistribution = dist;
+  }
   const results: CombinatorialResult[] = [];
   const failures: FailureLog[] = [];
   const seenFailures = new Set<string>();
@@ -787,8 +807,18 @@ export function testGenerationSpeed() {
 export async function generateCombinationsIncremental(
   bags: Item[], threats: Item[], nonThreats: Item[], k: number,
   onBatch: (batch: CombinatorialResult[], progress: { generated: number; total: number }) => void,
-  threatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 },
-  nonThreatDistribution: Record<number, number> = { 1: 25, 2: 25, 3: 25, 4: 25 },
+  threatDistribution: Record<number, number> = (() => {
+    const dist: Record<number, number> = {};
+    const max = Math.min(10, threats.length);
+    for (let i = 1; i <= max; i++) dist[i] = 25;
+    return dist;
+  })(),
+  nonThreatDistribution: Record<number, number> = (() => {
+    const dist: Record<number, number> = {};
+    const max = Math.min(10, nonThreats.length);
+    for (let i = 1; i <= max; i++) dist[i] = 25;
+    return dist;
+  })(),
   requireAtLeastOneNonThreat: boolean = false, existingIds: string[] = [], batchSize: number = DEFAULT_BATCH_SIZE
 ): Promise<GenerationResult> {
   const effectiveBatchSize = Math.max(1, batchSize);
@@ -798,8 +828,18 @@ export async function generateCombinationsIncremental(
   }
   const hasValidThreatDist = Object.values(threatDistribution).some(v => v > 0);
   const hasValidNonThreatDist = Object.values(nonThreatDistribution).some(v => v > 0);
-  if (!hasValidThreatDist && threats.length > 0) threatDistribution = { 1: 25, 2: 25, 3: 25, 4: 25 };
-  if (!hasValidNonThreatDist && nonThreats.length > 0) nonThreatDistribution = { 1: 25, 2: 25, 3: 25, 4: 25 };
+  if (!hasValidThreatDist && threats.length > 0) {
+    const dist: Record<number, number> = {};
+    const max = Math.min(10, threats.length);
+    for (let i = 1; i <= max; i++) dist[i] = 25;
+    threatDistribution = dist;
+  }
+  if (!hasValidNonThreatDist && nonThreats.length > 0) {
+    const dist: Record<number, number> = {};
+    const max = Math.min(10, nonThreats.length);
+    for (let i = 1; i <= max; i++) dist[i] = 25;
+    nonThreatDistribution = dist;
+  }
   const results: CombinatorialResult[] = [];
   const failures: FailureLog[] = [];
   const seenFailures = new Set<string>();

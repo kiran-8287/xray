@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import zlib from 'zlib';
 
+import Jimp from 'jimp';
 import config from './config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,6 +39,13 @@ function pngChunk(type, data) {
 }
 
 function encode16BitGrayscalePNG(width, height, pixels) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error(
+      `[renderCanvas] Invalid PNG dimensions: width=${width}, height=${height}. ` +
+      "The bag canvas must keep its original pixel size (e.g. 1000 x 500); " +
+      "the payload must include a bag object with valid dimensions."
+    );
+  }
   const rowBytes = 1 + width * 2;
   const rawData = Buffer.allocUnsafe(height * rowBytes);
 
@@ -249,6 +257,13 @@ function applyAffineTransform(
 }
 
 export async function renderSceneAsync(objects, width, height, energyType = "highenergy", warnings = null) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error(
+      `[renderCanvas] Invalid canvas size: width=${width}, height=${height}. ` +
+      "The bag must stay at its original pixel size (e.g. 1000 x 500); " +
+      "the payload must include a bag object with valid dimensions."
+    );
+  }
   const densityBuffer = new Float32Array(width * height);
 
   const sorted = [...objects].sort((a, b) => a.layer - b.layer);
