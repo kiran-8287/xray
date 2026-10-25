@@ -29,7 +29,11 @@ frontend/.env.development
 
 # Test data files
 new_data/
-dump and tip/
+
+# Load testing generated data (ignore generated seeds & runtime logs, keep code & results)
+load_test/seed_data/
+load_test/logs/*.log
+!load_test/logs/.gitkeep
 
 # Test utility scripts
 scripts/generate-test-files.js

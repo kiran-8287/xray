@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Synthetic X-Ray Load Test Report & Dashboard</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card: #131b2e;
+      --border: #22304d;
+      --text: #f1f5f9;
+      --subtext: #94a3b8;
+      --accent: #38bdf8;
+      --green: #22c55e;
+      --orange: #f59e0b;
+      --red: #ef4444;
+    }
+    body {
+      margin: 0;
+      padding: 32px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 24px;
+      margin-bottom: 32px;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      margin-right: 8px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .card h3 { margin: 0 0 16px; font-size: 16px; color: var(--accent); }
+    .metric { font-size: 32px; font-weight: 700; margin: 4px 0 12px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 12px;
+    }
+    th, td {
+      padding: 8px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--subtext); font-weight: 600; }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+      gap: 24px;
+    }
+    .chart-box {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+    .chart-box img { max-width: 100%; height: auto; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Synthetic X-Ray Load Test Report</h1>
+    <div>
+      <span class="badge">B: Drive Only (B:\xray)</span>
+      <span class="badge">Date: 2026-10-24</span>
+      <span class="badge">Node v24.15.0</span>
+      <span class="badge">8 Cores / 12 Threads</span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Upload Page (.dump.pgm & .tip)</h3>
+      <div class="metric">5000 <span style="font-size: 14px; font-weight: normal; color: var(--subtext);">peak files</span></div>
+      <div><strong>Peak Throughput:</strong> 16.74 files/sec</div>
+      <div><strong>Avg Time / File:</strong> 84.14 ms</div>
+      <div><strong>Known Limits:</strong> 100 MB/file, 5,000 files/batch, 8 workers cap</div>
+    </div>
+
+    <div class="card">
+      <h3>Library Page (Pagination & Search)</h3>
+      <div class="metric">909.09 <span style="font-size: 14px; font-weight: normal; color: var(--subtext);">QPS</span></div>
+      <div><strong>Max Concurrent Tabs:</strong> 10 tabs</div>
+      <div><strong>Avg Latency:</strong> 42.83 ms</div>
+      <div><strong>Known Limits:</strong> 50 req/s, 30 concurrent</div>
+    </div>
+
+    <div class="card">
+      <h3>Collage Page (Combinations & Layouts)</h3>
+      <div class="metric">19.84 <span style="font-size: 14px; font-weight: normal; color: var(--subtext);">combos/sec</span></div>
+      <div><strong>Peak Saved:</strong> 4862 combos</div>
+      <div><strong>Avg Time / Layout:</strong> 440.27 ms</div>
+      <div><strong>Known Limits:</strong> 200ms disk queue debounce, 5000/partition</div>
+    </div>
+
+    <div class="card">
+      <h3>Customization Page (Preview Rendering)</h3>
+      <div class="metric">316.46 <span style="font-size: 14px; font-weight: normal; color: var(--subtext);">renders/sec</span></div>
+      <div><strong>Peak Previews:</strong> 10</div>
+      <div><strong>Avg Latency:</strong> 48.69 ms</div>
+      <div><strong>Known Limits:</strong> 20 req/s, 10 concurrent</div>
+    </div>
+
+    <div class="card">
+      <h3>Saved Page (Filtered Layouts)</h3>
+      <div class="metric">208.91 <span style="font-size: 14px; font-weight: normal; color: var(--subtext);">QPS</span></div>
+      <div><strong>Peak Queries:</strong> 43</div>
+      <div><strong>Avg Latency:</strong> 182.52 ms</div>
+      <div><strong>Known Limits:</strong> 50 req/s, 30 concurrent</div>
+    </div>
+
+    <div class="card">
+      <h3>Load Page (Combination Pipeline)</h3>
+      <div class="metric">21.1 <span style="font-size: 14px; font-weight: normal; color: var(--subtext);">combos/sec</span></div>
+      <div><strong>Peak Combinations:</strong> 1000</div>
+      <div><strong>Avg Latency:</strong> 49.85 ms</div>
+      <div><strong>Known Limits:</strong> 10,000 combos max, dual-res export</div>
+    </div>
+  </div>
+
+  <h2>Generated Performance Visualizations</h2>
+  <div class="charts-grid">
+    <div class="chart-box">
+      <img src="all_pages_peak_throughput.svg" alt="Cross-Page Peak Throughput" />
+    </div>
+    <div class="chart-box">
+      <img src="upload_throughput_vs_scale.svg" alt="Upload Throughput" />
+    </div>
+    <div class="chart-box">
+      <img src="upload_avg_latency_vs_scale.svg" alt="Upload Latency" />
+    </div>
+    <div class="chart-box">
+      <img src="library_qps_vs_tabs.svg" alt="Library QPS" />
+    </div>
+    <div class="chart-box">
+      <img src="collage_throughput_vs_scale.svg" alt="Collage Throughput" />
+    </div>
+    <div class="chart-box">
+      <img src="customization_latency_vs_scale.svg" alt="Customization Latency" />
+    </div>
+  </div>
+</body>
+</html>

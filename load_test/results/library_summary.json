@@ -1,0 +1,324 @@
+{
+  "testType": "Library Page (Categorized Pagination & Filtering - Breaking Point Analysis)",
+  "drive": "B: drive only",
+  "timestamp": "2026-10-24T13:18:41.020Z",
+  "peakConcurrentTabsSupported": 10,
+  "breakingPointTabs": 15,
+  "breakingPointReason": "publicApiRateLimiter rejects queries exceeding 50 req/s or 30 concurrent with HTTP 429",
+  "peakQpsAchieved": 1628.66,
+  "overallAvgQueryTimeMs": 27.88,
+  "knownLimits": {
+    "publicApiRateLimiter": "50 req/s, 30 concurrent",
+    "partitionCap": "5,000 items per storage partition"
+  },
+  "results": [
+    {
+      "page": "Library Page",
+      "endpoint": "/api/items/categorized",
+      "concurrentTabs": 5,
+      "totalQueries": 25,
+      "successfulQueries": 25,
+      "rateLimitedQueries": 0,
+      "failedQueries": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 0.24,
+      "avgQueryTimeMs": 37.56,
+      "queriesPerSecond": 102.88,
+      "latencyStats": {
+        "p50Ms": 14,
+        "p95Ms": 121,
+        "p99Ms": 165,
+        "maxMs": 165
+      },
+      "memory": {
+        "rssDeltaMB": 16.97,
+        "heapUsedDeltaMB": 4.8
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Library Page",
+      "endpoint": "/api/items/categorized",
+      "concurrentTabs": 10,
+      "totalQueries": 50,
+      "successfulQueries": 50,
+      "rateLimitedQueries": 0,
+      "failedQueries": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 0.07,
+      "avgQueryTimeMs": 13.64,
+      "queriesPerSecond": 684.93,
+      "latencyStats": {
+        "p50Ms": 13,
+        "p95Ms": 20,
+        "p99Ms": 21,
+        "maxMs": 21
+      },
+      "memory": {
+        "rssDeltaMB": 2.93,
+        "heapUsedDeltaMB": 0.78
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Library Page",
+      "endpoint": "/api/items/categorized",
+      "concurrentTabs": 15,
+      "totalQueries": 75,
+      "successfulQueries": 50,
+      "rateLimitedQueries": 25,
+      "failedQueries": 25,
+      "successRatePct": 66.67,
+      "totalDurationSec": 0.1,
+      "avgQueryTimeMs": 18.45,
+      "queriesPerSecond": 742.57,
+      "latencyStats": {
+        "p50Ms": 15,
+        "p95Ms": 43,
+        "p99Ms": 51,
+        "maxMs": 51
+      },
+      "memory": {
+        "rssDeltaMB": 2.67,
+        "heapUsedDeltaMB": 1.4
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Library Page",
+      "endpoint": "/api/items/categorized",
+      "concurrentTabs": 20,
+      "totalQueries": 100,
+      "successfulQueries": 50,
+      "rateLimitedQueries": 50,
+      "failedQueries": 50,
+      "successRatePct": 50,
+      "totalDurationSec": 0.17,
+      "avgQueryTimeMs": 29.52,
+      "queriesPerSecond": 588.24,
+      "latencyStats": {
+        "p50Ms": 27,
+        "p95Ms": 62,
+        "p99Ms": 73,
+        "maxMs": 74
+      },
+      "memory": {
+        "rssDeltaMB": 2.23,
+        "heapUsedDeltaMB": -0.27
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Library Page",
+      "endpoint": "/api/items/categorized",
+      "concurrentTabs": 25,
+      "totalQueries": 125,
+      "successfulQueries": 50,
+      "rateLimitedQueries": 75,
+      "failedQueries": 75,
+      "successRatePct": 40,
+      "totalDurationSec": 0.12,
+      "avgQueryTimeMs": 21.12,
+      "queriesPerSecond": 1008.06,
+      "latencyStats": {
+        "p50Ms": 20,
+        "p95Ms": 38,
+        "p99Ms": 45,
+        "maxMs": 51
+      },
+      "memory": {
+        "rssDeltaMB": 6.09,
+        "heapUsedDeltaMB": -0.04
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Library Page",
+      "endpoint": "/api/items/categorized",
+      "concurrentTabs": 30,
+      "totalQueries": 150,
+      "successfulQueries": 50,
+      "rateLimitedQueries": 100,
+      "failedQueries": 100,
+      "successRatePct": 33.33,
+      "totalDurationSec": 0.16,
+      "avgQueryTimeMs": 26.95,
+      "queriesPerSecond": 914.63,
+      "latencyStats": {
+        "p50Ms": 25,
+        "p95Ms": 63,
+        "p99Ms": 75,
+        "maxMs": 75
+      },
+      "memory": {
+        "rssDeltaMB": 11.32,
+        "heapUsedDeltaMB": 6.64
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Library Page",
+      "endpoint": "/api/items/categorized",
+      "concurrentTabs": 35,
+      "totalQueries": 175,
+      "successfulQueries": 50,
+      "rateLimitedQueries": 125,
+      "failedQueries": 125,
+      "successRatePct": 28.57,
+      "totalDurationSec": 0.13,
+      "avgQueryTimeMs": 22.89,
+      "queriesPerSecond": 1305.97,
+      "latencyStats": {
+        "p50Ms": 18,
+        "p95Ms": 54,
+        "p99Ms": 61,
+        "maxMs": 62
+      },
+      "memory": {
+        "rssDeltaMB": 7.3,
+        "heapUsedDeltaMB": 2.35
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Library Page",
+      "endpoint": "/api/items/categorized",
+      "concurrentTabs": 40,
+      "totalQueries": 200,
+      "successfulQueries": 50,
+      "rateLimitedQueries": 150,
+      "failedQueries": 150,
+      "successRatePct": 25,
+      "totalDurationSec": 0.13,
+      "avgQueryTimeMs": 19.2,
+      "queriesPerSecond": 1574.8,
+      "latencyStats": {
+        "p50Ms": 12,
+        "p95Ms": 76,
+        "p99Ms": 81,
+        "maxMs": 81
+      },
+      "memory": {
+        "rssDeltaMB": 7.85,
+        "heapUsedDeltaMB": -4.49
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Library Page",
+      "endpoint": "/api/items/categorized",
+      "concurrentTabs": 50,
+      "totalQueries": 250,
+      "successfulQueries": 50,
+      "rateLimitedQueries": 200,
+      "failedQueries": 200,
+      "successRatePct": 20,
+      "totalDurationSec": 0.16,
+      "avgQueryTimeMs": 28.33,
+      "queriesPerSecond": 1524.39,
+      "latencyStats": {
+        "p50Ms": 21,
+        "p95Ms": 64,
+        "p99Ms": 77,
+        "maxMs": 77
+      },
+      "memory": {
+        "rssDeltaMB": 3.2,
+        "heapUsedDeltaMB": 5.48
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Library Page",
+      "endpoint": "/api/items/categorized",
+      "concurrentTabs": 75,
+      "totalQueries": 375,
+      "successfulQueries": 50,
+      "rateLimitedQueries": 325,
+      "failedQueries": 325,
+      "successRatePct": 13.33,
+      "totalDurationSec": 0.23,
+      "avgQueryTimeMs": 37.43,
+      "queriesPerSecond": 1616.38,
+      "latencyStats": {
+        "p50Ms": 26,
+        "p95Ms": 162,
+        "p99Ms": 174,
+        "maxMs": 176
+      },
+      "memory": {
+        "rssDeltaMB": 6.36,
+        "heapUsedDeltaMB": -0.6
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Library Page",
+      "endpoint": "/api/items/categorized",
+      "concurrentTabs": 100,
+      "totalQueries": 500,
+      "successfulQueries": 50,
+      "rateLimitedQueries": 450,
+      "failedQueries": 450,
+      "successRatePct": 10,
+      "totalDurationSec": 0.31,
+      "avgQueryTimeMs": 51.59,
+      "queriesPerSecond": 1628.66,
+      "latencyStats": {
+        "p50Ms": 43,
+        "p95Ms": 174,
+        "p99Ms": 210,
+        "maxMs": 225
+      },
+      "memory": {
+        "rssDeltaMB": 14.04,
+        "heapUsedDeltaMB": 6.34
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    }
+  ]
+}

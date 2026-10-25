@@ -49,15 +49,15 @@ import { enqueue as enqueueDiskWrite, getDiskWriteQueueStatus, drain as drainDis
 import { publicApiRateLimiter, strictRateLimiter } from './lib/rateLimiter.js';
 import { getExportsPath, getCollageImageRoot, setExportsPath, hasConfiguredExportsPath } from './lib/userConfig.js';
 import {
-  analyzeImport,
-  runImport,
-  scanPixelDir,
-  scanJsonDir,
+    analyzeImport,
+    runImport,
+    scanPixelDir,
+    scanJsonDir,
 } from './lib/importService.js';
 import {
-  validateClientOutputPath,
-  validateCombinationsArray,
-  isPathWithinAllowedRoots,
+    validateClientOutputPath,
+    validateCombinationsArray,
+    isPathWithinAllowedRoots,
 } from './lib/pathValidation.js';
 import { validateFileMagicNumber, validateFileSize as checkFileSize } from './lib/fileValidation.js';
 import { validateLayoutJson, validatePlainObject, validateObjectArray } from './lib/jsonValidation.js';
@@ -68,8 +68,8 @@ app.use(cors());
 app.use(express.json({ limit: "100mb" }));
 
 // Structured logger - set to warn to reduce terminal noise
-const logger = pino({ 
-  level: config.logLevel === 'info' ? 'warn' : config.logLevel
+const logger = pino({
+    level: config.logLevel === 'info' ? 'warn' : config.logLevel
 });
 
 // In-memory cancellation flags for long-running bulk export (Save All / Save Selected) jobs.
@@ -98,42 +98,42 @@ const CONTAINER_DATA_MOUNT = process.env.DATA_MOUNT_PATH || '/app/data';
 
 // True when the backend is running inside a container (Docker sets /.dockerenv).
 async function isContainerized() {
-  try {
-    await fs.access('/.dockerenv');
-    return true;
-  } catch {
-    return false;
-  }
+    try {
+        await fs.access('/.dockerenv');
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 // Prove a directory is actually writable by writing + deleting a tiny probe file.
 // A plain recursive mkdir is a silent no-op on an already-existing directory even
 // when it is read-only, so this is the only reliable way to fail fast.
 async function probeWritableDir(dir) {
-  const probe = path.join(dir, `.xray-write-probe-${process.pid}-${Date.now()}.tmp`);
-  try {
-    await fs.writeFile(probe, 'ok', 'utf8');
-    await fs.unlink(probe);
-    return { ok: true };
-  } catch (err) {
-    const code = err && err.code ? err.code : String(err);
-    const message = err && err.message ? err.message : String(err);
-    try { await fs.unlink(probe); } catch (_) { /* ignore */ }
-    return { ok: false, code, message };
-  }
+    const probe = path.join(dir, `.xray-write-probe-${process.pid}-${Date.now()}.tmp`);
+    try {
+        await fs.writeFile(probe, 'ok', 'utf8');
+        await fs.unlink(probe);
+        return { ok: true };
+    } catch (err) {
+        const code = err && err.code ? err.code : String(err);
+        const message = err && err.message ? err.message : String(err);
+        try { await fs.unlink(probe); } catch (_) { /* ignore */ }
+        return { ok: false, code, message };
+    }
 }
 
 // Human-friendly explanation for an unwritable export destination, tuned to the
 // current environment so the user actually knows how to fix it.
 function writableErrorText(result, insideContainer) {
-  const code = result.code || 'ERR';
-  if (code === 'EACCES' || code === 'EPERM') {
-    if (insideContainer) {
-      return `The export folder exists but the container's server user cannot write to it (${code}). Pick a folder under ${CONTAINER_DATA_MOUNT}/… (the only folder that is writable and visible on the host), or map an extra bind-mount for your chosen folder in docker-compose.yml.`;
+    const code = result.code || 'ERR';
+    if (code === 'EACCES' || code === 'EPERM') {
+        if (insideContainer) {
+            return `The export folder exists but the container's server user cannot write to it (${code}). Pick a folder under ${CONTAINER_DATA_MOUNT}/… (the only folder that is writable and visible on the host), or map an extra bind-mount for your chosen folder in docker-compose.yml.`;
+        }
+        return `The export folder exists but is not writable by the server user (${code}). Choose a folder the server process can write to, or fix the folder's permissions.`;
     }
-    return `The export folder exists but is not writable by the server user (${code}). Choose a folder the server process can write to, or fix the folder's permissions.`;
-  }
-  return `Could not write a test file into the export folder (${code}). Pick a different, writable folder.`;
+    return `Could not write a test file into the export folder (${code}). Pick a different, writable folder.`;
 }
 
 // In Docker, a path outside the bind-mounted /app/data lives on the container's
@@ -141,12 +141,12 @@ function writableErrorText(result, insideContainer) {
 // and are lost when the container is recreated. Returns an error message if the
 // path is unusable, or null if it is safe to use.
 async function containerPathError(resolvedPath) {
-  if (!(await isContainerized())) return null;
-  const mountedRoot = path.resolve(CONTAINER_DATA_MOUNT);
-  if (!resolvedPath.startsWith(mountedRoot)) {
-    return `This folder (${resolvedPath}) is inside the container but is NOT mapped to your host machine, so files saved here would only exist inside the container and would be lost when the container is recreated. Choose a path under ${mountedRoot}/… (which maps to your host's backend/data folder), or add a bind-mount for this folder in docker-compose.yml.`;
-  }
-  return null;
+    if (!(await isContainerized())) return null;
+    const mountedRoot = path.resolve(CONTAINER_DATA_MOUNT);
+    if (!resolvedPath.startsWith(mountedRoot)) {
+        return `This folder (${resolvedPath}) is inside the container but is NOT mapped to your host machine, so files saved here would only exist inside the container and would be lost when the container is recreated. Choose a path under ${mountedRoot}/… (which maps to your host's backend/data folder), or add a bind-mount for this folder in docker-compose.yml.`;
+    }
+    return null;
 }
 
 const httpRequestDuration = new client.Histogram({
@@ -202,50 +202,50 @@ const LOG_RETENTION_MS = Math.max(1, config.logRetentionDays || 14) * 24 * 60 * 
 const ROTATED_LOG_PATTERN = /^monitoring\.log\.\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/;
 
 async function rotateMonitoringLogIfNeeded() {
-  try {
-    const stat = await fs.stat(LOG_PATH);
-    if (stat.size < LOG_MAX_BYTES) return false;
-    const stamp = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-'); // YYYY-MM-DD_HH-mm-ss
-    const rotated = `${LOG_PATH}.${stamp}`;
-    logStream.end();
-    await fs.rename(LOG_PATH, rotated);
-    logStream = createWriteStream(LOG_PATH, { flags: 'a' });
-    logger.warn({ rotated }, 'Monitoring log rotated');
-    return true;
-  } catch (err) {
-    console.warn('[monitoring] Log rotation failed:', err && err.message ? err.message : err);
-    return false;
-  }
+    try {
+        const stat = await fs.stat(LOG_PATH);
+        if (stat.size < LOG_MAX_BYTES) return false;
+        const stamp = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-'); // YYYY-MM-DD_HH-mm-ss
+        const rotated = `${LOG_PATH}.${stamp}`;
+        logStream.end();
+        await fs.rename(LOG_PATH, rotated);
+        logStream = createWriteStream(LOG_PATH, { flags: 'a' });
+        logger.warn({ rotated }, 'Monitoring log rotated');
+        return true;
+    } catch (err) {
+        console.warn('[monitoring] Log rotation failed:', err && err.message ? err.message : err);
+        return false;
+    }
 }
 
 async function purgeOldMonitoringLogs() {
-  let removed = 0;
-  try {
-    const files = await fs.readdir(config.dataDir);
-    const now = Date.now();
-    for (const name of files) {
-      if (!ROTATED_LOG_PATTERN.test(name)) continue;
-      const full = path.join(config.dataDir, name);
-      try {
-        const stat = await fs.stat(full);
-        if (now - stat.mtimeMs > LOG_RETENTION_MS) {
-          await fs.unlink(full);
-          removed++;
+    let removed = 0;
+    try {
+        const files = await fs.readdir(config.dataDir);
+        const now = Date.now();
+        for (const name of files) {
+            if (!ROTATED_LOG_PATTERN.test(name)) continue;
+            const full = path.join(config.dataDir, name);
+            try {
+                const stat = await fs.stat(full);
+                if (now - stat.mtimeMs > LOG_RETENTION_MS) {
+                    await fs.unlink(full);
+                    removed++;
+                }
+            } catch (_err) { /* ignore per-file errors */ }
         }
-      } catch (_err) { /* ignore per-file errors */ }
+    } catch (err) {
+        console.warn('[monitoring] Log purge failed:', err && err.message ? err.message : err);
     }
-  } catch (err) {
-    console.warn('[monitoring] Log purge failed:', err && err.message ? err.message : err);
-  }
-  if (removed > 0) logger.warn({ removed }, 'Purged old monitoring log files');
-  return removed;
+    if (removed > 0) logger.warn({ removed }, 'Purged old monitoring log files');
+    return removed;
 }
 
 // Purge stale rotated logs on startup, then every 10 minutes rotate (if needed)
 // and purge. Unref'd so it never keeps the process alive on its own.
 void purgeOldMonitoringLogs();
 setInterval(() => {
-  void rotateMonitoringLogIfNeeded().then(purgeOldMonitoringLogs);
+    void rotateMonitoringLogIfNeeded().then(purgeOldMonitoringLogs);
 }, 10 * 60 * 1000).unref?.();
 
 function classifyPageHint(req) {
@@ -488,7 +488,7 @@ async function resolvePixelDataPath(itemId, catalogPixelDataPath) {
     if (pathToCheck) {
         const r = safeJoin(pixelDataRoot, pathToCheck);
         if (r.safe) {
-            try { await fs.access(r.fullPath); return pathToCheck; } catch {}
+            try { await fs.access(r.fullPath); return pathToCheck; } catch { }
         }
     }
     if (!itemId) return null;
@@ -514,14 +514,14 @@ const upload = multer({ storage: storage });
 
 // Multer setup for raw file uploads (disk storage to avoid loading huge files into RAM)
 const rawUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, path.join(tempDir, 'raw-uploads')),
-    filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`),
-  }),
-  limits: {
-    files: 5000,
-    fileSize: 1024 * 1024 * 1024, // 1 GB per file ceiling
-  },
+    storage: multer.diskStorage({
+        destination: (req, file, cb) => cb(null, path.join(tempDir, 'raw-uploads')),
+        filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`),
+    }),
+    limits: {
+        files: 5000,
+        fileSize: 1024 * 1024 * 1024, // 1 GB per file ceiling
+    },
 });
 
 // Multer setup for import (Save Historic Data) uploads.
@@ -533,9 +533,9 @@ const importStorage = multer.diskStorage({
         const runId = String((req.body && req.body.runId) || `r_${Date.now()}`);
         const kind =
             file.fieldname === 'pixelFiles' ? 'pixel/highenergy'
-            : file.fieldname === 'pixelFilesLow' ? 'pixel/lowenergy'
-            : file.fieldname === 'jsonFiles' ? 'json'
-            : 'other';
+                : file.fieldname === 'pixelFilesLow' ? 'pixel/lowenergy'
+                    : file.fieldname === 'jsonFiles' ? 'json'
+                        : 'other';
         const dir = path.join(tempDir, 'import', runId, kind);
         try {
             mkdirSync(dir, { recursive: true });
@@ -563,13 +563,13 @@ function safeNowStamp() {
 function parseFilename(filename) {
     const nameWithoutExt = path.basename(filename, path.extname(filename));
     const parts = nameWithoutExt.split(/[_-]/);
-    
+
     let subcategory = "General";
-    
+
     if (parts.length > 1) {
         subcategory = parts[1].charAt(0).toUpperCase() + parts[1].slice(1);
     }
-    
+
     return { subcategory };
 }
 
@@ -579,43 +579,43 @@ function parseFilename(filename) {
 
 // Root endpoint - API info
 app.get("/", (_req, res) => {
-  res.json({
-    name: "Synthetic X-Ray Generation System API",
-    version: "1.0.0",
-    status: "running",
-    endpoints: {
-      health: "GET /api/health",
-      items: "GET /api/items/:id",
-      savedLayouts: "GET /api/saved-layouts",
-      customSubcategories: "GET /api/custom-subcategories"
-    }
-  });
+    res.json({
+        name: "Synthetic X-Ray Generation System API",
+        version: "1.0.0",
+        status: "running",
+        endpoints: {
+            health: "GET /api/health",
+            items: "GET /api/items/:id",
+            savedLayouts: "GET /api/saved-layouts",
+            customSubcategories: "GET /api/custom-subcategories"
+        }
+    });
 });
 
 // Health check endpoint
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, status: "healthy", timestamp: new Date().toISOString() });
+    res.json({ ok: true, status: "healthy", timestamp: new Date().toISOString() });
 });
 
 // Rate limiter status endpoint (for monitoring)
 app.get('/api/rate-limit-status', (req, res) => {
-  try {
-    const stats = publicApiRateLimiter.getStats();
-    res.json({
-      ok: true,
-      rateLimiter: {
-        trackedIPs: stats.trackedIPs,
-        concurrentConnections: stats.concurrentConnections,
-        limits: {
-          windowMs: 1000,
-          maxRequestsPerSecond: 20,
-          maxConcurrentPerIP: 10
-        }
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: String(err) });
-  }
+    try {
+        const stats = publicApiRateLimiter.getStats();
+        res.json({
+            ok: true,
+            rateLimiter: {
+                trackedIPs: stats.trackedIPs,
+                concurrentConnections: stats.concurrentConnections,
+                limits: {
+                    windowMs: 1000,
+                    maxRequestsPerSecond: 20,
+                    maxConcurrentPerIP: 10
+                }
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ ok: false, error: String(err) });
+    }
 });
 
 // Prometheus metrics endpoint
@@ -631,50 +631,50 @@ app.get('/metrics', async (_req, res) => {
 
 // Clean up temp files older than 4 hours (runs on server startup and periodically)
 async function cleanupOldTempFiles() {
-  try {
-    await fs.mkdir(tempDir, { recursive: true });
-    const now = Date.now();
-    const maxAge = 4 * 60 * 60 * 1000; // 4 hours
-    let cleaned = 0;
+    try {
+        await fs.mkdir(tempDir, { recursive: true });
+        const now = Date.now();
+        const maxAge = 4 * 60 * 60 * 1000; // 4 hours
+        let cleaned = 0;
 
-    // Clean tempDir
-    const tempFiles = await fs.readdir(tempDir);
-    for (const file of tempFiles) {
-      if (!file.endsWith(".tmp")) continue;
-      const filePath = path.join(tempDir, file);
-      try {
-        const stats = await fs.stat(filePath);
-        if (now - stats.mtimeMs > maxAge) {
-          await fs.unlink(filePath);
-          cleaned++;
+        // Clean tempDir
+        const tempFiles = await fs.readdir(tempDir);
+        for (const file of tempFiles) {
+            if (!file.endsWith(".tmp")) continue;
+            const filePath = path.join(tempDir, file);
+            try {
+                const stats = await fs.stat(filePath);
+                if (now - stats.mtimeMs > maxAge) {
+                    await fs.unlink(filePath);
+                    cleaned++;
+                }
+            } catch (err) {
+                // Ignore individual file errors
+            }
         }
-      } catch (err) {
-        // Ignore individual file errors
-      }
-    }
 
-    // Clean orphaned .tmp files in dataDir (from writeJSONFileAtomic operations)
-    const dataFiles = await fs.readdir(config.dataDir);
-    for (const file of dataFiles) {
-      if (!file.endsWith(".tmp")) continue;
-      const filePath = path.join(config.dataDir, file);
-      try {
-        const stats = await fs.stat(filePath);
-        if (now - stats.mtimeMs > maxAge) {
-          await fs.unlink(filePath);
-          cleaned++;
+        // Clean orphaned .tmp files in dataDir (from writeJSONFileAtomic operations)
+        const dataFiles = await fs.readdir(config.dataDir);
+        for (const file of dataFiles) {
+            if (!file.endsWith(".tmp")) continue;
+            const filePath = path.join(config.dataDir, file);
+            try {
+                const stats = await fs.stat(filePath);
+                if (now - stats.mtimeMs > maxAge) {
+                    await fs.unlink(filePath);
+                    cleaned++;
+                }
+            } catch (err) {
+                // Ignore individual file errors
+            }
         }
-      } catch (err) {
-        // Ignore individual file errors
-      }
-    }
 
-    if (cleaned > 0) {
-      console.log(`[temp-cleanup] Cleaned up ${cleaned} old temp files`);
+        if (cleaned > 0) {
+            console.log(`[temp-cleanup] Cleaned up ${cleaned} old temp files`);
+        }
+    } catch (err) {
+        console.warn("[temp-cleanup] Failed to clean temp files:", err.message);
     }
-  } catch (err) {
-    console.warn("[temp-cleanup] Failed to clean temp files:", err.message);
-  }
 }
 
 // Run cleanup on startup
@@ -682,7 +682,7 @@ await cleanupOldTempFiles();
 
 // Run cleanup every 30 minutes to prune temp files older than 4 hours
 setInterval(() => {
-  void cleanupOldTempFiles();
+    void cleanupOldTempFiles();
 }, 30 * 60 * 1000).unref?.();
 
 // Initialize system configuration (detect CPU cores, etc.)
@@ -743,14 +743,14 @@ app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, 
 
     const operationId = generateOperationId();
     const timer = new PipelineTimer(operationId, 'process_raw_files');
-    
+
     try {
         // Stage 1: Upload Receipt
         timer.startStage(PIPELINE_STAGES.UPLOAD_RECEIPT);
         const files = req.files || [];
         logger.info({ operationId, fileCount: files.length, totalSize: files.reduce((sum, f) => sum + (f.size || 0), 0) }, 'upload_receipt');
         timer.endStage(PIPELINE_STAGES.UPLOAD_RECEIPT, { fileCount: files.length });
-        
+
         // Stage 2: Validation
         timer.startStage(PIPELINE_STAGES.VALIDATION);
 
@@ -769,7 +769,7 @@ app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, 
             if (!fileType) {
                 logger.debug({ operationId, filename: file.originalname }, 'Skipped file: unrecognized extension');
                 skippedFiles.push({ filename: file.originalname, reason: "Unrecognized file extension (expected .dump.pgm, .tip, or .npz)" });
-                try { await fs.unlink(file.path); } catch {}
+                try { await fs.unlink(file.path); } catch { }
                 continue;
             }
 
@@ -779,7 +779,7 @@ app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, 
             if (!magicCheck.ok) {
                 logger.debug({ operationId, filename: file.originalname, reason: magicCheck.error }, 'Skipped file: magic number mismatch');
                 skippedFiles.push({ filename: file.originalname, reason: `Invalid file content: ${magicCheck.error}` });
-                try { await fs.unlink(file.path); } catch {}
+                try { await fs.unlink(file.path); } catch { }
                 continue;
             }
 
@@ -787,6 +787,7 @@ app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, 
                 logger.debug({ operationId, itemId }, 'Duplicate file');
                 duplicateCount++;
                 duplicateFilenames.push(file.originalname);
+                try { await fs.unlink(file.path); } catch { }
             } else {
                 nonDuplicates.push({ file, itemId, fileType });
             }
@@ -841,14 +842,14 @@ app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, 
         const estimatedMemoryMB = Math.max(2, Math.ceil(nonDuplicates.length * 0.05));
         const memoryCheck = checkMemoryAvailability(estimatedMemoryMB);
         logger.info({ operationId, workerCount, memoryCheck }, 'memory_check');
-        
+
         if (!memoryCheck.canProceed) {
-            timer.endStage(PIPELINE_STAGES.FILE_PREPROCESSING, { 
+            timer.endStage(PIPELINE_STAGES.FILE_PREPROCESSING, {
                 tempFilesCreated: 0,
                 duration_s: 0,
-                memoryCheck 
+                memoryCheck
             });
-            
+
             res.write(JSON.stringify({
                 status: "error",
                 reason: memoryCheck.recommendation,
@@ -857,27 +858,24 @@ app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, 
             res.end();
             return;
         }
-        
+
         const pool = new WorkerPool(workerCount);
         let processedCount = 0;
         let failedCount = 0;
         await fs.mkdir(tempDir, { recursive: true });
-        
+
         const preprocessingStart = process.hrtime.bigint();
 
         const originalFilenameByItemId = new Map();
         for (const f of files) {
-          const itId = deriveItemId(f.originalname);
-          originalFilenameByItemId.set(itId, f.originalname);
+            const itId = deriveItemId(f.originalname);
+            originalFilenameByItemId.set(itId, f.originalname);
         }
-        
-        for (const { file, itemId, fileType } of nonDuplicates) {
-            const tempPath = path.join(tempDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
-            await fs.copyFile(file.path, tempPath);
 
+        for (const { file, itemId, fileType } of nonDuplicates) {
             pool.addTask(
                 {
-                    filePath: tempPath,
+                    filePath: file.path,
                     itemId,
                     fileType,
                     pixelDataDir: pixelDataRoot,
@@ -905,34 +903,35 @@ app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, 
                         failedCount++;
                     }
 
-                    fs.unlink(tempPath).catch(() => {});
+                    // Directly remove multer raw upload file after worker completes
+                    fs.unlink(file.path).catch(() => { });
                 }
             );
         }
-        
+
         const preprocessingDuration = Number(process.hrtime.bigint() - preprocessingStart) / 1e9;
-        timer.endStage(PIPELINE_STAGES.FILE_PREPROCESSING, { 
+        timer.endStage(PIPELINE_STAGES.FILE_PREPROCESSING, {
             tempFilesCreated: nonDuplicates.length,
-            duration_s: preprocessingDuration 
+            duration_s: preprocessingDuration
         });
 
         // Stage 4: Worker Dispatch
         timer.startStage(PIPELINE_STAGES.WORKER_DISPATCH);
         const workerDispatchStart = process.hrtime.bigint();
-        
+
         await pool.drain();
         pool.destroy();
 
         const workerDispatchDuration = Number(process.hrtime.bigint() - workerDispatchStart) / 1e9;
-        timer.endStage(PIPELINE_STAGES.WORKER_DISPATCH, { 
+        timer.endStage(PIPELINE_STAGES.WORKER_DISPATCH, {
             workerCount,
             batchSize: 1,
-            duration_s: workerDispatchDuration 
+            duration_s: workerDispatchDuration
         });
 
         // Stage 5: Persistence
         timer.startStage(PIPELINE_STAGES.PERSISTENCE);
-        
+
         const summary = {
             status: "complete",
             total: nonDuplicates.length,
@@ -943,10 +942,10 @@ app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, 
         const summaryLine = JSON.stringify(summary);
         res.write(summaryLine + "\n");
         res.end();
-        
-        timer.endStage(PIPELINE_STAGES.PERSISTENCE, { 
+
+        timer.endStage(PIPELINE_STAGES.PERSISTENCE, {
             itemsProcessed: processedCount,
-            itemsFailed: failedCount 
+            itemsFailed: failedCount
         });
 
         const pipelineSummary = timer.complete({
@@ -957,21 +956,21 @@ app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, 
             processedFiles: processedCount,
             failedFiles: failedCount
         });
-        
+
         logger.info(pipelineSummary, 'pipeline_summary');
 
     } catch (err) {
         timer.logError('pipeline_error', err);
         const errorMessage = err?.message || String(err);
         const errorStack = err?.stack || '';
-        
+
         // Always log the full error for debugging
         logger.error({ operationId, error: errorMessage, stack: errorStack }, 'process_raw_files_pipeline_error');
         console.error(`[process-raw-files] operationId=${operationId} error=${errorMessage}`);
         if (errorStack) {
             console.error(`[process-raw-files] stack=${errorStack.split('\n').slice(0, 5).join('\n')}`);
         }
-        
+
         if (!res.headersSent) {
             res.status(500).json({ ok: false, error: errorMessage });
         } else {
@@ -984,7 +983,7 @@ app.post("/api/process-raw-files", strictRateLimiter.middleware(), requireAuth, 
                     isFatal: true,
                 }) + "\n");
                 res.end();
-            } catch (_) {}
+            } catch (_) { }
         }
     }
 });
@@ -1001,240 +1000,240 @@ function normalizeCategory(cat) {
 // Get all items organized by category and subcategory (with pagination)
 // Rate limited to prevent abuse (max 20 requests/second, max 10 concurrent per IP)
 app.get("/api/items/categorized", publicApiRateLimiter.middleware(), async (req, res) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 100));
-    const categoryFilter = req.query.category || null;
-    
-    const { items: paginatedItems, pagination } = await getItemsPaginated(page, limit);
-    
-    const categorized = {};
-    const categoryCounts = {};
-    
-    for (const item of paginatedItems) {
-      const normalizedCategory = normalizeCategory(item.category);
-      
-      categoryCounts[normalizedCategory] = (categoryCounts[normalizedCategory] || 0) + 1;
-      
-      if (categoryFilter && normalizedCategory !== categoryFilter) {
-        continue;
-      }
-      
-      if (!categorized[normalizedCategory]) {
-        categorized[normalizedCategory] = {};
-      }
-      const subcat = item.subcategory || "General";
-      if (!categorized[normalizedCategory][subcat]) {
-        categorized[normalizedCategory][subcat] = [];
-      }
-      
-      if (normalizedCategory === "bags" && item.valid_region_points) {
-        const vr = item.valid_region_points;
-        item.validRegionData = vr;
-        item.valid_region_points = vr.simplifiedPoints || vr.points || vr;
-      }
-      
-      categorized[normalizedCategory][subcat].push(item);
-    }
-    
-    res.json({ 
-      ok: true, 
-      categorized,
-      pagination: {
-        page: pagination.page,
-        limit: pagination.limit,
-        totalItems: pagination.totalItems,
-        totalPages: pagination.totalPages,
-        totalCategories: Object.keys(categoryCounts).length,
-        categoryCounts: {
-          ...categoryCounts
+    try {
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 100));
+        const categoryFilter = req.query.category || null;
+
+        const { items: paginatedItems, pagination } = await getItemsPaginated(page, limit);
+
+        const categorized = {};
+        const categoryCounts = {};
+
+        for (const item of paginatedItems) {
+            const normalizedCategory = normalizeCategory(item.category);
+
+            categoryCounts[normalizedCategory] = (categoryCounts[normalizedCategory] || 0) + 1;
+
+            if (categoryFilter && normalizedCategory !== categoryFilter) {
+                continue;
+            }
+
+            if (!categorized[normalizedCategory]) {
+                categorized[normalizedCategory] = {};
+            }
+            const subcat = item.subcategory || "General";
+            if (!categorized[normalizedCategory][subcat]) {
+                categorized[normalizedCategory][subcat] = [];
+            }
+
+            if (normalizedCategory === "bags" && item.valid_region_points) {
+                const vr = item.valid_region_points;
+                item.validRegionData = vr;
+                item.valid_region_points = vr.simplifiedPoints || vr.points || vr;
+            }
+
+            categorized[normalizedCategory][subcat].push(item);
         }
-      }
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
+
+        res.json({
+            ok: true,
+            categorized,
+            pagination: {
+                page: pagination.page,
+                limit: pagination.limit,
+                totalItems: pagination.totalItems,
+                totalPages: pagination.totalPages,
+                totalCategories: Object.keys(categoryCounts).length,
+                categoryCounts: {
+                    ...categoryCounts
+                }
+            }
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
 });
 
 // Get all item IDs for fast existence checking
 app.get('/api/items/ids', publicApiRateLimiter.middleware(), async (req, res) => {
-  try {
-    const items = await getItems();
-    const ids = items.map(i => i.id);
-    res.json({ ok: true, ids });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
+    try {
+        const items = await getItems();
+        const ids = items.map(i => i.id);
+        res.json({ ok: true, ids });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
 });
 
 // Batch item persistence endpoint for 50-item page saves into category partitions
 app.post('/api/items/batch-save', requireAuth, async (req, res) => {
-  try {
-    const { items } = req.body;
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ ok: false, error: 'items array is required' });
-    }
+    try {
+        const { items } = req.body;
+        if (!Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ ok: false, error: 'items array is required' });
+        }
 
-    const savedItems = await createItemsBatch(items);
-    res.json({
-      ok: true,
-      savedCount: savedItems.length,
-      items: savedItems,
-    });
-  } catch (err) {
-    console.error('[batch-save] Error:', err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
+        const savedItems = await createItemsBatch(items);
+        res.json({
+            ok: true,
+            savedCount: savedItems.length,
+            items: savedItems,
+        });
+    } catch (err) {
+        console.error('[batch-save] Error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
 });
 
 // Storage catalog index metadata endpoint
 app.get('/api/storage/catalog', async (_req, res) => {
-  try {
-    const catalog = await getCatalog();
-    res.json({ ok: true, catalog });
-  } catch (err) {
-    console.error('[storage/catalog] Error:', err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
+    try {
+        const catalog = await getCatalog();
+        res.json({ ok: true, catalog });
+    } catch (err) {
+        console.error('[storage/catalog] Error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
 });
 
 // User configuration endpoints for export path settings.
 // Each page/destination has its OWN independent folder ("scope"): load, saved,
 // collage. Changing one never changes the others.
 app.get('/api/user-config/exports-path', async (_req, res) => {
-  try {
-    const scopes = ['load', 'saved', 'collage'];
-    const paths = {};
-    const configured = {};
-    for (const scope of scopes) {
-      paths[scope] = await getExportsPath(scope);
-      configured[scope] = await hasConfiguredExportsPath(scope);
+    try {
+        const scopes = ['load', 'saved', 'collage'];
+        const paths = {};
+        const configured = {};
+        for (const scope of scopes) {
+            paths[scope] = await getExportsPath(scope);
+            configured[scope] = await hasConfiguredExportsPath(scope);
+        }
+        // `platform` tells the UI which path convention (Windows drive vs POSIX /) to
+        // expect, so the client can show the right format instructions.
+        const insideContainer = await isContainerized();
+        res.json({
+            ok: true,
+            paths,
+            configured,
+            platform: process.platform,
+            isContainerized: insideContainer,
+            dataMountPath: insideContainer ? CONTAINER_DATA_MOUNT : null
+        });
+    } catch (err) {
+        console.error('[user-config/exports-path] Error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
     }
-    // `platform` tells the UI which path convention (Windows drive vs POSIX /) to
-    // expect, so the client can show the right format instructions.
-    const insideContainer = await isContainerized();
-    res.json({ 
-      ok: true, 
-      paths, 
-      configured, 
-      platform: process.platform, 
-      isContainerized: insideContainer, 
-      dataMountPath: insideContainer ? CONTAINER_DATA_MOUNT : null 
-    });
-  } catch (err) {
-    console.error('[user-config/exports-path] Error:', err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
 });
 
 app.post('/api/user-config/exports-path', requireAuth, async (req, res) => {
-  try {
-    const { scope, exportsPath } = req.body || {};
-    const requestedScope = typeof scope === 'string' && ['load', 'saved', 'collage'].includes(scope.trim().toLowerCase())
-      ? scope.trim().toLowerCase()
-      : 'saved';
-
-    if (typeof exportsPath !== 'string') {
-      return res.status(400).json({ ok: false, error: 'exportsPath is required and must be a string' });
-    }
-
-    // Empty string (or whitespace-only) resets that scope to its default folder.
-    if (exportsPath.trim() === '') {
-      const userConfig = await setExportsPath(requestedScope, null);
-      const key = requestedScope === 'load' ? 'loadExportsPath' : requestedScope === 'collage' ? 'collageExportsPath' : 'savedExportsPath';
-      return res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key] });
-    }
-
-    const trimmed = exportsPath.trim().replace(/[\\/]+$/, '');
-
-    // Reject directory traversal.
-    if (trimmed.split(/[\\/]+/).includes('..')) {
-      return res.status(400).json({ ok: false, error: 'Invalid path — directory traversal ("..") is not allowed.' });
-    }
-
-    // Only absolute paths are accepted so the destination is never ambiguous.
-    if (!path.isAbsolute(trimmed)) {
-      const hint = process.platform === 'win32'
-        ? 'On Windows use an absolute path like C:\\XrayExports or C:/XrayExports (drive letter required).'
-        : 'On Linux/macOS use an absolute path like /home/you/XrayExports (must start with /).';
-      return res.status(400).json({ ok: false, error: `Not an absolute path. ${hint}` });
-    }
-
-    const resolvedPath = path.resolve(trimmed);
-
-    // Create the expected subfolders up front so mistakes surface now.
     try {
-      if (requestedScope === 'collage') {
-        await fs.mkdir(path.join(resolvedPath, 'collage_images', 'high'), { recursive: true });
-        await fs.mkdir(path.join(resolvedPath, 'collage_images', 'low'), { recursive: true });
-      } else if (requestedScope === 'load') {
-        // Load-page saves keep high- and low-resolution images together in the
-        // same folder (named "<id> high.png" / "<id> low.png"), so no subfolders.
-        await fs.mkdir(resolvedPath, { recursive: true });
-      } else {
-        await fs.mkdir(path.join(resolvedPath, 'high'), { recursive: true });
-        await fs.mkdir(path.join(resolvedPath, 'low'), { recursive: true });
-        await fs.mkdir(path.join(resolvedPath, 'annotations'), { recursive: true });
-      }
+        const { scope, exportsPath } = req.body || {};
+        const requestedScope = typeof scope === 'string' && ['load', 'saved', 'collage'].includes(scope.trim().toLowerCase())
+            ? scope.trim().toLowerCase()
+            : 'saved';
+
+        if (typeof exportsPath !== 'string') {
+            return res.status(400).json({ ok: false, error: 'exportsPath is required and must be a string' });
+        }
+
+        // Empty string (or whitespace-only) resets that scope to its default folder.
+        if (exportsPath.trim() === '') {
+            const userConfig = await setExportsPath(requestedScope, null);
+            const key = requestedScope === 'load' ? 'loadExportsPath' : requestedScope === 'collage' ? 'collageExportsPath' : 'savedExportsPath';
+            return res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key] });
+        }
+
+        const trimmed = exportsPath.trim().replace(/[\\/]+$/, '');
+
+        // Reject directory traversal.
+        if (trimmed.split(/[\\/]+/).includes('..')) {
+            return res.status(400).json({ ok: false, error: 'Invalid path — directory traversal ("..") is not allowed.' });
+        }
+
+        // Only absolute paths are accepted so the destination is never ambiguous.
+        if (!path.isAbsolute(trimmed)) {
+            const hint = process.platform === 'win32'
+                ? 'On Windows use an absolute path like C:\\XrayExports or C:/XrayExports (drive letter required).'
+                : 'On Linux/macOS use an absolute path like /home/you/XrayExports (must start with /).';
+            return res.status(400).json({ ok: false, error: `Not an absolute path. ${hint}` });
+        }
+
+        const resolvedPath = path.resolve(trimmed);
+
+        // Create the expected subfolders up front so mistakes surface now.
+        try {
+            if (requestedScope === 'collage') {
+                await fs.mkdir(path.join(resolvedPath, 'collage_images', 'high'), { recursive: true });
+                await fs.mkdir(path.join(resolvedPath, 'collage_images', 'low'), { recursive: true });
+            } else if (requestedScope === 'load') {
+                // Load-page saves keep high- and low-resolution images together in the
+                // same folder (named "<id> high.png" / "<id> low.png"), so no subfolders.
+                await fs.mkdir(resolvedPath, { recursive: true });
+            } else {
+                await fs.mkdir(path.join(resolvedPath, 'high'), { recursive: true });
+                await fs.mkdir(path.join(resolvedPath, 'low'), { recursive: true });
+                await fs.mkdir(path.join(resolvedPath, 'annotations'), { recursive: true });
+            }
+        } catch (err) {
+            console.error('[user-config/exports-path] Failed to create folder:', err);
+            const code = err && err.code ? err.code : String(err);
+            let message = `Could not create the export folder. Check that the drive exists and is writable. (${code})`;
+            if (code === 'EACCES' || code === 'EPERM') {
+                message += ' The container runs as a non-root user (the uid/gid from PUID/PGID — default 1000). If this is a bind-mounted host folder, make sure the host directory is writable by that user, or choose a path under /app/data (which is automatically fixed on startup).';
+            }
+            return res.status(400).json({ ok: false, error: message });
+        }
+
+        // Prove the destination is actually writable BEFORE accepting it. Otherwise a
+        // read-only folder (or a host-only path inside Docker) is accepted fine and
+        // then silently "exports 0 files" later with no error.
+        const probe = await probeWritableDir(resolvedPath);
+        if (!probe.ok) {
+            console.error('[user-config/exports-path] Destination is not writable:', probe.message);
+            const insideContainer = await isContainerized();
+            return res.status(400).json({ ok: false, error: writableErrorText(probe, insideContainer) });
+        }
+
+        // In Docker, REJECT the chosen path when it is outside the only host-visible
+        // mount. The folder would be created and written inside the container's
+        // ephemeral overlay filesystem — the files would never appear on the host and
+        // would be silently lost when the container is recreated. A warning alone is
+        // not enough: the frontend reports "saved" and the user believes their exports
+        // are on disk when they are actually in a throwaway container layer.
+        if (await isContainerized()) {
+            const mountedRoot = path.resolve(CONTAINER_DATA_MOUNT);
+            if (!resolvedPath.startsWith(mountedRoot)) {
+                console.error(`[user-config/exports-path] Rejected path outside container data mount: ${resolvedPath}`);
+                return res.status(400).json({
+                    ok: false,
+                    error: `This folder (${resolvedPath}) is inside the container but is NOT mapped to your host machine, so files saved here would only exist inside the container and would be lost when the container is recreated. Choose a path under ${mountedRoot}/… (which maps to your host's backend/data folder), or add a bind-mount for this folder in docker-compose.yml.`,
+                });
+            }
+        }
+
+        const userConfig = await setExportsPath(requestedScope, resolvedPath);
+        const key = requestedScope === 'load' ? 'loadExportsPath' : requestedScope === 'collage' ? 'collageExportsPath' : 'savedExportsPath';
+        res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key] });
     } catch (err) {
-      console.error('[user-config/exports-path] Failed to create folder:', err);
-      const code = err && err.code ? err.code : String(err);
-      let message = `Could not create the export folder. Check that the drive exists and is writable. (${code})`;
-      if (code === 'EACCES' || code === 'EPERM') {
-        message += ' The container runs as a non-root user (the uid/gid from PUID/PGID — default 1000). If this is a bind-mounted host folder, make sure the host directory is writable by that user, or choose a path under /app/data (which is automatically fixed on startup).';
-      }
-      return res.status(400).json({ ok: false, error: message });
+        console.error('[user-config/exports-path] Error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
     }
-
-    // Prove the destination is actually writable BEFORE accepting it. Otherwise a
-    // read-only folder (or a host-only path inside Docker) is accepted fine and
-    // then silently "exports 0 files" later with no error.
-    const probe = await probeWritableDir(resolvedPath);
-    if (!probe.ok) {
-      console.error('[user-config/exports-path] Destination is not writable:', probe.message);
-      const insideContainer = await isContainerized();
-      return res.status(400).json({ ok: false, error: writableErrorText(probe, insideContainer) });
-    }
-
-    // In Docker, REJECT the chosen path when it is outside the only host-visible
-    // mount. The folder would be created and written inside the container's
-    // ephemeral overlay filesystem — the files would never appear on the host and
-    // would be silently lost when the container is recreated. A warning alone is
-    // not enough: the frontend reports "saved" and the user believes their exports
-    // are on disk when they are actually in a throwaway container layer.
-    if (await isContainerized()) {
-      const mountedRoot = path.resolve(CONTAINER_DATA_MOUNT);
-      if (!resolvedPath.startsWith(mountedRoot)) {
-        console.error(`[user-config/exports-path] Rejected path outside container data mount: ${resolvedPath}`);
-        return res.status(400).json({
-          ok: false,
-          error: `This folder (${resolvedPath}) is inside the container but is NOT mapped to your host machine, so files saved here would only exist inside the container and would be lost when the container is recreated. Choose a path under ${mountedRoot}/… (which maps to your host's backend/data folder), or add a bind-mount for this folder in docker-compose.yml.`,
-        });
-      }
-    }
-
-    const userConfig = await setExportsPath(requestedScope, resolvedPath);
-    const key = requestedScope === 'load' ? 'loadExportsPath' : requestedScope === 'collage' ? 'collageExportsPath' : 'savedExportsPath';
-    res.json({ ok: true, scope: requestedScope, exportsPath: userConfig[key] });
-  } catch (err) {
-    console.error('[user-config/exports-path] Error:', err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
 });
 
 app.get('/api/user-config/has-exports-path', async (req, res) => {
-  try {
-    const scope = typeof req.query.scope === 'string' && ['load', 'saved', 'collage'].includes(req.query.scope.trim().toLowerCase())
-      ? req.query.scope.trim().toLowerCase()
-      : 'saved';
-    const configured = await hasConfiguredExportsPath(scope);
-    res.json({ ok: true, scope, configured });
-  } catch (err) {
-    console.error('[user-config/has-exports-path] Error:', err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
+    try {
+        const scope = typeof req.query.scope === 'string' && ['load', 'saved', 'collage'].includes(req.query.scope.trim().toLowerCase())
+            ? req.query.scope.trim().toLowerCase()
+            : 'saved';
+        const configured = await hasConfiguredExportsPath(scope);
+        res.json({ ok: true, scope, configured });
+    } catch (err) {
+        console.error('[user-config/has-exports-path] Error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
+    }
 });
 
 // ============================================================================
@@ -1245,149 +1244,149 @@ app.get('/api/user-config/has-exports-path', async (req, res) => {
 // return a pre-flight report: duplicates, missing objects, unclassified files.
 // Streams NDJSON progress lines for real-time UI feedback.
 app.post('/api/import/analyze', requireAuth, uploadImport.any(), async (req, res) => {
-  res.setHeader('Content-Type', 'application/x-ndjson');
-  res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Transfer-Encoding', 'chunked');
 
-  try {
-    const files = Array.isArray(req.files) ? req.files : [];
-    const high = files.filter((f) => f.fieldname === 'pixelFiles');
-    const low = files.filter((f) => f.fieldname === 'pixelFilesLow');
-    const json = files.filter((f) => f.fieldname === 'jsonFiles');
-    
-    let pixelFiles = [
-      ...high.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'highenergy', absPath: f.path, originalName: f.originalname })),
-      ...low.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'lowenergy', absPath: f.path, originalName: f.originalname })),
-    ];
-    let jsonFiles = json.map((f) => ({ filename: f.originalname, absPath: f.path }));
-
-    const body = req.body || {};
-    const runId = body.runId;
-
-    // If no files uploaded but runId provided, scan temp directory for already-uploaded files
-    if (pixelFiles.length === 0 && jsonFiles.length === 0 && runId) {
-      const stagedDir = path.join(tempDir, 'import', String(runId));
-      try {
-        const pixelDir = path.join(stagedDir, 'highenergy'); // Default to highenergy
-        pixelFiles = await scanPixelDir(pixelDir);
-        jsonFiles = await scanJsonDir(path.join(stagedDir, 'json'));
-      } catch (err) {
-        console.error('[import/analyze] Error scanning staged dir:', err);
-      }
-    }
-
-    if (pixelFiles.length === 0 && jsonFiles.length === 0) {
-      res.write(JSON.stringify({ stage: 'error', message: 'No pixel data or JSON files provided. Upload files first or provide a runId.' }) + '\n');
-      res.end();
-      return;
-    }
-
-    res.write(JSON.stringify({ stage: 'start', message: 'Starting analysis…', runId: runId || null }) + '\n');
-
-    const report = await analyzeImport({
-      pixelFiles,
-      jsonFiles,
-      progress: (o) => {
-        try { 
-          const line = JSON.stringify(o) + '\n';
-          res.write(line);
-          // Force flush to prevent buffering multiple lines together
-          res.flush?.();
-        } catch { /* client gone */ }
-      },
-    });
-
-    res.write(JSON.stringify({ stage: 'done', message: 'Analysis complete', report }) + '\n');
-    res.end();
-  } catch (err) {
-    console.error('[import/analyze] Error:', err);
     try {
-      res.write(JSON.stringify({ stage: 'error', message: String(err) }) + '\n');
-      res.end();
-    } catch { /* response already ended */ }
-  }
+        const files = Array.isArray(req.files) ? req.files : [];
+        const high = files.filter((f) => f.fieldname === 'pixelFiles');
+        const low = files.filter((f) => f.fieldname === 'pixelFilesLow');
+        const json = files.filter((f) => f.fieldname === 'jsonFiles');
+
+        let pixelFiles = [
+            ...high.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'highenergy', absPath: f.path, originalName: f.originalname })),
+            ...low.map((f) => ({ baseName: path.basename(f.filename, path.extname(f.filename)), energy: 'lowenergy', absPath: f.path, originalName: f.originalname })),
+        ];
+        let jsonFiles = json.map((f) => ({ filename: f.originalname, absPath: f.path }));
+
+        const body = req.body || {};
+        const runId = body.runId;
+
+        // If no files uploaded but runId provided, scan temp directory for already-uploaded files
+        if (pixelFiles.length === 0 && jsonFiles.length === 0 && runId) {
+            const stagedDir = path.join(tempDir, 'import', String(runId));
+            try {
+                const pixelDir = path.join(stagedDir, 'highenergy'); // Default to highenergy
+                pixelFiles = await scanPixelDir(pixelDir);
+                jsonFiles = await scanJsonDir(path.join(stagedDir, 'json'));
+            } catch (err) {
+                console.error('[import/analyze] Error scanning staged dir:', err);
+            }
+        }
+
+        if (pixelFiles.length === 0 && jsonFiles.length === 0) {
+            res.write(JSON.stringify({ stage: 'error', message: 'No pixel data or JSON files provided. Upload files first or provide a runId.' }) + '\n');
+            res.end();
+            return;
+        }
+
+        res.write(JSON.stringify({ stage: 'start', message: 'Starting analysis…', runId: runId || null }) + '\n');
+
+        const report = await analyzeImport({
+            pixelFiles,
+            jsonFiles,
+            progress: (o) => {
+                try {
+                    const line = JSON.stringify(o) + '\n';
+                    res.write(line);
+                    // Force flush to prevent buffering multiple lines together
+                    res.flush?.();
+                } catch { /* client gone */ }
+            },
+        });
+
+        res.write(JSON.stringify({ stage: 'done', message: 'Analysis complete', report }) + '\n');
+        res.end();
+    } catch (err) {
+        console.error('[import/analyze] Error:', err);
+        try {
+            res.write(JSON.stringify({ stage: 'error', message: String(err) }) + '\n');
+            res.end();
+        } catch { /* response already ended */ }
+    }
 });
 
 // Execute the import. Streams NDJSON progress lines; cancellable via jobId.
 app.post('/api/import/run', requireAuth, async (req, res) => {
-  res.setHeader('Content-Type', 'application/x-ndjson');
-  res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Transfer-Encoding', 'chunked');
 
-  let runId = null;
-  let stagedDir = null;
-  try {
-    const body = req.body || {};
-    runId = String(body.runId || `run_${Date.now()}`);
-    const cancelState = { cancelled: false };
-    importCancellations.set(runId, cancelState);
-
-    stagedDir = path.join(tempDir, 'import', String(body.stagedId || runId));
-    res.write(JSON.stringify({ stage: 'start', message: 'Reading staged upload…' }) + '\n');
-    const pixelFiles = await scanPixelDir(stagedDir);
-    const jsonFiles = await scanJsonDir(path.join(stagedDir, 'json'));
-
-    const options = (body.options && typeof body.options === 'object') ? body.options : {};
-    await runImport({
-      pixelFiles,
-      jsonFiles,
-      options: { ...options, cancelState },
-      progress: (o) => {
-        try { 
-          const line = JSON.stringify(o) + '\n';
-          res.write(line);
-          // Force flush to prevent buffering multiple lines together
-          res.flush?.();
-        } catch { /* client gone */ }
-      },
-    });
-
-    res.write(JSON.stringify({ stage: 'done', message: 'Import complete' }) + '\n');
-    res.end();
-  } catch (err) {
-    console.error('[import/run] Error:', err);
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    const errorStack = err instanceof Error ? err.stack : undefined;
-    
-    // Log detailed error for debugging
-    console.error('[import/run] Full error details:', {
-      message: errorMessage,
-      stack: errorStack,
-      runId,
-      stagedDir,
-    });
-    
+    let runId = null;
+    let stagedDir = null;
     try {
-      // Send detailed error to frontend
-      res.write(JSON.stringify({ 
-        stage: 'error', 
-        message: `Import failed: ${errorMessage}`,
-        details: process.env.NODE_ENV === 'development' ? errorStack : undefined,
-        runId 
-      }) + '\n');
-      res.end();
-    } catch { /* response already ended */ }
-  } finally {
-    if (runId) importCancellations.delete(runId);
-    if (stagedDir) {
-      try { await fs.rm(stagedDir, { recursive: true, force: true }); } catch { /* ignore */ }
+        const body = req.body || {};
+        runId = String(body.runId || `run_${Date.now()}`);
+        const cancelState = { cancelled: false };
+        importCancellations.set(runId, cancelState);
+
+        stagedDir = path.join(tempDir, 'import', String(body.stagedId || runId));
+        res.write(JSON.stringify({ stage: 'start', message: 'Reading staged upload…' }) + '\n');
+        const pixelFiles = await scanPixelDir(stagedDir);
+        const jsonFiles = await scanJsonDir(path.join(stagedDir, 'json'));
+
+        const options = (body.options && typeof body.options === 'object') ? body.options : {};
+        await runImport({
+            pixelFiles,
+            jsonFiles,
+            options: { ...options, cancelState },
+            progress: (o) => {
+                try {
+                    const line = JSON.stringify(o) + '\n';
+                    res.write(line);
+                    // Force flush to prevent buffering multiple lines together
+                    res.flush?.();
+                } catch { /* client gone */ }
+            },
+        });
+
+        res.write(JSON.stringify({ stage: 'done', message: 'Import complete' }) + '\n');
+        res.end();
+    } catch (err) {
+        console.error('[import/run] Error:', err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        const errorStack = err instanceof Error ? err.stack : undefined;
+
+        // Log detailed error for debugging
+        console.error('[import/run] Full error details:', {
+            message: errorMessage,
+            stack: errorStack,
+            runId,
+            stagedDir,
+        });
+
+        try {
+            // Send detailed error to frontend
+            res.write(JSON.stringify({
+                stage: 'error',
+                message: `Import failed: ${errorMessage}`,
+                details: process.env.NODE_ENV === 'development' ? errorStack : undefined,
+                runId
+            }) + '\n');
+            res.end();
+        } catch { /* response already ended */ }
+    } finally {
+        if (runId) importCancellations.delete(runId);
+        if (stagedDir) {
+            try { await fs.rm(stagedDir, { recursive: true, force: true }); } catch { /* ignore */ }
+        }
     }
-  }
 });
 
 // Cancel a running import job (checked between import stages).
 app.post('/api/import/cancel', requireAuth, async (req, res) => {
-  try {
-    const { jobId } = req.body || {};
-    if (!jobId || typeof jobId !== 'string' || !jobId.trim()) {
-      return res.status(400).json({ ok: false, error: 'Missing jobId' });
+    try {
+        const { jobId } = req.body || {};
+        if (!jobId || typeof jobId !== 'string' || !jobId.trim()) {
+            return res.status(400).json({ ok: false, error: 'Missing jobId' });
+        }
+        const state = importCancellations.get(jobId.trim());
+        if (state) state.cancelled = true;
+        else importCancellations.set(jobId.trim(), { cancelled: true });
+        res.json({ ok: true, cancelled: true });
+    } catch (err) {
+        console.error('[import/cancel] Error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
     }
-    const state = importCancellations.get(jobId.trim());
-    if (state) state.cancelled = true;
-    else importCancellations.set(jobId.trim(), { cancelled: true });
-    res.json({ ok: true, cancelled: true });
-  } catch (err) {
-    console.error('[import/cancel] Error:', err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
 });
 
 // Saved layouts endpoints - rate limited to prevent abuse
@@ -1414,100 +1413,100 @@ app.get('/api/saved-layouts/ids', publicApiRateLimiter.middleware(), async (_req
 
 app.get('/api/saved-layouts/filtered', publicApiRateLimiter.middleware(), async (req, res) => {
     try {
-      const page = Math.max(1, parseInt(req.query.page) || 1);
-      const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
-      
-      const bagSubcategories = req.query.bagSubcategories ? String(req.query.bagSubcategories).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
-      const threatSubcategories = req.query.threatSubcategories ? String(req.query.threatSubcategories).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
-      const tags = req.query.tags ? String(req.query.tags).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
-      const filterLogic = req.query.filterLogic ? String(req.query.filterLogic).toLowerCase() : 'or';
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
 
-      const allLayouts = await getSavedLayouts();
+        const bagSubcategories = req.query.bagSubcategories ? String(req.query.bagSubcategories).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+        const threatSubcategories = req.query.threatSubcategories ? String(req.query.threatSubcategories).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+        const tags = req.query.tags ? String(req.query.tags).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+        const filterLogic = req.query.filterLogic ? String(req.query.filterLogic).toLowerCase() : 'or';
 
-      function extractObjects(layout) {
-        const obj = layout.layout_json?.objects;
-        if (!obj) return [];
-        if (obj.bag || obj.threats || obj['non-threats']) {
-          const result = [];
-          if (obj.bag) result.push({ ...obj.bag, library: 'bag' });
-          if (Array.isArray(obj.threats)) {
-            obj.threats.forEach(t => result.push({ ...t, library: 'threat' }));
-          }
-          if (Array.isArray(obj['non-threats'])) {
-            obj['non-threats'].forEach(n => result.push({ ...n, library: 'non-threat' }));
-          }
-          return result;
-        }
-        if (Array.isArray(obj)) return obj;
-        return [];
-      }
+        const allLayouts = await getSavedLayouts();
 
-      const filtered = allLayouts.filter((layout) => {
-        try {
-          const objects = extractObjects(layout);
-          if (!objects.length) return false;
-
-           const bagObjs = objects.filter(o => (o.library || '').toLowerCase().includes('bag'));
-           const threatObjs = objects.filter(o => {
-             const lib = (o.library || '').toLowerCase();
-             return lib.includes('threat') && !lib.includes('non-threat');
-           });
-           
-           const layoutBagSubcategories = bagObjs.map(o => {
-             if (o.subcategory) {
-               return o.subcategory.toLowerCase().replace(/\s+/g, '-');
-             }
-             const lib = (o.library || '').toLowerCase();
-             if (lib.includes('bag')) {
-               const parts = lib.split('-');
-               if (parts.length > 1) return parts[1];
-             }
-             return 'general';
-           });
-           
-           const layoutThreatSubcategories = threatObjs.map(o => {
-             if (o.subcategory) {
-               return o.subcategory.toLowerCase().replace(/\s+/g, '-');
-             }
-             const lib = (o.library || '').toLowerCase();
-             if (lib.includes('threat') && !lib.includes('non-threat')) {
-               const parts = lib.split('-');
-               if (parts.length > 1) return parts[1];
-             }
-             return 'general';
-           });
-
-          if (bagSubcategories.length === 0 && threatSubcategories.length === 0 && tags.length === 0) {
-            return true;
-          }
-
-          const bagMatch = bagSubcategories.length === 0 || 
-                          bagSubcategories.some(sub => layoutBagSubcategories.includes(sub));
-          
-          let threatMatch = true;
-          if (threatSubcategories.length > 0) {
-            if (filterLogic === 'or') {
-              threatMatch = threatSubcategories.some(sub => layoutThreatSubcategories.includes(sub));
-            } else if (filterLogic === 'and') {
-              threatMatch = threatSubcategories.every(sub => layoutThreatSubcategories.includes(sub));
+        function extractObjects(layout) {
+            const obj = layout.layout_json?.objects;
+            if (!obj) return [];
+            if (obj.bag || obj.threats || obj['non-threats']) {
+                const result = [];
+                if (obj.bag) result.push({ ...obj.bag, library: 'bag' });
+                if (Array.isArray(obj.threats)) {
+                    obj.threats.forEach(t => result.push({ ...t, library: 'threat' }));
+                }
+                if (Array.isArray(obj['non-threats'])) {
+                    obj['non-threats'].forEach(n => result.push({ ...n, library: 'non-threat' }));
+                }
+                return result;
             }
-          }
-
-          const layoutBagTags = bagObjs.length > 0 ? (bagObjs[0].tags || []) : [];
-          let tagMatch = true;
-          if (tags.length > 0) {
-            if (filterLogic === 'or') {
-              tagMatch = tags.some(tag => layoutBagTags.includes(tag));
-            } else if (filterLogic === 'and') {
-              tagMatch = tags.every(tag => layoutBagTags.includes(tag));
-            }
-          }
-          
-          return bagMatch && threatMatch && tagMatch;
-        } catch {
-          return false;
+            if (Array.isArray(obj)) return obj;
+            return [];
         }
-      });
+
+        const filtered = allLayouts.filter((layout) => {
+            try {
+                const objects = extractObjects(layout);
+                if (!objects.length) return false;
+
+                const bagObjs = objects.filter(o => (o.library || '').toLowerCase().includes('bag'));
+                const threatObjs = objects.filter(o => {
+                    const lib = (o.library || '').toLowerCase();
+                    return lib.includes('threat') && !lib.includes('non-threat');
+                });
+
+                const layoutBagSubcategories = bagObjs.map(o => {
+                    if (o.subcategory) {
+                        return o.subcategory.toLowerCase().replace(/\s+/g, '-');
+                    }
+                    const lib = (o.library || '').toLowerCase();
+                    if (lib.includes('bag')) {
+                        const parts = lib.split('-');
+                        if (parts.length > 1) return parts[1];
+                    }
+                    return 'general';
+                });
+
+                const layoutThreatSubcategories = threatObjs.map(o => {
+                    if (o.subcategory) {
+                        return o.subcategory.toLowerCase().replace(/\s+/g, '-');
+                    }
+                    const lib = (o.library || '').toLowerCase();
+                    if (lib.includes('threat') && !lib.includes('non-threat')) {
+                        const parts = lib.split('-');
+                        if (parts.length > 1) return parts[1];
+                    }
+                    return 'general';
+                });
+
+                if (bagSubcategories.length === 0 && threatSubcategories.length === 0 && tags.length === 0) {
+                    return true;
+                }
+
+                const bagMatch = bagSubcategories.length === 0 ||
+                    bagSubcategories.some(sub => layoutBagSubcategories.includes(sub));
+
+                let threatMatch = true;
+                if (threatSubcategories.length > 0) {
+                    if (filterLogic === 'or') {
+                        threatMatch = threatSubcategories.some(sub => layoutThreatSubcategories.includes(sub));
+                    } else if (filterLogic === 'and') {
+                        threatMatch = threatSubcategories.every(sub => layoutThreatSubcategories.includes(sub));
+                    }
+                }
+
+                const layoutBagTags = bagObjs.length > 0 ? (bagObjs[0].tags || []) : [];
+                let tagMatch = true;
+                if (tags.length > 0) {
+                    if (filterLogic === 'or') {
+                        tagMatch = tags.some(tag => layoutBagTags.includes(tag));
+                    } else if (filterLogic === 'and') {
+                        tagMatch = tags.every(tag => layoutBagTags.includes(tag));
+                    }
+                }
+
+                return bagMatch && threatMatch && tagMatch;
+            } catch {
+                return false;
+            }
+        });
 
         const total = filtered.length;
         const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -1534,14 +1533,14 @@ app.get('/api/saved-layouts/filtered', publicApiRateLimiter.middleware(), async 
 app.post('/api/saved-layouts', auditLog('create_saved_layout'), requireAuth, async (req, res) => {
     const { id, name, filepath, layout_json } = req.body;
     if (!name || !layout_json) return res.status(400).json({ ok: false, error: 'Missing name or layout_json' });
-    
+
     // Validate layout_json structure
     const layoutValidation = validateLayoutJson(layout_json);
     if (!layoutValidation.ok) {
         return res.status(400).json({ ok: false, error: layoutValidation.error });
     }
     const sanitizedLayoutJson = layoutValidation.sanitized;
-    
+
     try {
         // Attach segmentation masks (outer boundary polygon points) to each threat
         // so they are persisted with the saved annotation. Skip silently if a
@@ -1669,72 +1668,72 @@ app.post('/api/saved-layouts/batch-bulk/drain', requireAuth, async (_req, res) =
 
 // Check data integrity of saved layouts (MUST be before /:id route)
 app.get('/api/saved-layouts/integrity', async (_req, res) => {
-  try {
-    const [layouts, items] = await Promise.all([
-      getSavedLayouts(),
-      getItems()
-    ]);
-    
-    const itemMap = new Map(items.map(i => [i.id, i]));
-    const results = [];
-    
-    for (const layout of layouts) {
-      const issues = [];
-      const objects = layout.layout_json?.objects || {};
-      const allObjects = [
-        objects.bag && { ...objects.bag, library: 'bag' },
-        ...(objects.threats || []).map(t => ({ ...t, library: 'threat' })),
-        ...(objects['non-threats'] || []).map(n => ({ ...n, library: 'non-threat' }))
-      ].filter(Boolean);
-      
-      for (const obj of allObjects) {
-        const item = itemMap.get(obj.id);
-        if (!item) {
-          issues.push({
-            objectId: obj.id,
-            objectLibrary: obj.library,
-            issue: 'item_deleted',
-            message: `Item ${obj.id} not found in library`
-          });
-        } else {
-          const pixelDataPath = await resolvePixelDataPath(obj.id, item.pixel_data_path);
-          if (!pixelDataPath) {
-            issues.push({
-              objectId: obj.id,
-              objectLibrary: obj.library,
-              issue: 'no_pixel_data',
-              message: `Item ${obj.id} has no pixel data`
-            });
-          } else {
-            const highEnergyPath = path.join(pixelDataRoot, pixelDataPath);
-            try {
-              await fs.access(highEnergyPath);
-            } catch {
-              issues.push({
-                objectId: obj.id,
-                objectLibrary: obj.library,
-                issue: 'pixel_data_missing',
-                message: `Pixel data file not found: ${pixelDataPath}`
-              });
+    try {
+        const [layouts, items] = await Promise.all([
+            getSavedLayouts(),
+            getItems()
+        ]);
+
+        const itemMap = new Map(items.map(i => [i.id, i]));
+        const results = [];
+
+        for (const layout of layouts) {
+            const issues = [];
+            const objects = layout.layout_json?.objects || {};
+            const allObjects = [
+                objects.bag && { ...objects.bag, library: 'bag' },
+                ...(objects.threats || []).map(t => ({ ...t, library: 'threat' })),
+                ...(objects['non-threats'] || []).map(n => ({ ...n, library: 'non-threat' }))
+            ].filter(Boolean);
+
+            for (const obj of allObjects) {
+                const item = itemMap.get(obj.id);
+                if (!item) {
+                    issues.push({
+                        objectId: obj.id,
+                        objectLibrary: obj.library,
+                        issue: 'item_deleted',
+                        message: `Item ${obj.id} not found in library`
+                    });
+                } else {
+                    const pixelDataPath = await resolvePixelDataPath(obj.id, item.pixel_data_path);
+                    if (!pixelDataPath) {
+                        issues.push({
+                            objectId: obj.id,
+                            objectLibrary: obj.library,
+                            issue: 'no_pixel_data',
+                            message: `Item ${obj.id} has no pixel data`
+                        });
+                    } else {
+                        const highEnergyPath = path.join(pixelDataRoot, pixelDataPath);
+                        try {
+                            await fs.access(highEnergyPath);
+                        } catch {
+                            issues.push({
+                                objectId: obj.id,
+                                objectLibrary: obj.library,
+                                issue: 'pixel_data_missing',
+                                message: `Pixel data file not found: ${pixelDataPath}`
+                            });
+                        }
+                    }
+                }
             }
-          }
+
+            results.push({
+                layoutId: layout.id,
+                layoutName: layout.name,
+                hasIssues: issues.length > 0,
+                issues,
+                objectCount: allObjects.length
+            });
         }
-      }
-      
-      results.push({
-        layoutId: layout.id,
-        layoutName: layout.name,
-        hasIssues: issues.length > 0,
-        issues,
-        objectCount: allObjects.length
-      });
+
+        res.json({ ok: true, results });
+    } catch (err) {
+        console.error('[integrity] Error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
     }
-    
-    res.json({ ok: true, results });
-  } catch (err) {
-    console.error('[integrity] Error:', err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
 });
 
 // Export saved layout images as a JSON summary and write PNG files to exports folder.
@@ -1942,129 +1941,129 @@ async function handleSavedLayoutsExport(req, res) {
                     let nonThreatImageList = [];
 
                     if (includeImages) {
-                            const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
-                            const lowEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
-                            for (const obj of lowEnergyObjects) {
-                                if (obj.pixel_data_path) {
-                                    obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
-                                }
+                        const highEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
+                        const lowEnergyObjects = await enrichObjectsWithPixelData(flatObjects);
+                        for (const obj of lowEnergyObjects) {
+                            if (obj.pixel_data_path) {
+                                obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
                             }
+                        }
 
-                            const highPngBuffer = await renderSceneAsync(highEnergyObjects, bagWidth, bagHeight, 'highenergy');
-                            const highExportPath = path.join(exportsHighRoot, `${baseName}_high.png`);
-                            await fs.writeFile(highExportPath, highPngBuffer);
-                            savedPaths.high.push(highExportPath);
+                        const highPngBuffer = await renderSceneAsync(highEnergyObjects, bagWidth, bagHeight, 'highenergy');
+                        const highExportPath = path.join(exportsHighRoot, `${baseName}_high.png`);
+                        await fs.writeFile(highExportPath, highPngBuffer);
+                        savedPaths.high.push(highExportPath);
 
-                            const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, bagWidth, bagHeight, 'lowenergy');
-                            const lowExportPath = path.join(exportsLowRoot, `${baseName}_low.png`);
-                            await fs.writeFile(lowExportPath, lowPngBuffer);
-                            savedPaths.low.push(lowExportPath);
+                        const lowPngBuffer = await renderSceneAsync(lowEnergyObjects, bagWidth, bagHeight, 'lowenergy');
+                        const lowExportPath = path.join(exportsLowRoot, `${baseName}_low.png`);
+                        await fs.writeFile(lowExportPath, lowPngBuffer);
+                        savedPaths.low.push(lowExportPath);
 
-                            highEnergyPath = highExportPath;
-                            lowEnergyPath = lowExportPath;
-                            highEnergyFilename = `${baseName}_high.png`;
-                            lowEnergyFilename = `${baseName}_low.png`;
+                        highEnergyPath = highExportPath;
+                        lowEnergyPath = lowExportPath;
+                        highEnergyFilename = `${baseName}_high.png`;
+                        lowEnergyFilename = `${baseName}_low.png`;
 
-                            if (includeThreatImages && Array.isArray(objects.threats)) {
-                                for (let t = 0; t < objects.threats.length; t++) {
-                                    try {
-                                        const threat = objects.threats[t];
-                                        const threatFlat = [{
-                                            id: threat.id,
-                                            filepath: threat.filepath,
-                                            pixel_data_path: threat.pixel_data_path,
-                                            transform: {
-                                                x: threat.center?.x || 0,
-                                                y: threat.center?.y || 0,
-                                                width: threat.size?.width || 100,
-                                                height: threat.size?.height || 100,
-                                                rotation: threat.rotation || 0,
-                                            },
-                                            layer: threat.layer || 1,
-                                        }];
+                        if (includeThreatImages && Array.isArray(objects.threats)) {
+                            for (let t = 0; t < objects.threats.length; t++) {
+                                try {
+                                    const threat = objects.threats[t];
+                                    const threatFlat = [{
+                                        id: threat.id,
+                                        filepath: threat.filepath,
+                                        pixel_data_path: threat.pixel_data_path,
+                                        transform: {
+                                            x: threat.center?.x || 0,
+                                            y: threat.center?.y || 0,
+                                            width: threat.size?.width || 100,
+                                            height: threat.size?.height || 100,
+                                            rotation: threat.rotation || 0,
+                                        },
+                                        layer: threat.layer || 1,
+                                    }];
 
-                                        const threatHighObjects = await enrichObjectsWithPixelData(threatFlat);
-                                        const threatLowObjects = await enrichObjectsWithPixelData(threatFlat);
-                                        for (const obj of threatLowObjects) {
-                                            if (obj.pixel_data_path) {
-                                                obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
-                                            }
+                                    const threatHighObjects = await enrichObjectsWithPixelData(threatFlat);
+                                    const threatLowObjects = await enrichObjectsWithPixelData(threatFlat);
+                                    for (const obj of threatLowObjects) {
+                                        if (obj.pixel_data_path) {
+                                            obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
                                         }
-
-                                        const threatHighBuffer = await renderSceneAsync(threatHighObjects, bagWidth, bagHeight, 'highenergy');
-                                        const threatLowBuffer = await renderSceneAsync(threatLowObjects, bagWidth, bagHeight, 'lowenergy');
-
-                                        const threatHighPath = path.join(exportsHighRoot, `${baseName}_threat_${t}_high.png`);
-                                        const threatLowPath = path.join(exportsLowRoot, `${baseName}_threat_${t}_low.png`);
-
-                                        await fs.writeFile(threatHighPath, threatHighBuffer);
-                                        await fs.writeFile(threatLowPath, threatLowBuffer);
-
-                                        savedPaths.threatHigh.push(threatHighPath);
-                                        savedPaths.threatLow.push(threatLowPath);
-
-                                        threatImageList.push({
-                                            index: t,
-                                            id: threat.id,
-                                            high: `${baseName}_threat_${t}_high.png`,
-                                            low: `${baseName}_threat_${t}_low.png`,
-                                        });
-                                    } catch (err) {
-                                        console.warn(`[export] Failed to render clean threat ${t} for layout ${layout.id}:`, err);
                                     }
-                                }
-                            }
 
-                            if (includeNonThreatImages && Array.isArray(objects['non-threats'])) {
-                                for (let n = 0; n < objects['non-threats'].length; n++) {
-                                    try {
-                                        const nonThreat = objects['non-threats'][n];
-                                        const nonThreatFlat = [{
-                                            id: nonThreat.id,
-                                            filepath: nonThreat.filepath,
-                                            pixel_data_path: nonThreat.pixel_data_path,
-                                            transform: {
-                                                x: nonThreat.center?.x || 0,
-                                                y: nonThreat.center?.y || 0,
-                                                width: nonThreat.size?.width || 100,
-                                                height: nonThreat.size?.height || 100,
-                                                rotation: nonThreat.rotation || 0,
-                                            },
-                                            layer: nonThreat.layer || 2,
-                                        }];
+                                    const threatHighBuffer = await renderSceneAsync(threatHighObjects, bagWidth, bagHeight, 'highenergy');
+                                    const threatLowBuffer = await renderSceneAsync(threatLowObjects, bagWidth, bagHeight, 'lowenergy');
 
-                                        const nonThreatHighObjects = await enrichObjectsWithPixelData(nonThreatFlat);
-                                        const nonThreatLowObjects = await enrichObjectsWithPixelData(nonThreatFlat);
-                                        for (const obj of nonThreatLowObjects) {
-                                            if (obj.pixel_data_path) {
-                                                obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
-                                            }
-                                        }
+                                    const threatHighPath = path.join(exportsHighRoot, `${baseName}_threat_${t}_high.png`);
+                                    const threatLowPath = path.join(exportsLowRoot, `${baseName}_threat_${t}_low.png`);
 
-                                        const nonThreatHighBuffer = await renderSceneAsync(nonThreatHighObjects, bagWidth, bagHeight, 'highenergy');
-                                        const nonThreatLowBuffer = await renderSceneAsync(nonThreatLowObjects, bagWidth, bagHeight, 'lowenergy');
+                                    await fs.writeFile(threatHighPath, threatHighBuffer);
+                                    await fs.writeFile(threatLowPath, threatLowBuffer);
 
-                                        const nonThreatHighPath = path.join(exportsHighRoot, `${baseName}_nonthreat_${n}_high.png`);
-                                        const nonThreatLowPath = path.join(exportsLowRoot, `${baseName}_nonthreat_${n}_low.png`);
+                                    savedPaths.threatHigh.push(threatHighPath);
+                                    savedPaths.threatLow.push(threatLowPath);
 
-                                        await fs.writeFile(nonThreatHighPath, nonThreatHighBuffer);
-                                        await fs.writeFile(nonThreatLowPath, nonThreatLowBuffer);
-
-                                        savedPaths.nonThreatHigh.push(nonThreatHighPath);
-                                        savedPaths.nonThreatLow.push(nonThreatLowPath);
-
-                                        nonThreatImageList.push({
-                                            index: n,
-                                            id: nonThreat.id,
-                                            high: `${baseName}_nonthreat_${n}_high.png`,
-                                            low: `${baseName}_nonthreat_${n}_low.png`,
-                                        });
-                                    } catch (err) {
-                                        console.warn(`[export] Failed to render clean non-threat ${n} for layout ${layout.id}:`, err);
-                                    }
+                                    threatImageList.push({
+                                        index: t,
+                                        id: threat.id,
+                                        high: `${baseName}_threat_${t}_high.png`,
+                                        low: `${baseName}_threat_${t}_low.png`,
+                                    });
+                                } catch (err) {
+                                    console.warn(`[export] Failed to render clean threat ${t} for layout ${layout.id}:`, err);
                                 }
                             }
                         }
+
+                        if (includeNonThreatImages && Array.isArray(objects['non-threats'])) {
+                            for (let n = 0; n < objects['non-threats'].length; n++) {
+                                try {
+                                    const nonThreat = objects['non-threats'][n];
+                                    const nonThreatFlat = [{
+                                        id: nonThreat.id,
+                                        filepath: nonThreat.filepath,
+                                        pixel_data_path: nonThreat.pixel_data_path,
+                                        transform: {
+                                            x: nonThreat.center?.x || 0,
+                                            y: nonThreat.center?.y || 0,
+                                            width: nonThreat.size?.width || 100,
+                                            height: nonThreat.size?.height || 100,
+                                            rotation: nonThreat.rotation || 0,
+                                        },
+                                        layer: nonThreat.layer || 2,
+                                    }];
+
+                                    const nonThreatHighObjects = await enrichObjectsWithPixelData(nonThreatFlat);
+                                    const nonThreatLowObjects = await enrichObjectsWithPixelData(nonThreatFlat);
+                                    for (const obj of nonThreatLowObjects) {
+                                        if (obj.pixel_data_path) {
+                                            obj.pixel_data_path = obj.pixel_data_path.replace(/^highenergy[\\/]/, 'lowenergy/');
+                                        }
+                                    }
+
+                                    const nonThreatHighBuffer = await renderSceneAsync(nonThreatHighObjects, bagWidth, bagHeight, 'highenergy');
+                                    const nonThreatLowBuffer = await renderSceneAsync(nonThreatLowObjects, bagWidth, bagHeight, 'lowenergy');
+
+                                    const nonThreatHighPath = path.join(exportsHighRoot, `${baseName}_nonthreat_${n}_high.png`);
+                                    const nonThreatLowPath = path.join(exportsLowRoot, `${baseName}_nonthreat_${n}_low.png`);
+
+                                    await fs.writeFile(nonThreatHighPath, nonThreatHighBuffer);
+                                    await fs.writeFile(nonThreatLowPath, nonThreatLowBuffer);
+
+                                    savedPaths.nonThreatHigh.push(nonThreatHighPath);
+                                    savedPaths.nonThreatLow.push(nonThreatLowPath);
+
+                                    nonThreatImageList.push({
+                                        index: n,
+                                        id: nonThreat.id,
+                                        high: `${baseName}_nonthreat_${n}_high.png`,
+                                        low: `${baseName}_nonthreat_${n}_low.png`,
+                                    });
+                                } catch (err) {
+                                    console.warn(`[export] Failed to render clean non-threat ${n} for layout ${layout.id}:`, err);
+                                }
+                            }
+                        }
+                    }
 
                     const annotation = {
                         layoutId: layout.id,
@@ -2224,7 +2223,7 @@ app.post('/api/load/export-combinations', strictRateLimiter.middleware(), requir
 
     try {
         const { combinations, outputPath, includeImages = true } = req.body || {};
-        
+
         if (!Array.isArray(combinations) || combinations.length === 0) {
             return res.status(400).json({ ok: false, error: 'No combinations provided' });
         }
@@ -2246,11 +2245,11 @@ app.post('/api/load/export-combinations', strictRateLimiter.middleware(), requir
         // rendering every combination and then reporting "0 exported" with no error.
         const wrProbe = await probeWritableDir(exportsRoot);
         if (!wrProbe.ok) {
-          console.error('[export-combinations] Destination not writable:', wrProbe.message);
-          const insideContainer = await isContainerized();
-          if (!res.headersSent) {
-            return res.status(400).json({ ok: false, error: `The export folder is not writable: ${writableErrorText(wrProbe, insideContainer)}` });
-          }
+            console.error('[export-combinations] Destination not writable:', wrProbe.message);
+            const insideContainer = await isContainerized();
+            if (!res.headersSent) {
+                return res.status(400).json({ ok: false, error: `The export folder is not writable: ${writableErrorText(wrProbe, insideContainer)}` });
+            }
         }
 
         const exported = [];
@@ -2267,7 +2266,7 @@ app.post('/api/load/export-combinations', strictRateLimiter.middleware(), requir
             const bagWidth = objects.bag?.size?.width;
             const bagHeight = objects.bag?.size?.height;
             const flatObjects = [];
-            
+
             if (objects.bag) {
                 flatObjects.push({ ...objects.bag, transform: { x: objects.bag.center?.x || 0, y: objects.bag.center?.y || 0, width: objects.bag.size?.width, height: objects.bag.size?.height, rotation: 0 }, layer: objects.bag.layer || 0 });
             }
@@ -2338,7 +2337,7 @@ app.post('/api/load/export-combinations', strictRateLimiter.middleware(), requir
     } catch (err) {
         console.error('[export-combinations] Error:', err);
         if (!res.headersSent) { res.status(500).json({ ok: false, error: String(err) }); }
-        else { try { res.end(); } catch (_) {} }
+        else { try { res.end(); } catch (_) { } }
     } finally {
         if (jobId) { exportCancellations.delete(jobId); }
         if (jobId) { exportProgressStore.delete(jobId); }
@@ -2451,19 +2450,19 @@ app.delete('/api/saved-layouts/:id', auditLog('delete_saved_layout'), requireAut
 app.post('/api/saved-layouts/batch-delete', auditLog('batch_delete_saved_layouts'), requireAuth, async (req, res) => {
     try {
         const { ids } = req.body;
-        
+
         if (!Array.isArray(ids) || ids.length === 0) {
             return res.status(400).json({ ok: false, error: 'ids array is required and must not be empty' });
         }
-        
+
         if (ids.length > 1000) {
             return res.status(400).json({ ok: false, error: 'Maximum 1000 layouts can be deleted at once' });
         }
-        
+
         const results = [];
         let successCount = 0;
         let failCount = 0;
-        
+
         // Delete layouts sequentially to avoid overwhelming the storage layer
         for (const id of ids) {
             try {
@@ -2478,7 +2477,7 @@ app.post('/api/saved-layouts/batch-delete', auditLog('batch_delete_saved_layouts
                 failCount++;
             }
         }
-        
+
         res.json({
             ok: true,
             successCount,
@@ -2508,12 +2507,12 @@ app.post('/api/custom-subcategories', auditLog('add_custom_subcategory'), requir
         if (!category || !name) {
             return res.status(400).json({ ok: false, error: 'Missing category or name' });
         }
-        
+
         const result = await addCustomSubcategory(category, name);
         if (!result.success) {
             return res.status(400).json({ ok: false, error: result.error });
         }
-        
+
         res.json({ ok: true, subcategory: result.subcategory });
     } catch (err) {
         console.error(err);
@@ -2534,36 +2533,36 @@ app.delete('/api/custom-subcategories/:category/:slug', auditLog('remove_custom_
 
 // Upload endpoint - supports large batches (2k-5k files)
 const uploadWithLimits = multer({
-  storage: storage,
-  limits: {
-    fieldNameSize: 10000000,
-    fieldSize: 100000000,
-    fields: 10000,
-    fileSize: config.maxFileSize,
-    files: config.maxFilesPerUpload,
-  }
+    storage: storage,
+    limits: {
+        fieldNameSize: 10000000,
+        fieldSize: 100000000,
+        fields: 10000,
+        fileSize: config.maxFileSize,
+        files: config.maxFilesPerUpload,
+    }
 });
 
 app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithLimits.array("images", config.maxFilesPerUpload), async (req, res) => {
-  req.setTimeout(config.uploadTimeoutMs, () => {
-    if (!res.headersSent) {
-      res.status(408).json({ ok: false, error: "Upload timeout. Please try again with a smaller batch." });
-    }
-  });
-  
-  const operationId = generateOperationId();
-  const timer = new PipelineTimer(operationId, 'upload');
-  
-  try {
+    req.setTimeout(config.uploadTimeoutMs, () => {
+        if (!res.headersSent) {
+            res.status(408).json({ ok: false, error: "Upload timeout. Please try again with a smaller batch." });
+        }
+    });
+
+    const operationId = generateOperationId();
+    const timer = new PipelineTimer(operationId, 'upload');
+
+    try {
         // Stage 1: Upload Receipt
         timer.startStage(PIPELINE_STAGES.UPLOAD_RECEIPT);
         const files = req.files || [];
         logger.info({ operationId, fileCount: files.length }, 'upload_receipt');
         timer.endStage(PIPELINE_STAGES.UPLOAD_RECEIPT, { fileCount: files.length });
-        
+
         // Stage 2: Validation
         timer.startStage(PIPELINE_STAGES.VALIDATION);
-        
+
         let metadataArray = [];
         if (req.body.metadata) {
             try {
@@ -2585,7 +2584,7 @@ app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithL
                 fileValidationErrors.push({ filename: file.originalname, message: sizeCheck.error });
                 try {
                     await fs.unlink(file.path);
-                } catch {}
+                } catch { }
                 continue;
             }
 
@@ -2595,14 +2594,14 @@ app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithL
                 fileValidationErrors.push({ filename: file.originalname, message: magicCheck.error });
                 try {
                     await fs.unlink(file.path);
-                } catch {}
+                } catch { }
                 continue;
             }
 
             validFiles.push(file);
         }
-        
-        timer.endStage(PIPELINE_STAGES.VALIDATION, { 
+
+        timer.endStage(PIPELINE_STAGES.VALIDATION, {
             metadataItems: metadataArray.length,
             validFiles: validFiles.length,
             invalidFiles: fileValidationErrors.length
@@ -2610,7 +2609,7 @@ app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithL
 
         // Stage 3: File Processing (per-file)
         timer.startStage(PIPELINE_STAGES.FILE_PREPROCESSING);
-        
+
         const errors = [];
         const processed = [];
         const processedIds = new Set();
@@ -2619,7 +2618,7 @@ app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithL
         for (const file of validFiles) {
             const fileStart = process.hrtime.bigint();
             const itemId = path.basename(file.originalname, path.extname(file.originalname));
-            
+
             const fileMeta = metadataArray.find(m => m.originalname === file.originalname) || {};
 
             try {
@@ -2652,7 +2651,7 @@ app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithL
                 }
                 if (fileMeta.subcategory) subcategory = fileMeta.subcategory;
                 const tags = fileMeta.tags || [];
-                
+
                 let width = 512;
                 let height = 512;
                 try {
@@ -2820,20 +2819,20 @@ app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithL
 
         // Stage 4: Persistence
         timer.startStage(PIPELINE_STAGES.PERSISTENCE);
-        
-        res.json({ 
-            ok: true, 
+
+        res.json({
+            ok: true,
             message: errors.length > 0 || fileValidationErrors.length > 0 ? "Some files processed, some had errors" : "Files uploaded successfully!",
             itemsProcessed: processed.length,
             fileValidationErrors,
             errors
         });
-        
+
         const fileProcessingDuration = Number(process.hrtime.bigint() - fileProcessingStart) / 1e9;
-        timer.endStage(PIPELINE_STAGES.PERSISTENCE, { 
+        timer.endStage(PIPELINE_STAGES.PERSISTENCE, {
             itemsProcessed: processed.length,
             itemsFailed: errors.length,
-            duration_s: fileProcessingDuration 
+            duration_s: fileProcessingDuration
         });
 
         const pipelineSummary = timer.complete({
@@ -2842,7 +2841,7 @@ app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithL
             failedFiles: errors.length,
             metadataItems: metadataArray.length
         });
-        
+
         logger.info(pipelineSummary, 'pipeline_summary');
     } catch (err) {
         timer.logError('upload_pipeline_error', err);
@@ -2853,21 +2852,21 @@ app.post("/api/upload", strictRateLimiter.middleware(), requireAuth, uploadWithL
 
 // Update item metadata
 app.put("/api/items/:id", requireAuth, async (req, res) => {
-  try {
-    const { category, subcategory } = req.body;
-    if (!category || !subcategory) {
-      return res.status(400).json({ ok: false, error: "Missing required fields" });
-    }
+    try {
+        const { category, subcategory } = req.body;
+        if (!category || !subcategory) {
+            return res.status(400).json({ ok: false, error: "Missing required fields" });
+        }
 
-    const item = await updateItem(req.params.id, { category, subcategory });
-    if (!item) {
-      return res.status(404).json({ ok: false, error: "Item not found" });
+        const item = await updateItem(req.params.id, { category, subcategory });
+        if (!item) {
+            return res.status(404).json({ ok: false, error: "Item not found" });
+        }
+        res.json({ ok: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
     }
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
 });
 
 // Delete the collage / export image files (high + low) and annotation files
@@ -2883,139 +2882,139 @@ app.put("/api/items/:id", requireAuth, async (req, res) => {
 //   - individual annotation file (SB_{id}.json)
 //   - batch annotation entries (annotations_*.json arrays filtered by layoutId)
 async function deleteCollageImagesForLayout(layoutId) {
-  if (!layoutId || typeof layoutId !== 'string') return;
-  const safeId = String(layoutId).replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 100);
-  if (!safeId) return;
+    if (!layoutId || typeof layoutId !== 'string') return;
+    const safeId = String(layoutId).replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 100);
+    if (!safeId) return;
 
-  const roots = [];
+    const roots = [];
 
-  // Default collage image roots (backend/data/collage_images/high|low).
-  try {
-    roots.push(path.join(collageHighRoot));
-    roots.push(path.join(collageLowRoot));
-  } catch { /* ignore */ }
-
-  // User-configured collage export root (custom path chosen in the UI). Images are
-  // written under {configured}/collage_images/{high,low}; also scan the legacy
-  // {configured}/{high,low} layout so files saved by older versions get cleaned up.
-  try {
-    const collageImagesRoot = await getCollageImageRoot();
-    roots.push(path.join(collageImagesRoot, 'high'));
-    roots.push(path.join(collageImagesRoot, 'low'));
-    const legacyCollageRoot = await getExportsPath('collage');
-    roots.push(path.join(legacyCollageRoot, 'high'));
-    roots.push(path.join(legacyCollageRoot, 'low'));
-  } catch { /* ignore */ }
-
-  // Saved layout export roots (backend/data/exports/high|low or user-configured saved path).
-  let savedAnnotationsRoot = null;
-  try {
-    const savedRoot = await getExportsPath('saved');
-    roots.push(path.join(savedRoot, 'high'));
-    roots.push(path.join(savedRoot, 'low'));
-    savedAnnotationsRoot = path.join(savedRoot, 'annotations');
-  } catch { /* ignore */ }
-
-  const seen = new Set();
-  for (const root of roots) {
-    if (seen.has(root)) continue;
-    seen.add(root);
-
-    // Direct collage render: {id}.png
-    const directPath = path.join(root, `${safeId}.png`);
+    // Default collage image roots (backend/data/collage_images/high|low).
     try {
-      await fs.unlink(directPath);
-    } catch (err) {
-      if (err && err.code !== 'ENOENT') {
-        console.warn(`[delete-layout] Failed to remove image ${directPath}: ${err.message}`);
-      }
-    }
+        roots.push(path.join(collageHighRoot));
+        roots.push(path.join(collageLowRoot));
+    } catch { /* ignore */ }
 
-    // Saved-layout export: SB_{id}_high.png and SB_{id}_low.png
-    const baseName = `SB_${safeId}`;
-    const highPath = path.join(root, `${baseName}_high.png`);
+    // User-configured collage export root (custom path chosen in the UI). Images are
+    // written under {configured}/collage_images/{high,low}; also scan the legacy
+    // {configured}/{high,low} layout so files saved by older versions get cleaned up.
     try {
-      await fs.unlink(highPath);
-    } catch (err) {
-      if (err && err.code !== 'ENOENT') {
-        console.warn(`[delete-layout] Failed to remove image ${highPath}: ${err.message}`);
-      }
-    }
+        const collageImagesRoot = await getCollageImageRoot();
+        roots.push(path.join(collageImagesRoot, 'high'));
+        roots.push(path.join(collageImagesRoot, 'low'));
+        const legacyCollageRoot = await getExportsPath('collage');
+        roots.push(path.join(legacyCollageRoot, 'high'));
+        roots.push(path.join(legacyCollageRoot, 'low'));
+    } catch { /* ignore */ }
 
-    const lowPath = path.join(root, `${baseName}_low.png`);
+    // Saved layout export roots (backend/data/exports/high|low or user-configured saved path).
+    let savedAnnotationsRoot = null;
     try {
-      await fs.unlink(lowPath);
-    } catch (err) {
-      if (err && err.code !== 'ENOENT') {
-        console.warn(`[delete-layout] Failed to remove image ${lowPath}: ${err.message}`);
-      }
-    }
+        const savedRoot = await getExportsPath('saved');
+        roots.push(path.join(savedRoot, 'high'));
+        roots.push(path.join(savedRoot, 'low'));
+        savedAnnotationsRoot = path.join(savedRoot, 'annotations');
+    } catch { /* ignore */ }
 
-    // Clean threat images: SB_{id}_threat_{index}_high.png and _low.png
-    const threatFiles = await fs.readdir(root).catch(() => []);
-    for (const file of threatFiles) {
-      if (file.startsWith(`${baseName}_threat_`) && (file.endsWith('_high.png') || file.endsWith('_low.png'))) {
+    const seen = new Set();
+    for (const root of roots) {
+        if (seen.has(root)) continue;
+        seen.add(root);
+
+        // Direct collage render: {id}.png
+        const directPath = path.join(root, `${safeId}.png`);
         try {
-          await fs.unlink(path.join(root, file));
+            await fs.unlink(directPath);
         } catch (err) {
-          if (err && err.code !== 'ENOENT') {
-            console.warn(`[delete-layout] Failed to remove threat image ${file}: ${err.message}`);
-          }
+            if (err && err.code !== 'ENOENT') {
+                console.warn(`[delete-layout] Failed to remove image ${directPath}: ${err.message}`);
+            }
         }
-      }
-    }
 
-    // Clean non-threat images: SB_{id}_nonthreat_{index}_high.png and _low.png
-    const nonThreatFiles = await fs.readdir(root).catch(() => []);
-    for (const file of nonThreatFiles) {
-      if (file.startsWith(`${baseName}_nonthreat_`) && (file.endsWith('_high.png') || file.endsWith('_low.png'))) {
+        // Saved-layout export: SB_{id}_high.png and SB_{id}_low.png
+        const baseName = `SB_${safeId}`;
+        const highPath = path.join(root, `${baseName}_high.png`);
         try {
-          await fs.unlink(path.join(root, file));
+            await fs.unlink(highPath);
         } catch (err) {
-          if (err && err.code !== 'ENOENT') {
-            console.warn(`[delete-layout] Failed to remove non-threat image ${file}: ${err.message}`);
-          }
+            if (err && err.code !== 'ENOENT') {
+                console.warn(`[delete-layout] Failed to remove image ${highPath}: ${err.message}`);
+            }
         }
-      }
-    }
-  }
 
-  // Delete individual annotation file and purge entries from batch annotation files.
-  if (savedAnnotationsRoot) {
-    // Individual annotation: SB_{id}.json
-    const individualAnnotationPath = path.join(savedAnnotationsRoot, `${safeId}.json`);
-    try {
-      await fs.unlink(individualAnnotationPath);
-    } catch (err) {
-      if (err && err.code !== 'ENOENT') {
-        console.warn(`[delete-layout] Failed to remove annotation ${individualAnnotationPath}: ${err.message}`);
-      }
-    }
-
-    // Batch annotations: annotations_*.json — remove entries for this layoutId.
-    try {
-      const files = await fs.readdir(savedAnnotationsRoot);
-      const batchFiles = files.filter(name => /^annotations_\d+\.json$/.test(name));
-      for (const file of batchFiles) {
-        const fullPath = path.join(savedAnnotationsRoot, file);
+        const lowPath = path.join(root, `${baseName}_low.png`);
         try {
-          const raw = await fs.readFile(fullPath, 'utf8');
-          const arr = JSON.parse(raw);
-          if (!Array.isArray(arr)) continue;
-          const next = arr.filter(entry => entry && entry.layoutId !== layoutId);
-          if (next.length === 0) {
-            await fs.unlink(fullPath);
-          } else {
-            await fs.writeFile(fullPath, JSON.stringify(next, null, 2));
-          }
+            await fs.unlink(lowPath);
         } catch (err) {
-          console.warn(`[delete-layout] Failed to update batch annotation ${fullPath}: ${err.message}`);
+            if (err && err.code !== 'ENOENT') {
+                console.warn(`[delete-layout] Failed to remove image ${lowPath}: ${err.message}`);
+            }
         }
-      }
-    } catch (err) {
-      console.warn(`[delete-layout] Failed to scan annotations root ${savedAnnotationsRoot}: ${err.message}`);
+
+        // Clean threat images: SB_{id}_threat_{index}_high.png and _low.png
+        const threatFiles = await fs.readdir(root).catch(() => []);
+        for (const file of threatFiles) {
+            if (file.startsWith(`${baseName}_threat_`) && (file.endsWith('_high.png') || file.endsWith('_low.png'))) {
+                try {
+                    await fs.unlink(path.join(root, file));
+                } catch (err) {
+                    if (err && err.code !== 'ENOENT') {
+                        console.warn(`[delete-layout] Failed to remove threat image ${file}: ${err.message}`);
+                    }
+                }
+            }
+        }
+
+        // Clean non-threat images: SB_{id}_nonthreat_{index}_high.png and _low.png
+        const nonThreatFiles = await fs.readdir(root).catch(() => []);
+        for (const file of nonThreatFiles) {
+            if (file.startsWith(`${baseName}_nonthreat_`) && (file.endsWith('_high.png') || file.endsWith('_low.png'))) {
+                try {
+                    await fs.unlink(path.join(root, file));
+                } catch (err) {
+                    if (err && err.code !== 'ENOENT') {
+                        console.warn(`[delete-layout] Failed to remove non-threat image ${file}: ${err.message}`);
+                    }
+                }
+            }
+        }
     }
-  }
+
+    // Delete individual annotation file and purge entries from batch annotation files.
+    if (savedAnnotationsRoot) {
+        // Individual annotation: SB_{id}.json
+        const individualAnnotationPath = path.join(savedAnnotationsRoot, `${safeId}.json`);
+        try {
+            await fs.unlink(individualAnnotationPath);
+        } catch (err) {
+            if (err && err.code !== 'ENOENT') {
+                console.warn(`[delete-layout] Failed to remove annotation ${individualAnnotationPath}: ${err.message}`);
+            }
+        }
+
+        // Batch annotations: annotations_*.json — remove entries for this layoutId.
+        try {
+            const files = await fs.readdir(savedAnnotationsRoot);
+            const batchFiles = files.filter(name => /^annotations_\d+\.json$/.test(name));
+            for (const file of batchFiles) {
+                const fullPath = path.join(savedAnnotationsRoot, file);
+                try {
+                    const raw = await fs.readFile(fullPath, 'utf8');
+                    const arr = JSON.parse(raw);
+                    if (!Array.isArray(arr)) continue;
+                    const next = arr.filter(entry => entry && entry.layoutId !== layoutId);
+                    if (next.length === 0) {
+                        await fs.unlink(fullPath);
+                    } else {
+                        await fs.writeFile(fullPath, JSON.stringify(next, null, 2));
+                    }
+                } catch (err) {
+                    console.warn(`[delete-layout] Failed to update batch annotation ${fullPath}: ${err.message}`);
+                }
+            }
+        } catch (err) {
+            console.warn(`[delete-layout] Failed to scan annotations root ${savedAnnotationsRoot}: ${err.message}`);
+        }
+    }
 }
 
 // Delete an individual item
@@ -3142,7 +3141,7 @@ app.post('/api/temp-files/batch-delete', requireAuth, async (req, res) => {
                 if (Array.isArray(parsed?.itemIds)) {
                     itemIds = parsed.itemIds;
                 }
-            } catch {}
+            } catch { }
         }
         if (itemIds.length === 0) {
             return res.status(400).json({ ok: false, error: 'itemIds array is required' });
@@ -3174,7 +3173,7 @@ app.get("/api/auto-valid-region", (req, res) => {
 app.post("/api/auto-valid-region", requireAuth, async (req, res) => {
     try {
         const { itemId, pixelDataPath } = req.body;
-        
+
         if (!itemId || !pixelDataPath) {
             return res.status(400).json({ ok: false, error: "Missing itemId or pixelDataPath" });
         }
@@ -3191,7 +3190,7 @@ app.post("/api/auto-valid-region", requireAuth, async (req, res) => {
         }
 
         const fullPath = safePathResult.fullPath;
-        
+
         try {
             await fs.access(fullPath);
         } catch {
@@ -3554,7 +3553,7 @@ app.get("/api/items/:id/pixel-data", async (req, res) => {
 
         const { spawn } = await import('node:child_process');
         const readNpzScript = path.join(__dirname, 'lib', 'read_npz.py');
-        
+
         const pngBuffer = await new Promise((resolve, reject) => {
             const proc = spawn('python', [readNpzScript, '--npz-path', fullPath], { cwd: __dirname });
             let stdout = '';
@@ -3607,26 +3606,26 @@ app.get("/api/items/:id/pixel-data", async (req, res) => {
 
 // Get item details (including valid region for bags)
 app.get("/api/items/:id", async (req, res) => {
-  try {
-    const item = await getItemById(req.params.id);
-    if (!item) {
-      return res.status(404).json({ ok: false, error: "Item not found" });
+    try {
+        const item = await getItemById(req.params.id);
+        if (!item) {
+            return res.status(404).json({ ok: false, error: "Item not found" });
+        }
+
+        const normalizedCat = normalizeCategory(item.category);
+        if (normalizedCat === "bags") {
+            const bagData = await getBagByItemId(item.id);
+            if (bagData) {
+                item.validRegionPoints = bagData.valid_region_points?.simplifiedPoints || bagData.valid_region_points?.points || bagData.valid_region_points;
+                item.validRegionData = bagData.valid_region_points;
+            }
+        }
+
+        res.json({ ok: true, item });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ ok: false, error: String(err) });
     }
-    
-    const normalizedCat = normalizeCategory(item.category);
-    if (normalizedCat === "bags") {
-      const bagData = await getBagByItemId(item.id);
-      if (bagData) {
-        item.validRegionPoints = bagData.valid_region_points?.simplifiedPoints || bagData.valid_region_points?.points || bagData.valid_region_points;
-        item.validRegionData = bagData.valid_region_points;
-      }
-    }
-    
-    res.json({ ok: true, item });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
 });
 
 // Helper: generate segmentation masks (outermost boundary polygon of non-white
@@ -3719,19 +3718,19 @@ async function fileExists(p) {
 
 // Helper: inject pixel_data_path into flat objects array from items database
 async function enrichObjectsWithPixelData(objects) {
-  const allItems = await getItems();
-  const itemMap = new Map(allItems.map(i => [i.id, i]));
-  const resolved = [];
-  for (const obj of objects) {
-    const item = itemMap.get(obj.id);
-    const resolvedPath = await resolvePixelDataPath(obj.id, item?.pixel_data_path || null);
-    if (resolvedPath) {
-      resolved.push({ ...obj, pixel_data_path: resolvedPath });
-    } else {
-      resolved.push(obj);
+    const allItems = await getItems();
+    const itemMap = new Map(allItems.map(i => [i.id, i]));
+    const resolved = [];
+    for (const obj of objects) {
+        const item = itemMap.get(obj.id);
+        const resolvedPath = await resolvePixelDataPath(obj.id, item?.pixel_data_path || null);
+        if (resolvedPath) {
+            resolved.push({ ...obj, pixel_data_path: resolvedPath });
+        } else {
+            resolved.push(obj);
+        }
     }
-  }
-  return resolved;
+    return resolved;
 }
 
 // Resolve the canvas dimensions for rendering from either payload shape:
@@ -3740,23 +3739,23 @@ async function enrichObjectsWithPixelData(objects) {
 // Both shapes carry the ORIGINAL bag pixel size (the bag is never resized), so the
 // resolved values are used directly as the output canvas size.
 function resolveCanvasSize(objects) {
-  if (objects && !Array.isArray(objects)) {
-    const b = objects.bag;
-    if (b) {
-      return { width: Number(b.size?.width), height: Number(b.size?.height) };
+    if (objects && !Array.isArray(objects)) {
+        const b = objects.bag;
+        if (b) {
+            return { width: Number(b.size?.width), height: Number(b.size?.height) };
+        }
+        return null;
     }
-    return null;
-  }
-  const bag = (Array.isArray(objects) ? objects : []).find(o => o?.stencilId === "bag" || o?.library === "bag");
-  if (!bag) return null;
-  const w = bag.transform?.width ?? bag.initialWidth;
-  const h = bag.transform?.height ?? bag.initialHeight;
-  return { width: Number(w), height: Number(h) };
+    const bag = (Array.isArray(objects) ? objects : []).find(o => o?.stencilId === "bag" || o?.library === "bag");
+    if (!bag) return null;
+    const w = bag.transform?.width ?? bag.initialWidth;
+    const h = bag.transform?.height ?? bag.initialHeight;
+    return { width: Number(w), height: Number(h) };
 }
 
 // True when the resolved canvas size is usable (finite, positive numbers).
 function isValidCanvasSize(size) {
-  return !!size && Number.isFinite(size.width) && Number.isFinite(size.height) && size.width > 0 && size.height > 0;
+    return !!size && Number.isFinite(size.width) && Number.isFinite(size.height) && size.width > 0 && size.height > 0;
 }
 
 // Render and save a collage combination as a PNG image
@@ -3776,7 +3775,7 @@ app.post("/api/render-and-save-collage", strictRateLimiter.middleware(), require
         const collageImagesRoot = await getCollageImageRoot();
         const collageHighRoot = path.join(collageImagesRoot, 'high');
         const collageLowRoot = path.join(collageImagesRoot, 'low');
-        
+
         await fs.mkdir(collageHighRoot, { recursive: true });
         await fs.mkdir(collageLowRoot, { recursive: true });
 
@@ -3831,7 +3830,7 @@ app.post("/api/render-and-save-collage-both", strictRateLimiter.middleware(), re
         const filename = `${safeName}.png`;
 
         let highEnergyDir, lowEnergyDir;
-        
+
         if (outputPath && typeof outputPath === 'string') {
             const collageRoot = await getExportsPath('collage');
             const result = validateClientOutputPath(outputPath, collageRoot, collageRoot);
@@ -3850,7 +3849,7 @@ app.post("/api/render-and-save-collage-both", strictRateLimiter.middleware(), re
             const collageImagesRoot = await getCollageImageRoot();
             highEnergyDir = path.join(collageImagesRoot, 'high');
             lowEnergyDir = path.join(collageImagesRoot, 'low');
-            
+
             await fs.mkdir(highEnergyDir, { recursive: true });
             await fs.mkdir(lowEnergyDir, { recursive: true });
         }
@@ -3858,7 +3857,7 @@ app.post("/api/render-and-save-collage-both", strictRateLimiter.middleware(), re
         // Enrich objects separately for each energy type to ensure correct pixel data paths
         const highEnergyObjects = await enrichObjectsWithPixelData(objects);
         const lowEnergyObjects = await enrichObjectsWithPixelData(objects);
-        
+
         // Update low energy objects to use lowenergy paths
         for (const obj of lowEnergyObjects) {
             if (obj.pixel_data_path) {
@@ -3872,12 +3871,12 @@ app.post("/api/render-and-save-collage-both", strictRateLimiter.middleware(), re
         const lowPath = path.join(lowEnergyDir, filename);
 
         try {
-          await fs.writeFile(highPath, highPngBuffer);
-          await fs.writeFile(lowPath, lowPngBuffer);
+            await fs.writeFile(highPath, highPngBuffer);
+            await fs.writeFile(lowPath, lowPngBuffer);
         } catch (err) {
-          try { await fs.unlink(highPath); } catch { /* ignore cleanup errors */ }
-          try { await fs.unlink(lowPath); } catch { /* ignore cleanup errors */ }
-          throw err;
+            try { await fs.unlink(highPath); } catch { /* ignore cleanup errors */ }
+            try { await fs.unlink(lowPath); } catch { /* ignore cleanup errors */ }
+            throw err;
         }
 
         let isAbsolutePath = false;
@@ -4063,74 +4062,74 @@ app.post("/api/regenerate-collage-images", strictRateLimiter.middleware(), requi
 
 // Check data integrity of saved layouts (which items/pixel data are missing)
 app.get('/api/saved-layouts/integrity', async (_req, res) => {
-  try {
-    const [layouts, items] = await Promise.all([
-      getSavedLayouts(),
-      getItems()
-    ]);
-    
-    const itemMap = new Map(items.map(i => [i.id, i]));
-    const results = [];
-    
-    for (const layout of layouts) {
-      const issues = [];
-      const objects = layout.layout_json?.objects || {};
-      const allObjects = [
-        objects.bag && { ...objects.bag, library: 'bag' },
-        ...(objects.threats || []).map(t => ({ ...t, library: 'threat' })),
-        ...(objects['non-threats'] || []).map(n => ({ ...n, library: 'non-threat' }))
-      ].filter(Boolean);
-      
-      for (const obj of allObjects) {
-        const item = itemMap.get(obj.id);
-        if (!item) {
-          issues.push({
-            objectId: obj.id,
-            objectLibrary: obj.library,
-            issue: 'item_deleted',
-            message: `Item ${obj.id} not found in library`
-          });
-        } else {
-          const pixelDataPath = await resolvePixelDataPath(obj.id, item.pixel_data_path);
-          if (!pixelDataPath) {
-            issues.push({
-              objectId: obj.id,
-              objectLibrary: obj.library,
-              issue: 'no_pixel_data',
-              message: `Item ${obj.id} has no pixel data`
-            });
-          } else {
-            const highEnergyPath = path.join(pixelDataRoot, pixelDataPath);
-            const lowEnergyPath = path.join(pixelDataRoot, pixelDataPath.replace(/^highenergy[\\/]/, 'lowenergy/'));
-            
-            try {
-              await fs.access(highEnergyPath);
-            } catch {
-              issues.push({
-                objectId: obj.id,
-                objectLibrary: obj.library,
-                issue: 'pixel_data_missing',
-                message: `Pixel data file not found: ${pixelDataPath}`
-              });
+    try {
+        const [layouts, items] = await Promise.all([
+            getSavedLayouts(),
+            getItems()
+        ]);
+
+        const itemMap = new Map(items.map(i => [i.id, i]));
+        const results = [];
+
+        for (const layout of layouts) {
+            const issues = [];
+            const objects = layout.layout_json?.objects || {};
+            const allObjects = [
+                objects.bag && { ...objects.bag, library: 'bag' },
+                ...(objects.threats || []).map(t => ({ ...t, library: 'threat' })),
+                ...(objects['non-threats'] || []).map(n => ({ ...n, library: 'non-threat' }))
+            ].filter(Boolean);
+
+            for (const obj of allObjects) {
+                const item = itemMap.get(obj.id);
+                if (!item) {
+                    issues.push({
+                        objectId: obj.id,
+                        objectLibrary: obj.library,
+                        issue: 'item_deleted',
+                        message: `Item ${obj.id} not found in library`
+                    });
+                } else {
+                    const pixelDataPath = await resolvePixelDataPath(obj.id, item.pixel_data_path);
+                    if (!pixelDataPath) {
+                        issues.push({
+                            objectId: obj.id,
+                            objectLibrary: obj.library,
+                            issue: 'no_pixel_data',
+                            message: `Item ${obj.id} has no pixel data`
+                        });
+                    } else {
+                        const highEnergyPath = path.join(pixelDataRoot, pixelDataPath);
+                        const lowEnergyPath = path.join(pixelDataRoot, pixelDataPath.replace(/^highenergy[\\/]/, 'lowenergy/'));
+
+                        try {
+                            await fs.access(highEnergyPath);
+                        } catch {
+                            issues.push({
+                                objectId: obj.id,
+                                objectLibrary: obj.library,
+                                issue: 'pixel_data_missing',
+                                message: `Pixel data file not found: ${pixelDataPath}`
+                            });
+                        }
+                    }
+                }
             }
-          }
+
+            results.push({
+                layoutId: layout.id,
+                layoutName: layout.name,
+                hasIssues: issues.length > 0,
+                issues,
+                objectCount: allObjects.length
+            });
         }
-      }
-      
-      results.push({
-        layoutId: layout.id,
-        layoutName: layout.name,
-        hasIssues: issues.length > 0,
-        issues,
-        objectCount: allObjects.length
-      });
+
+        res.json({ ok: true, results });
+    } catch (err) {
+        console.error('[integrity] Error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
     }
-    
-    res.json({ ok: true, results });
-  } catch (err) {
-    console.error('[integrity] Error:', err);
-    res.status(500).json({ ok: false, error: String(err) });
-  }
 });
 
 // Render a preview image from a saved layout using real pixel data (I1*I2/65535)
@@ -4210,7 +4209,7 @@ app.post('/api/render-preview', strictRateLimiter.middleware(), requireAuth, asy
         }
 
         const renderWarnings = [];
-        
+
         const objectsWithData = flatObjects.filter(o => o.pixel_data_path);
         const objectsWithNoDataSource = missingPixelDataObjs.filter(id => !id.includes("falls back to PNG"));
         if (objectsWithData.length === 0 && objectsWithNoDataSource.length > 0) {
@@ -4220,7 +4219,7 @@ app.post('/api/render-preview', strictRateLimiter.middleware(), requireAuth, asy
         const pngBuffer = await renderSceneAsync(flatObjects, bagWidth, bagHeight, "highenergy", renderWarnings);
 
         const isBlank = pngBuffer.length < 500;
-        
+
         res.json({
             ok: true,
             warnings: renderWarnings,
@@ -4235,23 +4234,23 @@ app.post('/api/render-preview', strictRateLimiter.middleware(), requireAuth, asy
 
 // Error handling middleware - ensure all errors return JSON
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  console.error('Error stack:', err.stack);
-  
-  if (res.headersSent) {
-    return next(err);
-  }
-  
-  res.status(500).json({ 
-    ok: false, 
-    error: err.message || String(err),
-    ...(config.nodeEnv === 'development' && { stack: err.stack })
-  });
+    console.error('Unhandled error:', err);
+    console.error('Error stack:', err.stack);
+
+    if (res.headersSent) {
+        return next(err);
+    }
+
+    res.status(500).json({
+        ok: false,
+        error: err.message || String(err),
+        ...(config.nodeEnv === 'development' && { stack: err.stack })
+    });
 });
 
 // 404 handler - also return JSON
 app.use((req, res) => {
-  res.status(404).json({ ok: false, error: 'Not found' });
+    res.status(404).json({ ok: false, error: 'Not found' });
 });
 
 const port = config.port;

@@ -1,0 +1,297 @@
+{
+  "testType": "Saved Page (Multi-facet Filtered Queries - Breaking Point Analysis)",
+  "drive": "B: drive only",
+  "timestamp": "2026-10-24T13:19:33.465Z",
+  "peakQueriesExecuted": 41,
+  "breakingPointScale": 35,
+  "breakingPointReason": "publicApiRateLimiter rejects queries exceeding 50 req/s or 30 concurrent with HTTP 429",
+  "peakQpsAchieved": 490.2,
+  "overallAvgQueryLatencyMs": 150.84,
+  "knownLimits": {
+    "publicApiRateLimiter": "50 req/s, 30 concurrent",
+    "serverLimitClamping": "Math.min(200, limit) clamps page size to max 200 items",
+    "partitionCap": "5,000 items per storage partition"
+  },
+  "results": [
+    {
+      "page": "Saved Page",
+      "endpoint": "/api/saved-layouts/filtered",
+      "scale": 10,
+      "totalRequested": 10,
+      "successful": 10,
+      "rateLimited": 0,
+      "failed": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 0.67,
+      "avgQueryLatencyMs": 400,
+      "queriesPerSecond": 14.93,
+      "latencyStats": {
+        "p50Ms": 369,
+        "p95Ms": 624,
+        "p99Ms": 624,
+        "maxMs": 624
+      },
+      "memory": {
+        "rssDeltaMB": 12.4,
+        "heapUsedDeltaMB": 4.24
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Saved Page",
+      "endpoint": "/api/saved-layouts/filtered",
+      "scale": 20,
+      "totalRequested": 20,
+      "successful": 20,
+      "rateLimited": 0,
+      "failed": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 0.2,
+      "avgQueryLatencyMs": 113.75,
+      "queriesPerSecond": 99.01,
+      "latencyStats": {
+        "p50Ms": 111,
+        "p95Ms": 188,
+        "p99Ms": 199,
+        "maxMs": 199
+      },
+      "memory": {
+        "rssDeltaMB": 1.31,
+        "heapUsedDeltaMB": 0.85
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Saved Page",
+      "endpoint": "/api/saved-layouts/filtered",
+      "scale": 30,
+      "totalRequested": 30,
+      "successful": 30,
+      "rateLimited": 0,
+      "failed": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 0.27,
+      "avgQueryLatencyMs": 139.93,
+      "queriesPerSecond": 111.11,
+      "latencyStats": {
+        "p50Ms": 135,
+        "p95Ms": 255,
+        "p99Ms": 264,
+        "maxMs": 264
+      },
+      "memory": {
+        "rssDeltaMB": 1.52,
+        "heapUsedDeltaMB": 1.08
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Saved Page",
+      "endpoint": "/api/saved-layouts/filtered",
+      "scale": 35,
+      "totalRequested": 35,
+      "successful": 32,
+      "rateLimited": 3,
+      "failed": 3,
+      "successRatePct": 91.43,
+      "totalDurationSec": 0.27,
+      "avgQueryLatencyMs": 129.34,
+      "queriesPerSecond": 127.74,
+      "latencyStats": {
+        "p50Ms": 128,
+        "p95Ms": 257,
+        "p99Ms": 266,
+        "maxMs": 266
+      },
+      "memory": {
+        "rssDeltaMB": 1.93,
+        "heapUsedDeltaMB": 0.22
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Saved Page",
+      "endpoint": "/api/saved-layouts/filtered",
+      "scale": 40,
+      "totalRequested": 40,
+      "successful": 32,
+      "rateLimited": 8,
+      "failed": 8,
+      "successRatePct": 80,
+      "totalDurationSec": 0.3,
+      "avgQueryLatencyMs": 129.68,
+      "queriesPerSecond": 133.33,
+      "latencyStats": {
+        "p50Ms": 117,
+        "p95Ms": 276,
+        "p99Ms": 293,
+        "maxMs": 293
+      },
+      "memory": {
+        "rssDeltaMB": 1.9,
+        "heapUsedDeltaMB": 0.72
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Saved Page",
+      "endpoint": "/api/saved-layouts/filtered",
+      "scale": 50,
+      "totalRequested": 50,
+      "successful": 33,
+      "rateLimited": 17,
+      "failed": 17,
+      "successRatePct": 66,
+      "totalDurationSec": 0.32,
+      "avgQueryLatencyMs": 115.88,
+      "queriesPerSecond": 157.23,
+      "latencyStats": {
+        "p50Ms": 86,
+        "p95Ms": 286,
+        "p99Ms": 310,
+        "maxMs": 310
+      },
+      "memory": {
+        "rssDeltaMB": 0.9,
+        "heapUsedDeltaMB": 1.31
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Saved Page",
+      "endpoint": "/api/saved-layouts/filtered",
+      "scale": 75,
+      "totalRequested": 75,
+      "successful": 36,
+      "rateLimited": 39,
+      "failed": 39,
+      "successRatePct": 48,
+      "totalDurationSec": 0.39,
+      "avgQueryLatencyMs": 124.68,
+      "queriesPerSecond": 193.3,
+      "latencyStats": {
+        "p50Ms": 70,
+        "p95Ms": 353,
+        "p99Ms": 380,
+        "maxMs": 380
+      },
+      "memory": {
+        "rssDeltaMB": 2.05,
+        "heapUsedDeltaMB": -0.97
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Saved Page",
+      "endpoint": "/api/saved-layouts/filtered",
+      "scale": 100,
+      "totalRequested": 100,
+      "successful": 38,
+      "rateLimited": 62,
+      "failed": 62,
+      "successRatePct": 38,
+      "totalDurationSec": 0.41,
+      "avgQueryLatencyMs": 127.79,
+      "queriesPerSecond": 242.13,
+      "latencyStats": {
+        "p50Ms": 61,
+        "p95Ms": 365,
+        "p99Ms": 390,
+        "maxMs": 398
+      },
+      "memory": {
+        "rssDeltaMB": 4.4,
+        "heapUsedDeltaMB": 2.15
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Saved Page",
+      "endpoint": "/api/saved-layouts/filtered",
+      "scale": 150,
+      "totalRequested": 150,
+      "successful": 41,
+      "rateLimited": 109,
+      "failed": 109,
+      "successRatePct": 27.33,
+      "totalDurationSec": 0.43,
+      "avgQueryLatencyMs": 119.75,
+      "queriesPerSecond": 344.83,
+      "latencyStats": {
+        "p50Ms": 78,
+        "p95Ms": 363,
+        "p99Ms": 406,
+        "maxMs": 415
+      },
+      "memory": {
+        "rssDeltaMB": 5.3,
+        "heapUsedDeltaMB": -2.81
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Saved Page",
+      "endpoint": "/api/saved-layouts/filtered",
+      "scale": 200,
+      "totalRequested": 200,
+      "successful": 37,
+      "rateLimited": 163,
+      "failed": 163,
+      "successRatePct": 18.5,
+      "totalDurationSec": 0.41,
+      "avgQueryLatencyMs": 107.57,
+      "queriesPerSecond": 490.2,
+      "latencyStats": {
+        "p50Ms": 77,
+        "p95Ms": 315,
+        "p99Ms": 367,
+        "maxMs": 380
+      },
+      "memory": {
+        "rssDeltaMB": 7.62,
+        "heapUsedDeltaMB": 4.51
+      },
+      "knownLimits": {
+        "publicApiRateLimiter": "50 req/s, 30 concurrent",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": true
+    }
+  ]
+}

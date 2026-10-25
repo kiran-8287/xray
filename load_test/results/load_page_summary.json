@@ -1,0 +1,153 @@
+{
+  "testType": "Load Page (Combinations Export Pipeline - Breaking Point Analysis)",
+  "drive": "B: drive only",
+  "timestamp": "2026-10-24T12:13:09.295Z",
+  "peakCombinationsExported": 1000,
+  "breakingPoints": {
+    "maxCombinationsPerCall": 10000,
+    "hardLimitFailureReason": "validateCombinationsArray rejects > 10,000 combinations with HTTP 400"
+  },
+  "peakThroughputCombosPerSec": 21.1,
+  "overallAvgTimePerComboMs": 49.85,
+  "knownLimits": {
+    "maxCombinationsPerCall": 10000,
+    "strictRateLimiter": "20 req/s, 10 concurrent"
+  },
+  "results": [
+    {
+      "page": "Load Page",
+      "endpoint": "/api/load/export-combinations",
+      "scale": 50,
+      "totalRequested": 50,
+      "totalExported": 50,
+      "successRatePct": 100,
+      "totalDurationSec": 2.87,
+      "avgTimePerComboMs": 57.3,
+      "throughputCombosPerSec": 17.45,
+      "batchStats": {
+        "totalBatches": 1,
+        "p50BatchMs": 2863,
+        "p95BatchMs": 2863,
+        "p99BatchMs": 2863
+      },
+      "memory": {
+        "rssDeltaMB": 10.15,
+        "heapUsedDeltaMB": 3.85
+      },
+      "knownLimits": {
+        "maxCombinationsPerCall": 10000,
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "dualResolutionSynthesis": "High + low energy image pairs side-by-side"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Load Page",
+      "endpoint": "/api/load/export-combinations",
+      "scale": 100,
+      "totalRequested": 100,
+      "totalExported": 100,
+      "successRatePct": 100,
+      "totalDurationSec": 4.74,
+      "avgTimePerComboMs": 47.39,
+      "throughputCombosPerSec": 21.1,
+      "batchStats": {
+        "totalBatches": 2,
+        "p50BatchMs": 2350,
+        "p95BatchMs": 2387,
+        "p99BatchMs": 2387
+      },
+      "memory": {
+        "rssDeltaMB": -0.69,
+        "heapUsedDeltaMB": -1.11
+      },
+      "knownLimits": {
+        "maxCombinationsPerCall": 10000,
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "dualResolutionSynthesis": "High + low energy image pairs side-by-side"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Load Page",
+      "endpoint": "/api/load/export-combinations",
+      "scale": 250,
+      "totalRequested": 250,
+      "totalExported": 250,
+      "successRatePct": 100,
+      "totalDurationSec": 12.2,
+      "avgTimePerComboMs": 48.79,
+      "throughputCombosPerSec": 20.5,
+      "batchStats": {
+        "totalBatches": 5,
+        "p50BatchMs": 2442,
+        "p95BatchMs": 2520,
+        "p99BatchMs": 2520
+      },
+      "memory": {
+        "rssDeltaMB": 2.38,
+        "heapUsedDeltaMB": 0.77
+      },
+      "knownLimits": {
+        "maxCombinationsPerCall": 10000,
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "dualResolutionSynthesis": "High + low energy image pairs side-by-side"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Load Page",
+      "endpoint": "/api/load/export-combinations",
+      "scale": 500,
+      "totalRequested": 500,
+      "totalExported": 500,
+      "successRatePct": 100,
+      "totalDurationSec": 24.09,
+      "avgTimePerComboMs": 48.19,
+      "throughputCombosPerSec": 20.75,
+      "batchStats": {
+        "totalBatches": 10,
+        "p50BatchMs": 2413,
+        "p95BatchMs": 2514,
+        "p99BatchMs": 2514
+      },
+      "memory": {
+        "rssDeltaMB": 1.57,
+        "heapUsedDeltaMB": 1.71
+      },
+      "knownLimits": {
+        "maxCombinationsPerCall": 10000,
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "dualResolutionSynthesis": "High + low energy image pairs side-by-side"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Load Page",
+      "endpoint": "/api/load/export-combinations",
+      "scale": 1000,
+      "totalRequested": 1000,
+      "totalExported": 1000,
+      "successRatePct": 100,
+      "totalDurationSec": 47.57,
+      "avgTimePerComboMs": 47.57,
+      "throughputCombosPerSec": 21.02,
+      "batchStats": {
+        "totalBatches": 20,
+        "p50BatchMs": 2379,
+        "p95BatchMs": 2442,
+        "p99BatchMs": 2452
+      },
+      "memory": {
+        "rssDeltaMB": 3.94,
+        "heapUsedDeltaMB": 2.3
+      },
+      "knownLimits": {
+        "maxCombinationsPerCall": 10000,
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "dualResolutionSynthesis": "High + low energy image pairs side-by-side"
+      },
+      "breakingPointReached": false
+    }
+  ]
+}

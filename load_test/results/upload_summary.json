@@ -1,0 +1,265 @@
+{
+  "testType": "Upload Page (dump and tip files - Extended & Breaking Point)",
+  "drive": "B: drive only",
+  "timestamp": "2026-10-24T11:53:51.956Z",
+  "peakUploadsAchieved": 5000,
+  "peakThroughputFilesPerSec": 16.74,
+  "overallAvgProcessingTimePerFileMs": 84.14,
+  "breakingPoints": {
+    "singleBatchMaxFiles": 5000,
+    "singleBatchFailureReason": "Multer rejects > 5,000 files with LIMIT_FILE_COUNT",
+    "concurrencyLimit": 10,
+    "concurrencyFailureReason": "strictRateLimiter rejects > 10 concurrent requests with HTTP 429"
+  },
+  "knownLimits": {
+    "maxFileSize": "100 MB per file",
+    "maxFilesPerBatch": 5000,
+    "uploadTimeoutMs": 1800000,
+    "strictRateLimiter": "20 req/s, 10 concurrent",
+    "workerPoolHardCap": 8,
+    "optimalWorkerCount": 1,
+    "availableRamConstrained": true
+  },
+  "results": [
+    {
+      "page": "Upload Page",
+      "endpoint": "/api/process-raw-files",
+      "scale": 100,
+      "totalRequested": 100,
+      "totalDone": 100,
+      "totalFailed": 0,
+      "totalDuplicates": 0,
+      "totalSkipped": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 5.97,
+      "avgProcessingTimePerFileMs": 59.75,
+      "throughputFilesPerSec": 16.74,
+      "batchStats": {
+        "totalBatches": 2,
+        "batchSize": 50,
+        "concurrency": 2,
+        "p50BatchMs": 909,
+        "p95BatchMs": 1095,
+        "p99BatchMs": 1095
+      },
+      "fileLatencyStats": {
+        "p50FileMs": 18.2,
+        "p95FileMs": 21.9,
+        "p99FileMs": 21.9
+      },
+      "memory": {
+        "rssDeltaMB": 748.98,
+        "heapUsedDeltaMB": 1.9
+      },
+      "knownLimits": {
+        "maxFileSize": "100 MB per file",
+        "maxFilesPerBatch": 5000,
+        "workerPoolHardCap": 8,
+        "activeOptimalWorkers": 1,
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "memoryAvailabilityCheck": "Enforced before worker dispatch"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Upload Page",
+      "endpoint": "/api/process-raw-files",
+      "scale": 500,
+      "totalRequested": 500,
+      "totalDone": 500,
+      "totalFailed": 0,
+      "totalDuplicates": 0,
+      "totalSkipped": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 51.59,
+      "avgProcessingTimePerFileMs": 103.17,
+      "throughputFilesPerSec": 9.69,
+      "batchStats": {
+        "totalBatches": 10,
+        "batchSize": 50,
+        "concurrency": 2,
+        "p50BatchMs": 975,
+        "p95BatchMs": 8540,
+        "p99BatchMs": 8540
+      },
+      "fileLatencyStats": {
+        "p50FileMs": 19.5,
+        "p95FileMs": 170.8,
+        "p99FileMs": 170.8
+      },
+      "memory": {
+        "rssDeltaMB": 33.38,
+        "heapUsedDeltaMB": 1.05
+      },
+      "knownLimits": {
+        "maxFileSize": "100 MB per file",
+        "maxFilesPerBatch": 5000,
+        "workerPoolHardCap": 8,
+        "activeOptimalWorkers": 1,
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "memoryAvailabilityCheck": "Enforced before worker dispatch"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Upload Page",
+      "endpoint": "/api/process-raw-files",
+      "scale": 1000,
+      "totalRequested": 1000,
+      "totalDone": 1000,
+      "totalFailed": 0,
+      "totalDuplicates": 0,
+      "totalSkipped": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 116.98,
+      "avgProcessingTimePerFileMs": 116.98,
+      "throughputFilesPerSec": 8.55,
+      "batchStats": {
+        "totalBatches": 20,
+        "batchSize": 50,
+        "concurrency": 2,
+        "p50BatchMs": 1746,
+        "p95BatchMs": 8023,
+        "p99BatchMs": 8440
+      },
+      "fileLatencyStats": {
+        "p50FileMs": 34.9,
+        "p95FileMs": 160.5,
+        "p99FileMs": 168.8
+      },
+      "memory": {
+        "rssDeltaMB": 42.38,
+        "heapUsedDeltaMB": 0.18
+      },
+      "knownLimits": {
+        "maxFileSize": "100 MB per file",
+        "maxFilesPerBatch": 5000,
+        "workerPoolHardCap": 8,
+        "activeOptimalWorkers": 1,
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "memoryAvailabilityCheck": "Enforced before worker dispatch"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Upload Page",
+      "endpoint": "/api/process-raw-files",
+      "scale": 2000,
+      "totalRequested": 2000,
+      "totalDone": 2000,
+      "totalFailed": 0,
+      "totalDuplicates": 0,
+      "totalSkipped": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 126.4,
+      "avgProcessingTimePerFileMs": 63.2,
+      "throughputFilesPerSec": 15.82,
+      "batchStats": {
+        "totalBatches": 40,
+        "batchSize": 50,
+        "concurrency": 2,
+        "p50BatchMs": 806,
+        "p95BatchMs": 2875,
+        "p99BatchMs": 3301
+      },
+      "fileLatencyStats": {
+        "p50FileMs": 16.1,
+        "p95FileMs": 57.5,
+        "p99FileMs": 66
+      },
+      "memory": {
+        "rssDeltaMB": 41.25,
+        "heapUsedDeltaMB": 0.2
+      },
+      "knownLimits": {
+        "maxFileSize": "100 MB per file",
+        "maxFilesPerBatch": 5000,
+        "workerPoolHardCap": 8,
+        "activeOptimalWorkers": 1,
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "memoryAvailabilityCheck": "Enforced before worker dispatch"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Upload Page",
+      "endpoint": "/api/process-raw-files",
+      "scale": 3000,
+      "totalRequested": 3000,
+      "totalDone": 3000,
+      "totalFailed": 0,
+      "totalDuplicates": 0,
+      "totalSkipped": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 287.62,
+      "avgProcessingTimePerFileMs": 95.87,
+      "throughputFilesPerSec": 10.43,
+      "batchStats": {
+        "totalBatches": 60,
+        "batchSize": 50,
+        "concurrency": 2,
+        "p50BatchMs": 949,
+        "p95BatchMs": 5454,
+        "p99BatchMs": 8571
+      },
+      "fileLatencyStats": {
+        "p50FileMs": 19,
+        "p95FileMs": 109.1,
+        "p99FileMs": 171.4
+      },
+      "memory": {
+        "rssDeltaMB": -11.22,
+        "heapUsedDeltaMB": 0.42
+      },
+      "knownLimits": {
+        "maxFileSize": "100 MB per file",
+        "maxFilesPerBatch": 5000,
+        "workerPoolHardCap": 8,
+        "activeOptimalWorkers": 1,
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "memoryAvailabilityCheck": "Enforced before worker dispatch"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Upload Page",
+      "endpoint": "/api/process-raw-files",
+      "scale": 5000,
+      "totalRequested": 5000,
+      "totalDone": 5000,
+      "totalFailed": 0,
+      "totalDuplicates": 0,
+      "totalSkipped": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 329.35,
+      "avgProcessingTimePerFileMs": 65.87,
+      "throughputFilesPerSec": 15.18,
+      "batchStats": {
+        "totalBatches": 100,
+        "batchSize": 50,
+        "concurrency": 2,
+        "p50BatchMs": 763,
+        "p95BatchMs": 5629,
+        "p99BatchMs": 8495
+      },
+      "fileLatencyStats": {
+        "p50FileMs": 15.3,
+        "p95FileMs": 112.6,
+        "p99FileMs": 169.9
+      },
+      "memory": {
+        "rssDeltaMB": 390.36,
+        "heapUsedDeltaMB": 0.05
+      },
+      "knownLimits": {
+        "maxFileSize": "100 MB per file",
+        "maxFilesPerBatch": 5000,
+        "workerPoolHardCap": 8,
+        "activeOptimalWorkers": 1,
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "memoryAvailabilityCheck": "Enforced before worker dispatch"
+      },
+      "breakingPointReached": false
+    }
+  ]
+}

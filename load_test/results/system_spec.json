@@ -1,0 +1,48 @@
+{
+  "timestamp": "2026-10-25T18:04:43.173Z",
+  "cpu": {
+    "model": "12th Gen Intel(R) Core(TM) i5-12450HX",
+    "arch": "x64",
+    "physical_cores": 8,
+    "logical_cores": 12,
+    "speed_mhz": 2688
+  },
+  "memory": {
+    "total_ram_gb": 15.71,
+    "available_ram_gb": 3.46,
+    "swap_total_gb": 0,
+    "swap_free_gb": 0
+  },
+  "disks": [
+    {
+      "path": "B:\\xray",
+      "total_gb": 97.66,
+      "used_gb": 66.22,
+      "free_gb": 31.44,
+      "is_test_target": true
+    }
+  ],
+  "gpus": [
+    {
+      "model": "NVIDIA GeForce RTX 3050 6GB Laptop GPU",
+      "driver_version": "581.86",
+      "total_vram_mb": 6144,
+      "free_vram_mb": 6002
+    }
+  ],
+  "runtimes": {
+    "node": "v24.15.0",
+    "npm": "11.6.1",
+    "python": "Python 3.14.5",
+    "os_name": "Windows_NT",
+    "os_release": "10.0.26200",
+    "platform_str": "Windows_NT 10.0.26200 (x64)",
+    "ulimit_nofile": "N/A",
+    "ulimit_nproc": "N/A"
+  },
+  "io_benchmark": {
+    "sample_size_mb": 100,
+    "seq_write_mb_per_sec": 862.07,
+    "seq_read_mb_per_sec": 4347.83
+  }
+}

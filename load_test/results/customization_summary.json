@@ -1,0 +1,323 @@
+{
+  "testType": "Customization Page (Preview Rendering & Transformation - Breaking Point Analysis)",
+  "drive": "B: drive only",
+  "timestamp": "2026-10-24T13:19:08.475Z",
+  "peakPreviewsRendered": 10,
+  "breakingPointScale": 11,
+  "breakingPointReason": "strictRateLimiter rejects simultaneous requests exceeding 10 concurrent with HTTP 429",
+  "peakThroughputRendersPerSec": 403.23,
+  "overallAvgRenderLatencyMs": 55.73,
+  "knownLimits": {
+    "strictRateLimiter": "20 req/s, 10 concurrent"
+  },
+  "results": [
+    {
+      "page": "Customization Page",
+      "endpoint": "/api/render-preview",
+      "scale": 5,
+      "totalRequested": 5,
+      "successful": 5,
+      "rateLimited": 0,
+      "failed": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 0.17,
+      "avgRenderLatencyMs": 139.2,
+      "throughputRendersPerSec": 28.9,
+      "latencyStats": {
+        "p50Ms": 136,
+        "p95Ms": 164,
+        "p99Ms": 164,
+        "maxMs": 164
+      },
+      "memory": {
+        "rssDeltaMB": 26.55,
+        "heapUsedDeltaMB": 4.16
+      },
+      "knownLimits": {
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "imageCompositing": "Sharp buffer synthesis with memory fallback"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Customization Page",
+      "endpoint": "/api/render-preview",
+      "scale": 8,
+      "totalRequested": 8,
+      "successful": 8,
+      "rateLimited": 0,
+      "failed": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 0.07,
+      "avgRenderLatencyMs": 46.63,
+      "throughputRendersPerSec": 117.65,
+      "latencyStats": {
+        "p50Ms": 43,
+        "p95Ms": 65,
+        "p99Ms": 65,
+        "maxMs": 65
+      },
+      "memory": {
+        "rssDeltaMB": 0.84,
+        "heapUsedDeltaMB": 0.05
+      },
+      "knownLimits": {
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "imageCompositing": "Sharp buffer synthesis with memory fallback"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Customization Page",
+      "endpoint": "/api/render-preview",
+      "scale": 10,
+      "totalRequested": 10,
+      "successful": 10,
+      "rateLimited": 0,
+      "failed": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 0.08,
+      "avgRenderLatencyMs": 53.7,
+      "throughputRendersPerSec": 128.21,
+      "latencyStats": {
+        "p50Ms": 49,
+        "p95Ms": 77,
+        "p99Ms": 77,
+        "maxMs": 77
+      },
+      "memory": {
+        "rssDeltaMB": 1.73,
+        "heapUsedDeltaMB": 0.19
+      },
+      "knownLimits": {
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "imageCompositing": "Sharp buffer synthesis with memory fallback"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Customization Page",
+      "endpoint": "/api/render-preview",
+      "scale": 11,
+      "totalRequested": 11,
+      "successful": 10,
+      "rateLimited": 1,
+      "failed": 1,
+      "successRatePct": 90.91,
+      "totalDurationSec": 0.08,
+      "avgRenderLatencyMs": 49.36,
+      "throughputRendersPerSec": 144.74,
+      "latencyStats": {
+        "p50Ms": 49,
+        "p95Ms": 75,
+        "p99Ms": 75,
+        "maxMs": 75
+      },
+      "memory": {
+        "rssDeltaMB": 0.06,
+        "heapUsedDeltaMB": 0.78
+      },
+      "knownLimits": {
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "imageCompositing": "Sharp buffer synthesis with memory fallback"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Customization Page",
+      "endpoint": "/api/render-preview",
+      "scale": 12,
+      "totalRequested": 12,
+      "successful": 10,
+      "rateLimited": 2,
+      "failed": 2,
+      "successRatePct": 83.33,
+      "totalDurationSec": 0.09,
+      "avgRenderLatencyMs": 55.83,
+      "throughputRendersPerSec": 130.43,
+      "latencyStats": {
+        "p50Ms": 58,
+        "p95Ms": 91,
+        "p99Ms": 91,
+        "maxMs": 91
+      },
+      "memory": {
+        "rssDeltaMB": 0.29,
+        "heapUsedDeltaMB": -0.16
+      },
+      "knownLimits": {
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "imageCompositing": "Sharp buffer synthesis with memory fallback"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Customization Page",
+      "endpoint": "/api/render-preview",
+      "scale": 15,
+      "totalRequested": 15,
+      "successful": 10,
+      "rateLimited": 5,
+      "failed": 5,
+      "successRatePct": 66.67,
+      "totalDurationSec": 0.1,
+      "avgRenderLatencyMs": 51.27,
+      "throughputRendersPerSec": 157.89,
+      "latencyStats": {
+        "p50Ms": 61,
+        "p95Ms": 94,
+        "p99Ms": 94,
+        "maxMs": 94
+      },
+      "memory": {
+        "rssDeltaMB": 0.49,
+        "heapUsedDeltaMB": 0.28
+      },
+      "knownLimits": {
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "imageCompositing": "Sharp buffer synthesis with memory fallback"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Customization Page",
+      "endpoint": "/api/render-preview",
+      "scale": 20,
+      "totalRequested": 20,
+      "successful": 10,
+      "rateLimited": 10,
+      "failed": 10,
+      "successRatePct": 50,
+      "totalDurationSec": 0.11,
+      "avgRenderLatencyMs": 42.75,
+      "throughputRendersPerSec": 181.82,
+      "latencyStats": {
+        "p50Ms": 14,
+        "p95Ms": 99,
+        "p99Ms": 107,
+        "maxMs": 107
+      },
+      "memory": {
+        "rssDeltaMB": 0.56,
+        "heapUsedDeltaMB": 0.6
+      },
+      "knownLimits": {
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "imageCompositing": "Sharp buffer synthesis with memory fallback"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Customization Page",
+      "endpoint": "/api/render-preview",
+      "scale": 25,
+      "totalRequested": 25,
+      "successful": 10,
+      "rateLimited": 15,
+      "failed": 15,
+      "successRatePct": 40,
+      "totalDurationSec": 0.1,
+      "avgRenderLatencyMs": 40.44,
+      "throughputRendersPerSec": 242.72,
+      "latencyStats": {
+        "p50Ms": 20,
+        "p95Ms": 95,
+        "p99Ms": 101,
+        "maxMs": 101
+      },
+      "memory": {
+        "rssDeltaMB": 2.57,
+        "heapUsedDeltaMB": 1.41
+      },
+      "knownLimits": {
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "imageCompositing": "Sharp buffer synthesis with memory fallback"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Customization Page",
+      "endpoint": "/api/render-preview",
+      "scale": 30,
+      "totalRequested": 30,
+      "successful": 10,
+      "rateLimited": 20,
+      "failed": 20,
+      "successRatePct": 33.33,
+      "totalDurationSec": 0.14,
+      "avgRenderLatencyMs": 43.8,
+      "throughputRendersPerSec": 214.29,
+      "latencyStats": {
+        "p50Ms": 18,
+        "p95Ms": 117,
+        "p99Ms": 138,
+        "maxMs": 138
+      },
+      "memory": {
+        "rssDeltaMB": 2.14,
+        "heapUsedDeltaMB": 0.25
+      },
+      "knownLimits": {
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "imageCompositing": "Sharp buffer synthesis with memory fallback"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Customization Page",
+      "endpoint": "/api/render-preview",
+      "scale": 40,
+      "totalRequested": 40,
+      "successful": 10,
+      "rateLimited": 30,
+      "failed": 30,
+      "successRatePct": 25,
+      "totalDurationSec": 0.13,
+      "avgRenderLatencyMs": 44.45,
+      "throughputRendersPerSec": 305.34,
+      "latencyStats": {
+        "p50Ms": 30,
+        "p95Ms": 108,
+        "p99Ms": 129,
+        "maxMs": 129
+      },
+      "memory": {
+        "rssDeltaMB": 1.25,
+        "heapUsedDeltaMB": 1.98
+      },
+      "knownLimits": {
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "imageCompositing": "Sharp buffer synthesis with memory fallback"
+      },
+      "breakingPointReached": true
+    },
+    {
+      "page": "Customization Page",
+      "endpoint": "/api/render-preview",
+      "scale": 50,
+      "totalRequested": 50,
+      "successful": 10,
+      "rateLimited": 40,
+      "failed": 40,
+      "successRatePct": 20,
+      "totalDurationSec": 0.12,
+      "avgRenderLatencyMs": 45.6,
+      "throughputRendersPerSec": 403.23,
+      "latencyStats": {
+        "p50Ms": 31,
+        "p95Ms": 114,
+        "p99Ms": 122,
+        "maxMs": 122
+      },
+      "memory": {
+        "rssDeltaMB": 3.63,
+        "heapUsedDeltaMB": 1.5
+      },
+      "knownLimits": {
+        "strictRateLimiter": "20 req/s, 10 concurrent",
+        "imageCompositing": "Sharp buffer synthesis with memory fallback"
+      },
+      "breakingPointReached": true
+    }
+  ]
+}

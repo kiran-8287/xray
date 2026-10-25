@@ -1,0 +1,132 @@
+{
+  "testType": "Collage Page (Layout Creation & Combinations - Extended & Breaking Point)",
+  "drive": "B: drive only",
+  "timestamp": "2026-10-24T12:06:38.031Z",
+  "peakCombinationsSaved": 4862,
+  "peakThroughputCombosPerSec": 19.84,
+  "overallAvgTimePerLayoutMs": 440.27,
+  "breakingPoints": {
+    "partitionCap": 5000,
+    "partitionOverflowBehavior": "Splits into savedLayouts_2.json upon reaching 5,000 items",
+    "concurrencyLimit": 30,
+    "concurrencyFailureReason": "publicApiRateLimiter rejects > 30 concurrent requests with HTTP 429"
+  },
+  "knownLimits": {
+    "diskWriteQueuePause": "200ms queue debounce delay",
+    "partitionCap": "5,000 items per storage partition"
+  },
+  "results": [
+    {
+      "page": "Collage Page",
+      "endpoint": "/api/saved-layouts",
+      "scale": 500,
+      "totalRequested": 500,
+      "successful": 500,
+      "rateLimited": 0,
+      "failed": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 36.24,
+      "avgTimePerLayoutMs": 432.78,
+      "throughputCombosPerSec": 13.8,
+      "latencyStats": {
+        "p50Ms": 261,
+        "p95Ms": 1436,
+        "p99Ms": 3831,
+        "maxMs": 4387
+      },
+      "memory": {
+        "rssDeltaMB": 24.81,
+        "heapUsedDeltaMB": 12.52
+      },
+      "knownLimits": {
+        "diskWriteQueueInterval": "200ms queue debounce delay",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Collage Page",
+      "endpoint": "/api/saved-layouts",
+      "scale": 1000,
+      "totalRequested": 1000,
+      "successful": 1000,
+      "rateLimited": 0,
+      "failed": 0,
+      "successRatePct": 100,
+      "totalDurationSec": 50.39,
+      "avgTimePerLayoutMs": 301.71,
+      "throughputCombosPerSec": 19.84,
+      "latencyStats": {
+        "p50Ms": 257,
+        "p95Ms": 357,
+        "p99Ms": 2338,
+        "maxMs": 2784
+      },
+      "memory": {
+        "rssDeltaMB": 34.54,
+        "heapUsedDeltaMB": 13.54
+      },
+      "knownLimits": {
+        "diskWriteQueueInterval": "200ms queue debounce delay",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Collage Page",
+      "endpoint": "/api/saved-layouts",
+      "scale": 2500,
+      "totalRequested": 2500,
+      "successful": 2472,
+      "rateLimited": 0,
+      "failed": 28,
+      "successRatePct": 98.88,
+      "totalDurationSec": 166.27,
+      "avgTimePerLayoutMs": 398.59,
+      "throughputCombosPerSec": 14.87,
+      "latencyStats": {
+        "p50Ms": 342,
+        "p95Ms": 607,
+        "p99Ms": 2619,
+        "maxMs": 7007
+      },
+      "memory": {
+        "rssDeltaMB": -10.82,
+        "heapUsedDeltaMB": -8.51
+      },
+      "knownLimits": {
+        "diskWriteQueueInterval": "200ms queue debounce delay",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": false
+    },
+    {
+      "page": "Collage Page",
+      "endpoint": "/api/saved-layouts",
+      "scale": 5000,
+      "totalRequested": 5000,
+      "successful": 4862,
+      "rateLimited": 0,
+      "failed": 138,
+      "successRatePct": 97.24,
+      "totalDurationSec": 523.78,
+      "avgTimePerLayoutMs": 628.02,
+      "throughputCombosPerSec": 9.28,
+      "latencyStats": {
+        "p50Ms": 591,
+        "p95Ms": 776,
+        "p99Ms": 2268,
+        "maxMs": 7648
+      },
+      "memory": {
+        "rssDeltaMB": 18.92,
+        "heapUsedDeltaMB": -1.66
+      },
+      "knownLimits": {
+        "diskWriteQueueInterval": "200ms queue debounce delay",
+        "partitionCap": "5,000 items per storage partition"
+      },
+      "breakingPointReached": false
+    }
+  ]
+}
