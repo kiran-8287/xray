@@ -1,0 +1,42 @@
+{
+  "timestamp": "2026-10-24T11:19:47.989Z",
+  "drive": "B: drive only (B:/xray)",
+  "tests": [
+    {
+      "name": "Upload Page (dump & tip files)",
+      "page": "Upload",
+      "status": "completed",
+      "durationSec": "137.4"
+    },
+    {
+      "name": "Library Page (categorized pagination)",
+      "page": "Library",
+      "status": "completed",
+      "durationSec": "3.5"
+    },
+    {
+      "name": "Collage Page (layout creation)",
+      "page": "Collage",
+      "status": "completed",
+      "durationSec": "0.6"
+    },
+    {
+      "name": "Customization Page (preview rendering)",
+      "page": "Customize",
+      "status": "completed",
+      "durationSec": "2.3"
+    },
+    {
+      "name": "Saved Page (filtered layout queries)",
+      "page": "Saved",
+      "status": "completed",
+      "durationSec": "3.4"
+    },
+    {
+      "name": "Load Page (export combinations)",
+      "page": "Load",
+      "status": "completed",
+      "durationSec": "14.5"
+    }
+  ]
+}
